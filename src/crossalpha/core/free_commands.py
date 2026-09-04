@@ -7,6 +7,7 @@ from crossalpha.core.free_baselines import FreeBaselineConfig, run_free_baseline
 from crossalpha.core.free_dataset import audit_free_core, build_free_core_returns
 from crossalpha.core.free_provider import FreeCoreRange
 from crossalpha.core.free_robustness import run_free_robustness_stage1
+from crossalpha.core.free_robustness_stage2 import run_free_robustness_stage2
 from crossalpha.settings import Settings
 
 
@@ -72,5 +73,27 @@ def robustness_main() -> None:
         settings.crossalpha_data_dir,
         start=args.start,
         end=args.end,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def robustness2_main() -> None:
+    parser = _range_parser("crossalpha-free-robustness2")
+    parser.add_argument(
+        "--bootstrap",
+        type=int,
+        default=2000,
+        help="Circular block-bootstrap replications; minimum 100.",
+    )
+    parser.add_argument("--seed", type=int, default=8592)
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = run_free_robustness_stage2(
+        settings.crossalpha_data_dir,
+        start=args.start,
+        end=args.end,
+        bootstrap_replications=args.bootstrap,
+        seed=args.seed,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
