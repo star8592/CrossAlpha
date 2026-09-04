@@ -27,7 +27,15 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    canonical_dir = tmp_path / "canonical" / "hyperliquid" / "asset_contexts" / "year=2026" / "month=09" / "day=04"
+    canonical_dir = (
+        tmp_path
+        / "canonical"
+        / "hyperliquid"
+        / "asset_contexts"
+        / "year=2026"
+        / "month=09"
+        / "day=04"
+    )
     canonical_dir.mkdir(parents=True)
     pd.DataFrame(
         [
@@ -39,9 +47,32 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
         ]
     ).to_parquet(canonical_dir / "part.parquet", index=False)
 
+    core_dir = (
+        tmp_path
+        / "derived"
+        / "core"
+        / "free_v01"
+        / "start=2026-01-01"
+        / "end=2026-02-01"
+    )
+    core_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "date": "2026-01-02T00:00:00Z",
+                "economic_asset": "US_EQUITY",
+                "source": "tiingo_eod",
+                "symbol": "SPY",
+                "price": 100.0,
+                "return": 0.01,
+            }
+        ]
+    ).to_parquet(core_dir / "asset_returns.parquet", index=False)
+
     result = build_catalog(tmp_path)
     assert "observatory.raw_manifest" in result["views"]
     assert "observatory.hyperliquid_asset_contexts" in result["views"]
+    assert "core.free_asset_returns" in result["views"]
 
     con = duckdb.connect(result["database"], read_only=True)
     try:
@@ -50,5 +81,9 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
             "SELECT asset, mark_price FROM observatory.hyperliquid_asset_contexts"
         ).fetchone()
         assert row == ("BTC", 100.0)
+        core_row = con.execute(
+            "SELECT economic_asset, symbol, return FROM core.free_asset_returns"
+        ).fetchone()
+        assert core_row == ("US_EQUITY", "SPY", 0.01)
     finally:
         con.close()
