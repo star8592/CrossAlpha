@@ -34,10 +34,11 @@ async def collect_observatory(settings: Settings, sources: list[str]) -> None:
 
 
 def materialize_observatory(settings: Settings) -> dict[str, object]:
-    canonical = canonicalize_hyperliquid(settings.crossalpha_data_dir)
-    market_state = build_hyperliquid_market_state(settings.crossalpha_data_dir)
+    canonical = canonicalize_hyperliquid(settings.crossalpha_data_dir, recent_days=2)
+    market_state = build_hyperliquid_market_state(settings.crossalpha_data_dir, recent_only=True)
     catalog = build_catalog(settings.crossalpha_data_dir)
     return {
+        "mode": "incremental",
         "canonical_hyperliquid": canonical,
         "hyperliquid_market_state": market_state,
         "catalog": catalog,
