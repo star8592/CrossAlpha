@@ -10,6 +10,7 @@ from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
 from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
 from crossalpha.observatory.health import observatory_health, write_health_report
+from crossalpha.observatory.live_health import observatory_live_health
 from crossalpha.observatory.providers.defillama import DefiLlamaStablecoinProvider
 from crossalpha.observatory.providers.hyperliquid import HyperliquidProvider
 from crossalpha.settings import Settings
@@ -62,6 +63,10 @@ def main() -> None:
     health.add_argument("--stale-after", type=int, default=900)
     health.add_argument("--no-verify-latest", action="store_true")
 
+    live_health = sub.add_parser("observatory-live-health")
+    live_health.add_argument("--stale-after", type=int, default=900)
+    live_health.add_argument("--no-verify-latest", action="store_true")
+
     sub.add_parser("manifest-rebuild-indexes")
     sub.add_parser("canonicalize-hyperliquid")
     sub.add_parser("build-catalog")
@@ -89,6 +94,15 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if not report["ok"]:
             raise SystemExit("OBSERVATORY HEALTH FAILED")
+    elif args.command == "observatory-live-health":
+        report = observatory_live_health(
+            settings.crossalpha_data_dir,
+            stale_after_seconds=args.stale_after,
+            verify_latest=not args.no_verify_latest,
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["ok"]:
+            raise SystemExit("OBSERVATORY LIVE HEALTH FAILED")
     elif args.command == "manifest-rebuild-indexes":
         print(json.dumps(rebuild_manifest_indexes(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "canonicalize-hyperliquid":
