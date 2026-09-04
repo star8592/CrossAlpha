@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from crossalpha.core.free_baselines import (
+    ALL_ASSETS,
     FreeBaselineConfig,
     _load_daily_panel,
     _metrics,
@@ -37,29 +38,31 @@ SCREEN_POSITIVE_WF_FOLDS = 0.60
 
 def _output_root(data_root: Path, start: str, end: str) -> Path:
     return (
-        data_root
-        / "research"
-        / "free_v01"
-        / "robustness_stage2"
-        / f"start={_safe_slug(start)}"
-        / f"end={_safe_slug(end)}"
+        data_root / "research" / "free_v01" / "robustness_stage2"
+        / f"start={_safe_slug(start)}" / f"end={_safe_slug(end)}"
     )
 
 
 def _candidate_family(
     daily: pd.DataFrame,
     available: pd.DataFrame,
-) -> tuple[dict[str, FreeBaselineConfig], dict[str, pd.DataFrame]]:
+) -> tuple[
+    dict[str, FreeBaselineConfig],
+    dict[str, pd.DataFrame],
+    dict[str, pd.DataFrame],
+]:
     configs: dict[str, FreeBaselineConfig] = {}
+    weights: dict[str, pd.DataFrame] = {}
     returns: dict[str, pd.DataFrame] = {}
     baseline = FreeBaselineConfig()
     for trend, vol in PARAMETER_GRID:
         label = f"trend_{trend}_vol_{vol}"
         config = replace(baseline, trend_window_days=trend, vol_window_days=vol)
-        _, result = _run_scenario(daily, available, config)
+        scenario_weights, scenario_returns = _run_scenario(daily, available, config)
         configs[label] = config
-        returns[label] = result
-    return configs, returns
+        weights[label] = scenario_weights
+        returns[label] = scenario_returns
+    return configs, weights, returns
 
 
 def _strategy_part(frame: pd.DataFrame, strategy: str) -> pd.DataFrame:
@@ -81,9 +84,7 @@ def _daily_sharpe(values: pd.Series | np.ndarray) -> float:
     if len(array) < 2:
         return float("nan")
     std = float(np.std(array, ddof=1))
-    if std <= 0:
-        return float("nan")
-    return float(np.mean(array) / std)
+    return float(np.mean(array) / std) if std > 0 else float("nan")
 
 
 def _annualized_sharpe(values: pd.Series | np.ndarray, annualization_days: int = 365) -> float:
@@ -106,16 +107,14 @@ def _circular_block_bootstrap(
         raise ValueError("insufficient observations for block bootstrap")
     if replications < 100:
         raise ValueError("bootstrap replications must be at least 100")
-
     rng = np.random.default_rng(seed)
     block_count = int(math.ceil(n / block_size))
-    out = np.empty(replications, dtype=float)
     offsets = np.arange(block_size)
+    out = np.empty(replications, dtype=float)
     for i in range(replications):
         starts = rng.integers(0, n, size=block_count)
-        indices = ((starts[:, None] + offsets[None, :]) % n).reshape(-1)[:n]
-        out[i] = _annualized_sharpe(array[indices], annualization_days)
-
+        idx = ((starts[:, None] + offsets[None, :]) % n).reshape(-1)[:n]
+        out[i] = _annualized_sharpe(array[idx], annualization_days)
     finite = out[np.isfinite(out)]
     if finite.size == 0:
         raise ValueError("bootstrap produced no finite Sharpe estimates")
@@ -140,16 +139,19 @@ def _expected_max_sharpe(sharpes: np.ndarray) -> float:
         return 0.0
     gamma = 0.5772156649015329
     normal = NormalDist()
-    first = normal.inv_cdf(1.0 - 1.0 / n)
-    second = normal.inv_cdf(1.0 - 1.0 / (n * math.e))
-    return sigma * ((1.0 - gamma) * first + gamma * second)
+    return sigma * (
+        (1.0 - gamma) * normal.inv_cdf(1.0 - 1.0 / n)
+        + gamma * normal.inv_cdf(1.0 - 1.0 / (n * math.e))
+    )
 
 
 def _deflated_sharpe(
     baseline_excess: pd.Series,
     candidate_daily_sharpes: np.ndarray,
 ) -> dict[str, float | int]:
-    values = pd.Series(np.asarray(baseline_excess, dtype=float)).replace([np.inf, -np.inf], np.nan).dropna()
+    values = pd.Series(np.asarray(baseline_excess, dtype=float)).replace(
+        [np.inf, -np.inf], np.nan
+    ).dropna()
     t = int(len(values))
     if t < 30:
         raise ValueError("insufficient observations for DSR")
@@ -157,10 +159,8 @@ def _deflated_sharpe(
     sr0 = _expected_max_sharpe(candidate_daily_sharpes)
     skew = float(values.skew())
     kurtosis = float(values.kurt()) + 3.0
-    denominator_sq = 1.0 - skew * sr + ((kurtosis - 1.0) / 4.0) * (sr**2)
-    denominator = math.sqrt(max(denominator_sq, 1e-12))
-    z = (sr - sr0) * math.sqrt(max(t - 1, 1)) / denominator
-    probability = NormalDist().cdf(z)
+    denominator_sq = 1.0 - skew * sr + ((kurtosis - 1.0) / 4.0) * sr**2
+    z = (sr - sr0) * math.sqrt(max(t - 1, 1)) / math.sqrt(max(denominator_sq, 1e-12))
     return {
         "observations": t,
         "trial_count": int(np.isfinite(candidate_daily_sharpes).sum()),
@@ -169,7 +169,7 @@ def _deflated_sharpe(
         "expected_max_daily_sharpe": sr0,
         "skew": skew,
         "kurtosis": kurtosis,
-        "dsr_probability": float(probability),
+        "dsr_probability": float(NormalDist().cdf(z)),
     }
 
 
@@ -182,61 +182,55 @@ def _candidate_excess_matrix(
     columns: dict[str, pd.Series] = {}
     for label, frame in candidate_returns.items():
         part = _strategy_part(frame, strategy)
-        series = pd.Series(_excess(part).to_numpy(), index=part["date"], name=label)
-        columns[label] = series
-    matrix = pd.DataFrame(columns).sort_index()
-    matrix = matrix.loc[matrix.index >= analysis_start].fillna(0.0)
-    return matrix
+        columns[label] = pd.Series(_excess(part).to_numpy(), index=part["date"], name=label)
+    return pd.DataFrame(columns).sort_index().loc[analysis_start:].fillna(0.0)
 
 
-def _cscv_pbo(matrix: pd.DataFrame, *, slices: int = CSCV_SLICES) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if slices % 2 != 0 or slices < 4:
+def _cscv_pbo(
+    matrix: pd.DataFrame,
+    *,
+    slices: int = CSCV_SLICES,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if slices % 2 or slices < 4:
         raise ValueError("CSCV slices must be even and at least 4")
     if len(matrix) < slices * 30:
         raise ValueError("insufficient observations for CSCV")
-
-    blocks = [np.asarray(block, dtype=int) for block in np.array_split(np.arange(len(matrix)), slices)]
-    half = slices // 2
+    blocks = [np.asarray(x, dtype=int) for x in np.array_split(np.arange(len(matrix)), slices)]
     labels = list(matrix.columns)
     values = matrix.to_numpy(dtype=float)
     rows: list[dict[str, Any]] = []
-
-    for split_id, is_blocks in enumerate(combinations(range(slices), half)):
+    for split_id, is_blocks in enumerate(combinations(range(slices), slices // 2)):
         is_set = set(is_blocks)
         oos_blocks = tuple(i for i in range(slices) if i not in is_set)
         is_idx = np.concatenate([blocks[i] for i in is_blocks])
         oos_idx = np.concatenate([blocks[i] for i in oos_blocks])
         is_scores = np.array([_daily_sharpe(values[is_idx, j]) for j in range(len(labels))])
-        safe_is = np.where(np.isfinite(is_scores), is_scores, -np.inf)
-        selected = int(np.argmax(safe_is))
+        selected = int(np.argmax(np.where(np.isfinite(is_scores), is_scores, -np.inf)))
         oos_scores = np.array([_daily_sharpe(values[oos_idx, j]) for j in range(len(labels))])
         selected_score = oos_scores[selected]
         finite = np.isfinite(oos_scores)
         if not finite[selected] or int(finite.sum()) < 2:
             percentile = 0.5
         else:
-            finite_scores = oos_scores[finite]
-            less = float(np.sum(finite_scores < selected_score))
-            equal = float(np.sum(np.isclose(finite_scores, selected_score, rtol=1e-12, atol=1e-12)))
-            percentile = (less + 0.5 * equal) / float(len(finite_scores))
+            scores = oos_scores[finite]
+            less = float(np.sum(scores < selected_score))
+            equal = float(np.sum(np.isclose(scores, selected_score, rtol=1e-12, atol=1e-12)))
+            percentile = (less + 0.5 * equal) / float(len(scores))
         percentile = min(max(percentile, 1e-6), 1.0 - 1e-6)
         logit = math.log(percentile / (1.0 - percentile))
-        rows.append(
-            {
-                "split_id": split_id,
-                "is_blocks": ",".join(map(str, is_blocks)),
-                "oos_blocks": ",".join(map(str, oos_blocks)),
-                "selected_candidate": labels[selected],
-                "is_daily_sharpe": float(is_scores[selected]),
-                "oos_daily_sharpe": float(selected_score),
-                "oos_rank_percentile": percentile,
-                "logit_rank": logit,
-                "overfit": bool(logit < 0.0),
-            }
-        )
-
+        rows.append({
+            "split_id": split_id,
+            "is_blocks": ",".join(map(str, is_blocks)),
+            "oos_blocks": ",".join(map(str, oos_blocks)),
+            "selected_candidate": labels[selected],
+            "is_daily_sharpe": float(is_scores[selected]),
+            "oos_daily_sharpe": float(selected_score),
+            "oos_rank_percentile": percentile,
+            "logit_rank": logit,
+            "overfit": bool(logit < 0.0),
+        })
     frame = pd.DataFrame(rows)
-    summary = {
+    return frame, {
         "slices": slices,
         "split_count": int(len(frame)),
         "candidate_count": int(len(labels)),
@@ -244,29 +238,42 @@ def _cscv_pbo(matrix: pd.DataFrame, *, slices: int = CSCV_SLICES) -> tuple[pd.Da
         "median_logit_rank": float(frame["logit_rank"].median()),
         "median_oos_daily_sharpe": float(frame["oos_daily_sharpe"].median()),
     }
-    return frame, summary
 
 
-def _window_metrics(part: pd.DataFrame, annualization_days: int = 365) -> dict[str, Any]:
-    if len(part) < 30:
-        return {
-            "days": int(len(part)),
-            "cagr": None,
-            "annualized_volatility": None,
-            "sharpe_excess_cash": None,
-            "max_drawdown": None,
-        }
-    result = _metrics(part, annualization_days)
-    return {
-        "days": result["days"],
-        "cagr": result["cagr"],
-        "annualized_volatility": result["annualized_volatility"],
-        "sharpe_excess_cash": result["sharpe_excess_cash"],
-        "max_drawdown": result["max_drawdown"],
-    }
+def _returns_from_weights(
+    daily: pd.DataFrame,
+    weights: pd.DataFrame,
+    *,
+    strategy: str,
+    cost_bps: float = 5.0,
+) -> pd.DataFrame:
+    part = weights.copy()
+    part["date"] = pd.to_datetime(part["date"], utc=True)
+    part = part.sort_values("date").drop_duplicates("date", keep="last").set_index("date")
+    w = part.loc[:, list(ALL_ASSETS)].astype(float)
+    market = daily.reindex(w.index).loc[:, list(ALL_ASSETS)].fillna(0.0)
+    gross = (w * market).sum(axis=1)
+    previous = w.shift(1)
+    if len(w):
+        initial = pd.Series(0.0, index=ALL_ASSETS, dtype=float)
+        initial.loc["CASH"] = 1.0
+        previous.iloc[0] = initial
+    turnover = (w - previous).abs().sum(axis=1).fillna(0.0) * 0.5
+    cost = turnover * (cost_bps / 10_000.0)
+    return pd.DataFrame({
+        "date": w.index,
+        "strategy": strategy,
+        "gross_return": gross.to_numpy(),
+        "turnover": turnover.to_numpy(),
+        "cost": cost.to_numpy(),
+        "net_return": (gross - cost).to_numpy(),
+        "cash_return": market["CASH"].to_numpy(),
+    })
 
 
 def _walk_forward(
+    daily: pd.DataFrame,
+    candidate_weights: dict[str, pd.DataFrame],
     candidate_returns: dict[str, pd.DataFrame],
     strategy: str,
     *,
@@ -277,11 +284,12 @@ def _walk_forward(
     start_ts = pd.Timestamp(start, tz="UTC")
     end_ts = pd.Timestamp(end, tz="UTC")
     first_test_year = max(start_ts.year + train_years + 1, 2015)
-    fold_rows: list[dict[str, Any]] = []
-    selected_segments: list[pd.DataFrame] = []
-    frozen_segments: list[pd.DataFrame] = []
+    return_parts = {k: _strategy_part(v, strategy) for k, v in candidate_returns.items()}
+    weight_parts = {k: _strategy_part(v, strategy) for k, v in candidate_weights.items()}
+    selections: list[dict[str, Any]] = []
+    selected_weights: list[pd.DataFrame] = []
+    frozen_weights: list[pd.DataFrame] = []
 
-    parts = {label: _strategy_part(frame, strategy) for label, frame in candidate_returns.items()}
     for year in range(first_test_year, end_ts.year + 1):
         test_start = pd.Timestamp(f"{year}-01-01", tz="UTC")
         test_end = min(pd.Timestamp(f"{year + 1}-01-01", tz="UTC"), end_ts)
@@ -289,62 +297,75 @@ def _walk_forward(
             continue
         train_start = test_start - pd.DateOffset(years=train_years)
         train_scores: dict[str, float] = {}
-        for label, part in parts.items():
+        for label, part in return_parts.items():
             train = part.loc[(part["date"] >= train_start) & (part["date"] < test_start)]
             train_scores[label] = _annualized_sharpe(_excess(train)) if len(train) >= 180 else float("nan")
         finite = {k: v for k, v in train_scores.items() if math.isfinite(v)}
         if not finite:
             continue
         selected = max(finite, key=finite.get)
-        selected_test = parts[selected].loc[
-            (parts[selected]["date"] >= test_start) & (parts[selected]["date"] < test_end)
+        chosen = weight_parts[selected].loc[
+            (weight_parts[selected]["date"] >= test_start)
+            & (weight_parts[selected]["date"] < test_end)
         ].copy()
-        frozen_test = parts[BASELINE_LABEL].loc[
-            (parts[BASELINE_LABEL]["date"] >= test_start)
-            & (parts[BASELINE_LABEL]["date"] < test_end)
+        frozen = weight_parts[BASELINE_LABEL].loc[
+            (weight_parts[BASELINE_LABEL]["date"] >= test_start)
+            & (weight_parts[BASELINE_LABEL]["date"] < test_end)
         ].copy()
-        if len(selected_test) < 90 or len(frozen_test) < 90:
+        if len(chosen) < 90 or len(frozen) < 90:
             continue
-        selected_segments.append(selected_test)
-        frozen_segments.append(frozen_test)
-        selected_metrics = _window_metrics(selected_test)
-        frozen_metrics = _window_metrics(frozen_test)
-        fold_rows.append(
-            {
-                "strategy": strategy,
-                "test_year": year,
-                "train_start": train_start.isoformat(),
-                "train_end": test_start.isoformat(),
-                "test_start": test_start.isoformat(),
-                "test_end": test_end.isoformat(),
-                "selected_candidate": selected,
-                "selected_train_sharpe": finite[selected],
-                "selected_oos_sharpe": selected_metrics["sharpe_excess_cash"],
-                "selected_oos_cagr": selected_metrics["cagr"],
-                "selected_oos_max_drawdown": selected_metrics["max_drawdown"],
-                "frozen_oos_sharpe": frozen_metrics["sharpe_excess_cash"],
-                "frozen_oos_cagr": frozen_metrics["cagr"],
-                "frozen_oos_max_drawdown": frozen_metrics["max_drawdown"],
-            }
-        )
+        selected_weights.append(chosen)
+        frozen_weights.append(frozen)
+        selections.append({
+            "strategy": strategy,
+            "test_year": year,
+            "train_start": train_start,
+            "train_end": test_start,
+            "test_start": test_start,
+            "test_end": test_end,
+            "selected_candidate": selected,
+            "selected_train_sharpe": finite[selected],
+        })
 
-    folds = pd.DataFrame(fold_rows)
-    if not selected_segments:
+    if not selections:
         raise ValueError(f"walk-forward produced no folds for {strategy}")
-    selected_all = pd.concat(selected_segments, ignore_index=True)
-    frozen_all = pd.concat(frozen_segments, ignore_index=True)
-    selected_metrics = _metrics(selected_all, 365)
-    frozen_metrics = _metrics(frozen_all, 365)
+    selected_w = pd.concat(selected_weights, ignore_index=True)
+    frozen_w = pd.concat(frozen_weights, ignore_index=True)
+    selected_returns = _returns_from_weights(daily, selected_w, strategy=strategy)
+    frozen_returns = _returns_from_weights(daily, frozen_w, strategy=strategy)
+
+    fold_rows: list[dict[str, Any]] = []
+    for item in selections:
+        selected_test = selected_returns.loc[
+            (selected_returns["date"] >= item["test_start"])
+            & (selected_returns["date"] < item["test_end"])
+        ]
+        frozen_test = frozen_returns.loc[
+            (frozen_returns["date"] >= item["test_start"])
+            & (frozen_returns["date"] < item["test_end"])
+        ]
+        selected_metrics = _metrics(selected_test, 365)
+        frozen_metrics = _metrics(frozen_test, 365)
+        fold_rows.append({
+            **{k: (v.isoformat() if isinstance(v, pd.Timestamp) else v) for k, v in item.items()},
+            "selected_oos_sharpe": selected_metrics["sharpe_excess_cash"],
+            "selected_oos_cagr": selected_metrics["cagr"],
+            "selected_oos_max_drawdown": selected_metrics["max_drawdown"],
+            "frozen_oos_sharpe": frozen_metrics["sharpe_excess_cash"],
+            "frozen_oos_cagr": frozen_metrics["cagr"],
+            "frozen_oos_max_drawdown": frozen_metrics["max_drawdown"],
+        })
+    folds = pd.DataFrame(fold_rows)
     positive = pd.to_numeric(folds["selected_oos_sharpe"], errors="coerce").dropna()
-    summary = {
+    return folds, {
         "strategy": strategy,
         "train_years": train_years,
         "fold_count": int(len(folds)),
         "positive_selected_oos_fold_share": float((positive > 0).mean()) if not positive.empty else 0.0,
-        "selected_parameter_oos": selected_metrics,
-        "frozen_parameter_oos": frozen_metrics,
+        "selected_parameter_oos": _metrics(selected_returns, 365),
+        "frozen_parameter_oos": _metrics(frozen_returns, 365),
+        "switch_turnover_and_cost_included": True,
     }
-    return folds, summary
 
 
 def run_free_robustness_stage2(
@@ -356,10 +377,8 @@ def run_free_robustness_stage2(
     seed: int = 8592,
 ) -> dict[str, Any]:
     daily, available = _load_daily_panel(data_root, start, end)
-    configs, candidate_returns = _candidate_family(daily, available)
-    baseline_returns = candidate_returns[BASELINE_LABEL]
+    configs, candidate_weights, candidate_returns = _candidate_family(daily, available)
     analysis_start = daily.index.min() + pd.Timedelta(days=max(t for t, _ in PARAMETER_GRID))
-
     bootstrap_rows: list[dict[str, Any]] = []
     dsr_rows: list[dict[str, Any]] = []
     pbo_rows: list[pd.DataFrame] = []
@@ -369,38 +388,31 @@ def run_free_robustness_stage2(
     screens: dict[str, Any] = {}
 
     for strategy_index, strategy in enumerate(FOCUS_STRATEGIES):
-        baseline_part = _strategy_part(baseline_returns, strategy)
-        baseline_part = baseline_part.loc[baseline_part["date"] >= analysis_start]
-        baseline_excess = _excess(baseline_part)
-
+        matrix = _candidate_excess_matrix(candidate_returns, strategy, analysis_start=analysis_start)
+        baseline_excess = matrix[BASELINE_LABEL]
         for block in BOOTSTRAP_BLOCKS:
-            row = _circular_block_bootstrap(
-                baseline_excess,
-                block_size=block,
-                replications=bootstrap_replications,
-                seed=seed + strategy_index * 100 + block,
-                annualization_days=365,
-            )
-            bootstrap_rows.append({"strategy": strategy, **row})
-
-        matrix = _candidate_excess_matrix(
-            candidate_returns,
-            strategy,
-            analysis_start=analysis_start,
-        )
+            bootstrap_rows.append({
+                "strategy": strategy,
+                **_circular_block_bootstrap(
+                    baseline_excess,
+                    block_size=block,
+                    replications=bootstrap_replications,
+                    seed=seed + strategy_index * 100 + block,
+                    annualization_days=365,
+                ),
+            })
         candidate_daily_sharpes = np.array(
-            [_daily_sharpe(matrix[column].to_numpy()) for column in matrix.columns],
-            dtype=float,
+            [_daily_sharpe(matrix[c].to_numpy()) for c in matrix.columns], dtype=float
         )
-        dsr = _deflated_sharpe(matrix[BASELINE_LABEL], candidate_daily_sharpes)
+        dsr = _deflated_sharpe(baseline_excess, candidate_daily_sharpes)
         dsr_rows.append({"strategy": strategy, **dsr})
-
         splits, pbo = _cscv_pbo(matrix)
         splits.insert(0, "strategy", strategy)
         pbo_rows.append(splits)
         pbo_summary_rows.append({"strategy": strategy, **pbo})
-
         folds, wf = _walk_forward(
+            daily,
+            candidate_weights,
             candidate_returns,
             strategy,
             start=start,
@@ -410,8 +422,8 @@ def run_free_robustness_stage2(
         wf_summary[strategy] = wf
 
         boot63 = next(
-            row for row in bootstrap_rows
-            if row["strategy"] == strategy and row["block_size_days"] == 63
+            x for x in bootstrap_rows
+            if x["strategy"] == strategy and x["block_size_days"] == 63
         )
         selected_oos = wf["selected_parameter_oos"]["sharpe_excess_cash"]
         survives = bool(
@@ -432,11 +444,10 @@ def run_free_robustness_stage2(
         }
 
     bootstrap = pd.DataFrame(bootstrap_rows)
-    dsr = pd.DataFrame(dsr_rows)
+    dsr_frame = pd.DataFrame(dsr_rows)
     pbo_splits = pd.concat(pbo_rows, ignore_index=True)
     pbo_summary = pd.DataFrame(pbo_summary_rows)
     walk_forward_folds = pd.concat(wf_rows, ignore_index=True)
-
     output_root = _output_root(data_root, start, end)
     output_root.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -447,7 +458,7 @@ def run_free_robustness_stage2(
         "walk_forward_folds": output_root / "walk_forward_folds.parquet",
     }
     bootstrap.to_parquet(paths["bootstrap"], index=False)
-    dsr.to_parquet(paths["dsr"], index=False)
+    dsr_frame.to_parquet(paths["dsr"], index=False)
     pbo_splits.to_parquet(paths["pbo_splits"], index=False)
     pbo_summary.to_parquet(paths["pbo_summary"], index=False)
     walk_forward_folds.to_parquet(paths["walk_forward_folds"], index=False)
@@ -482,7 +493,8 @@ def run_free_robustness_stage2(
         "interpretation": (
             "Stage 2 is a pre-registered falsification screen. DSR is an explicit "
             "Bailey/Lopez de Prado-style approximation over the frozen 15-member parameter family; "
-            "CSCV/PBO uses contiguous slices. Passing is not final proof of alpha."
+            "CSCV/PBO uses contiguous slices. Walk-forward charges turnover when the selected "
+            "parameter set changes. Passing is not final proof of alpha."
         ),
         **{name: str(path) for name, path in paths.items()},
     }
