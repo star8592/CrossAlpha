@@ -8,9 +8,9 @@ CrossAlpha is a research-first, crypto-native systematic global macro platform. 
 - **Observatory**: immutable point-in-time capital-state data collection.
 - **Market Engine**: funding / basis / liquidity / instrument / venue routing.
 
-## Current milestone: V0.1 + Observatory O0.3
+## Current milestone: V0.1 + Observatory O0.4
 
-V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory O0.3 keeps immutable raw point-in-time facts, rebuildable indexes/canonical data, and adds a causal descriptive Hyperliquid market-state feature layer. No composite risk or trading score is emitted yet.
+V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory keeps immutable raw point-in-time facts, rebuildable indexes/canonical data, a causal descriptive Hyperliquid market-state feature layer, and a stablecoin stock/chain accounting layer. No composite risk or trading score is emitted yet.
 
 ### Frozen research universe
 
@@ -95,15 +95,16 @@ manifests/
 └── series/<source>/<type>.json  # incremental latest/count/interval state
 ```
 
-A manual full-history canonical rebuild uses:
+Manual full-history canonical rebuilds use:
 
 ```bash
 crossalpha canonicalize-hyperliquid
+crossalpha canonicalize-stablecoins
 ```
 
 The scheduled materializer does not scan the full audit ledger. It reads only the latest two daily manifest partitions and skips already canonicalized snapshots.
 
-## O0.3 market-state layer
+## O0.3 Hyperliquid market-state layer
 
 A manual full-history feature rebuild uses:
 
@@ -124,6 +125,62 @@ Current features include:
 
 The 24h z-scores require at least 24 observations; before that they remain null rather than manufacturing an early signal.
 
+Query latest BTC/ETH state without writing SQL:
+
+```bash
+crossalpha market-state --asset BTC --asset ETH
+```
+
+## O0.4 stablecoin accounting layer
+
+DefiLlama raw snapshots are canonicalized into two independent tables:
+
+```text
+canonical/defillama/
+├── stablecoin_assets/
+└── stablecoin_chain_supply/
+```
+
+The accounting layer then materializes:
+
+```text
+derived/stablecoins/
+├── system_state/
+└── chain_state/
+```
+
+Build it manually:
+
+```bash
+crossalpha build-stablecoin-state
+```
+
+Query the latest system and top chains:
+
+```bash
+crossalpha stablecoin-state --top-chains 10
+```
+
+The system state currently reports:
+
+- USD-pegged stablecoin count and total stock;
+- market value and snapshot-provided 1d/7d/30d supply changes;
+- USDT/USDC market shares;
+- asset concentration HHI;
+- weighted and maximum USD-peg deviation;
+- market value more than 50 bps away from the USD peg;
+- summed chain supply, chain coverage ratio and conservation residual.
+
+The chain state reports per-chain stock, market value, market share, stablecoin count and chain concentration HHI.
+
+**Important:** this is a stock/accounting layer, not a liquidity-creation signal. CrossAlpha does not assume:
+
+```text
+stablecoin supply increase = external capital creation = risk-on
+```
+
+A later capital-flow layer must distinguish issuer mint/burn, bridge migration, inventory movement, exchange/protocol deployment and true external capital creation. Chain coverage/residuals are recorded now but are not yet hard quality gates until the upstream accounting behavior is empirically characterized.
+
 ### Incremental online materialization
 
 The command used by the timer is incremental:
@@ -132,13 +189,15 @@ The command used by the timer is incremental:
 crossalpha materialize-observatory
 ```
 
-It canonicalizes only the recent daily partitions, rebuilds only the latest market-state day with the previous day as causal 24h lookback, and refreshes the DuckDB catalog. Its online runtime therefore does not grow linearly with total history.
+It canonicalizes only recent daily partitions, rebuilds only the latest Hyperliquid and stablecoin state days, and refreshes the DuckDB catalog. Its online runtime therefore does not grow linearly with total history.
 
-For an explicit full rebuild after changing a parser or feature definition:
+For an explicit full rebuild after changing parsers or feature definitions:
 
 ```bash
 crossalpha canonicalize-hyperliquid
+crossalpha canonicalize-stablecoins
 crossalpha build-market-state
+crossalpha build-stablecoin-state
 crossalpha build-catalog
 ```
 
@@ -148,17 +207,16 @@ The database is stored at:
 /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb
 ```
 
-Query latest BTC/ETH state without writing SQL:
+Current Observatory views include:
 
-```bash
-crossalpha market-state --asset BTC --asset ETH
-```
-
-Or query DuckDB directly:
-
-```bash
-duckdb /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb \
-  -c "select observed_at, asset, mark_price, funding_bps, mark_oracle_basis_bps, open_interest_notional from observatory.hyperliquid_market_state where asset='BTC' order by observed_at desc limit 20;"
+```text
+observatory.raw_manifest
+observatory.hyperliquid_asset_contexts
+observatory.hyperliquid_market_state
+observatory.stablecoin_assets
+observatory.stablecoin_chain_supply
+observatory.stablecoin_system_state
+observatory.stablecoin_chain_state
 ```
 
 ### Independent derived-data timer
