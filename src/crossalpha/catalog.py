@@ -9,6 +9,12 @@ def _sql_string(path: Path) -> str:
     return "'" + str(path).replace("'", "''") + "'"
 
 
+def _has_parquet(root: Path) -> bool:
+    if not root.exists():
+        return False
+    return next(root.rglob("*.parquet"), None) is not None
+
+
 def build_catalog(data_root: Path) -> dict[str, object]:
     catalog_dir = data_root / "catalog"
     catalog_dir.mkdir(parents=True, exist_ok=True)
@@ -24,26 +30,31 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     con = duckdb.connect(str(db_path))
     try:
         con.execute("CREATE SCHEMA IF NOT EXISTS observatory")
+        for view in (
+            "observatory.raw_manifest",
+            "observatory.hyperliquid_asset_contexts",
+            "observatory.hyperliquid_market_state",
+        ):
+            con.execute(f"DROP VIEW IF EXISTS {view}")
+
         if manifest_path.exists():
             con.execute(
-                "CREATE OR REPLACE VIEW observatory.raw_manifest AS "
+                "CREATE VIEW observatory.raw_manifest AS "
                 f"SELECT * FROM read_json_auto({_sql_string(manifest_path)}, format='newline_delimited')"
             )
             created_views.append("observatory.raw_manifest")
 
-        parquet_files = list(hyperliquid_root.glob("**/*.parquet")) if hyperliquid_root.exists() else []
-        if parquet_files:
+        if _has_parquet(hyperliquid_root):
             con.execute(
-                "CREATE OR REPLACE VIEW observatory.hyperliquid_asset_contexts AS "
+                "CREATE VIEW observatory.hyperliquid_asset_contexts AS "
                 f"SELECT * FROM read_parquet({_sql_string(hyperliquid_glob)}, "
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.hyperliquid_asset_contexts")
 
-        market_state_files = list(market_state_root.glob("**/*.parquet")) if market_state_root.exists() else []
-        if market_state_files:
+        if _has_parquet(market_state_root):
             con.execute(
-                "CREATE OR REPLACE VIEW observatory.hyperliquid_market_state AS "
+                "CREATE VIEW observatory.hyperliquid_market_state AS "
                 f"SELECT * FROM read_parquet({_sql_string(market_state_glob)}, "
                 "union_by_name=true, hive_partitioning=true)"
             )
