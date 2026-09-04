@@ -9,6 +9,7 @@ import pandas as pd
 
 from crossalpha.domain.models import RawSnapshotManifest
 from crossalpha.observatory.health import load_manifest
+from crossalpha.storage.indexes import load_recent_daily_manifests
 
 
 def _to_float(value: Any) -> float | None:
@@ -76,8 +77,23 @@ def parse_meta_and_asset_contexts(envelope: dict[str, Any], raw_record: RawSnaps
     return frame
 
 
-def canonicalize_hyperliquid(data_root: Path) -> dict[str, int]:
-    records, errors = load_manifest(data_root)
+def canonicalize_hyperliquid(
+    data_root: Path,
+    *,
+    recent_days: int | None = None,
+) -> dict[str, int | str]:
+    """Canonicalize Hyperliquid snapshots.
+
+    `recent_days=None` performs an explicit full historical scan, suitable for manual
+    rebuilds. Online materialization should pass a small recent-day window so runtime
+    does not grow with the age of the repository.
+    """
+    if recent_days is None:
+        records, errors = load_manifest(data_root)
+        mode = "full"
+    else:
+        records, errors = load_recent_daily_manifests(data_root, days=recent_days)
+        mode = f"recent_{recent_days}d"
     if errors:
         raise ValueError(f"raw manifest contains errors: {errors}")
 
@@ -90,7 +106,7 @@ def canonicalize_hyperliquid(data_root: Path) -> dict[str, int]:
     skipped = 0
     rows = 0
 
-    for record in selected:
+    for record in sorted(selected, key=lambda item: item.observed_at):
         observed = record.observed_at
         out_dir = (
             data_root
@@ -116,4 +132,10 @@ def canonicalize_hyperliquid(data_root: Path) -> dict[str, int]:
         written += 1
         rows += len(frame)
 
-    return {"snapshots": len(selected), "written": written, "skipped": skipped, "rows_written": rows}
+    return {
+        "mode": mode,
+        "snapshots": len(selected),
+        "written": written,
+        "skipped": skipped,
+        "rows_written": rows,
+    }
