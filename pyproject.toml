@@ -34,6 +34,7 @@ crossalpha-free-returns = "crossalpha.core.free_commands:returns_main"
 crossalpha-free-baselines = "crossalpha.core.free_commands:baselines_main"
 crossalpha-free-robustness = "crossalpha.core.free_commands:robustness_main"
 crossalpha-free-robustness2 = "crossalpha.core.free_commands:robustness2_main"
+crossalpha-free-finalize = "crossalpha.core.free_commands:final_evaluation_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
