@@ -8,9 +8,9 @@ CrossAlpha is a research-first, crypto-native systematic global macro platform. 
 - **Observatory**: immutable point-in-time capital-state data collection.
 - **Market Engine**: funding / basis / liquidity / instrument / venue routing (later phase).
 
-## Current milestone: V0.1 + Observatory O0.1
+## Current milestone: V0.1 + Observatory O0.2
 
-V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory O0.1 begins accumulating point-in-time public market/onchain state and adds freshness/integrity monitoring before those histories become impossible to recreate perfectly.
+V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory O0.2 keeps immutable raw point-in-time facts while adding rebuildable daily manifests, per-series state, canonical Hyperliquid market-state Parquet and a local DuckDB research catalog.
 
 ### Frozen research universe
 
@@ -69,14 +69,6 @@ Check freshness and latest-file integrity:
 crossalpha observatory-health
 ```
 
-Run the supervised local collection loop manually:
-
-```bash
-python scripts/collect_loop.py --interval 300
-```
-
-The loop applies a collector timeout, writes `/mnt/disk2/CrossAlphaData/manifests/observatory_health.json`, and exits after repeated collection failures so systemd can restart it.
-
 For unattended collection on Linux:
 
 ```bash
@@ -85,13 +77,57 @@ systemctl --user status crossalpha-observatory.service
 journalctl --user -u crossalpha-observatory.service -f
 ```
 
-Fetch first-pass core historical futures staging data:
+## O0.2 derived indexes and canonical research layer
+
+The global audit manifest remains immutable. Derived indexes can always be deleted and rebuilt from it:
+
+```bash
+crossalpha manifest-rebuild-indexes
+```
+
+This creates:
+
+```text
+manifests/
+├── raw_snapshots.jsonl          # immutable global audit ledger
+├── daily/.../raw_snapshots.jsonl
+└── series/<source>/<type>.json  # incremental latest/count/interval state
+```
+
+Convert Hyperliquid `metaAndAssetCtxs` raw envelopes into typed per-asset Parquet:
+
+```bash
+crossalpha canonicalize-hyperliquid
+```
+
+Build the local DuckDB catalog:
+
+```bash
+crossalpha build-catalog
+```
+
+The database is stored at:
+
+```text
+/mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb
+```
+
+Example local query:
+
+```bash
+duckdb /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb \
+  -c "select observed_at, asset, mark_price, funding_rate, open_interest from observatory.hyperliquid_asset_contexts where asset='BTC' order by observed_at desc limit 20;"
+```
+
+## Core V0.1
+
+Fetch first-pass historical futures staging data after adding a Databento API key:
 
 ```bash
 crossalpha fetch-core --start 2010-06-01
 ```
 
-> Important: continuous futures staging data is **not** used as naive strategy PnL across rolls. The explicit real-contract roll/MTM engine is the next development milestone.
+> Important: continuous futures staging data is **not** used as naive strategy PnL across rolls. `src/crossalpha/core/futures_roll.py` constructs explicit same-contract MTM returns across a point-in-time-safe roll map.
 
 ## Raw-data invariants
 
@@ -100,6 +136,7 @@ crossalpha fetch-core --start 2010-06-01
 - Manifest records keep both uncompressed `bytes` and, for new snapshots, `compressed_bytes`.
 - `observed_at` and `known_at` are preserved for point-in-time research.
 - Historical gaps are reported, not silently filled.
+- `canonical/`, `derived/`, `catalog/`, and manifest indexes are disposable/rebuildable; `raw/` and the global audit ledger are not.
 
 ## Repository policy
 
