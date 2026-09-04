@@ -17,6 +17,8 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     manifest_path = data_root / "manifests" / "raw_snapshots.jsonl"
     hyperliquid_root = data_root / "canonical" / "hyperliquid" / "asset_contexts"
     hyperliquid_glob = hyperliquid_root / "**" / "*.parquet"
+    market_state_root = data_root / "derived" / "hyperliquid" / "market_state"
+    market_state_glob = market_state_root / "**" / "*.parquet"
 
     created_views: list[str] = []
     con = duckdb.connect(str(db_path))
@@ -37,6 +39,15 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.hyperliquid_asset_contexts")
+
+        market_state_files = list(market_state_root.glob("**/*.parquet")) if market_state_root.exists() else []
+        if market_state_files:
+            con.execute(
+                "CREATE OR REPLACE VIEW observatory.hyperliquid_market_state AS "
+                f"SELECT * FROM read_parquet({_sql_string(market_state_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.hyperliquid_market_state")
     finally:
         con.close()
 
