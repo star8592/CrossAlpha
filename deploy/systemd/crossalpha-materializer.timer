@@ -1,0 +1,12 @@
+[Unit]
+Description=Run CrossAlpha Observatory materializer every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=crossalpha-materializer.service
+
+[Install]
+WantedBy=timers.target
