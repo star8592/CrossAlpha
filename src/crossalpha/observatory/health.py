@@ -137,10 +137,12 @@ def observatory_health(
         }
 
     total_raw_bytes = sum(record.bytes for record in records)
-    total_compressed_bytes = sum(record.compressed_bytes or 0 for record in records)
+    compression_sample = [record for record in records if record.compressed_bytes is not None]
+    compression_sample_raw_bytes = sum(record.bytes for record in compression_sample)
+    total_compressed_bytes = sum(record.compressed_bytes or 0 for record in compression_sample)
     compression_ratio = None
-    if total_raw_bytes and total_compressed_bytes:
-        compression_ratio = total_raw_bytes / total_compressed_bytes
+    if compression_sample_raw_bytes and total_compressed_bytes:
+        compression_ratio = compression_sample_raw_bytes / total_compressed_bytes
 
     report = {
         "ok": current_ok,
@@ -150,6 +152,8 @@ def observatory_health(
         "expected_interval_seconds": expected_interval_seconds,
         "stale_after_seconds": stale_after_seconds,
         "raw_bytes_manifested": total_raw_bytes,
+        "compression_sample_records": len(compression_sample),
+        "compression_sample_raw_bytes": compression_sample_raw_bytes,
         "compressed_bytes_manifested": total_compressed_bytes,
         "compression_ratio": round(compression_ratio, 3) if compression_ratio else None,
         "series": series_report,
