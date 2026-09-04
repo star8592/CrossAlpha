@@ -39,6 +39,7 @@ class RawSnapshotStore:
             path=str(path),
             sha256=digest,
             bytes=len(payload_bytes),
+            compressed_bytes=path.stat().st_size,
             observed_at=observed,
             source_id=envelope.source_id,
             observation_type=envelope.observation_type,
