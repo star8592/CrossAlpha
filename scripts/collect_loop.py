@@ -8,7 +8,8 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from crossalpha.observatory.health import observatory_health, write_health_report
+from crossalpha.observatory.health import write_health_report
+from crossalpha.observatory.live_health import observatory_live_health
 from crossalpha.settings import Settings
 
 
@@ -53,9 +54,8 @@ def main() -> None:
         else:
             consecutive_failures = 0
 
-        health = observatory_health(
+        health = observatory_live_health(
             settings.crossalpha_data_dir,
-            expected_interval_seconds=args.interval,
             stale_after_seconds=max(args.stale_after, args.interval * 2),
             verify_latest=True,
         )
@@ -77,6 +77,7 @@ def main() -> None:
             json.dumps(
                 {
                     "health_ok": health["ok"],
+                    "health_mode": health.get("mode"),
                     "health_path": str(health_path),
                     "consecutive_failures": consecutive_failures,
                     "consecutive_health_failures": consecutive_health_failures,
