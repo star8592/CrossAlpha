@@ -7,6 +7,8 @@ cd "$REPO_DIR"
 START="${CROSSALPHA_RESEARCH_START:-2010-06-01}"
 END="${CROSSALPHA_RESEARCH_END:-2026-09-01}"
 BOOTSTRAP="${CROSSALPHA_BOOTSTRAP_REPLICATIONS:-2000}"
+export CROSSALPHA_RESEARCH_START="$START"
+export CROSSALPHA_RESEARCH_END="$END"
 
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck disable=SC1091
@@ -30,11 +32,12 @@ crossalpha-free-robustness2 --start "$START" --end "$END" --bootstrap "$BOOTSTRA
 
 python - <<'PY'
 import json
+import os
 from pathlib import Path
 
 root = Path("/mnt/disk2/CrossAlphaData/research/free_v01")
-start = "2010-06-01"
-end = "2026-09-01"
+start = os.environ["CROSSALPHA_RESEARCH_START"]
+end = os.environ["CROSSALPHA_RESEARCH_END"]
 
 baseline_path = root / "baselines" / f"start={start}" / f"end={end}" / "summary.json"
 stage1_path = root / "robustness_stage1" / f"start={start}" / f"end={end}" / "summary.json"
