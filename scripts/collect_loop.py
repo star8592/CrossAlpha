@@ -28,6 +28,7 @@ def main() -> None:
         command += ["--source", source]
 
     consecutive_failures = 0
+    consecutive_health_failures = 0
     while True:
         cycle_started = time.monotonic()
         print(f"[{datetime.now(timezone.utc).isoformat()}] collecting...", flush=True)
@@ -58,8 +59,19 @@ def main() -> None:
             stale_after_seconds=max(args.stale_after, args.interval * 2),
             verify_latest=True,
         )
+        if health["ok"]:
+            consecutive_health_failures = 0
+        else:
+            consecutive_health_failures += 1
+            print(
+                f"observatory unhealthy consecutive={consecutive_health_failures}",
+                file=sys.stderr,
+                flush=True,
+            )
+
         health["collector_returncode"] = returncode
         health["consecutive_failures"] = consecutive_failures
+        health["consecutive_health_failures"] = consecutive_health_failures
         health_path = write_health_report(settings.crossalpha_data_dir, health)
         print(
             json.dumps(
@@ -67,14 +79,20 @@ def main() -> None:
                     "health_ok": health["ok"],
                     "health_path": str(health_path),
                     "consecutive_failures": consecutive_failures,
+                    "consecutive_health_failures": consecutive_health_failures,
                 },
                 ensure_ascii=False,
             ),
             flush=True,
         )
 
-        if consecutive_failures >= max(args.max_consecutive_failures, 1):
-            print("too many consecutive collector failures; exiting for systemd restart", file=sys.stderr, flush=True)
+        failure_limit = max(args.max_consecutive_failures, 1)
+        if consecutive_failures >= failure_limit or consecutive_health_failures >= failure_limit:
+            print(
+                "collector is repeatedly failing or stale; exiting for systemd restart",
+                file=sys.stderr,
+                flush=True,
+            )
             raise SystemExit(1)
 
         elapsed = time.monotonic() - cycle_started
