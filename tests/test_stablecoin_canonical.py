@@ -43,13 +43,13 @@ def test_parse_stablecoin_snapshot_preserves_native_peg_units() -> None:
                     "circulatingPrevMonth": {"peggedUSD": 800.0},
                     "chainCirculating": {
                         "Ethereum": {
-                            "circulating": {"peggedUSD": 600.0},
+                            "current": {"peggedUSD": 600.0},
                             "circulatingPrevDay": {"peggedUSD": 590.0},
                             "circulatingPrevWeek": {"peggedUSD": 560.0},
                             "circulatingPrevMonth": {"peggedUSD": 500.0},
                         },
                         "Solana": {
-                            "circulating": {"peggedUSD": 400.0},
+                            "current": {"peggedUSD": 400.0},
                             "circulatingPrevDay": {"peggedUSD": 390.0},
                             "circulatingPrevWeek": {"peggedUSD": 340.0},
                             "circulatingPrevMonth": {"peggedUSD": 300.0},
@@ -66,7 +66,7 @@ def test_parse_stablecoin_snapshot_preserves_native_peg_units() -> None:
                     "circulatingPrevDay": {"peggedEUR": 95.0},
                     "chainCirculating": {
                         "Ethereum": {
-                            "circulating": {"peggedEUR": 100.0},
+                            "current": {"peggedEUR": 100.0},
                             "circulatingPrevDay": {"peggedEUR": 95.0},
                         }
                     },
@@ -98,6 +98,31 @@ def test_parse_stablecoin_snapshot_preserves_native_peg_units() -> None:
     assert eth_usdc["delta_7d_native"] == 40.0
     assert eth_usdc["delta_30d_native"] == 100.0
     assert eth_usdc["market_value_usd"] == pytest.approx(599.88)
+
+
+def test_parse_stablecoin_snapshot_supports_older_nested_circulating_shape() -> None:
+    envelope = {
+        "observed_at": "2026-09-04T12:00:00Z",
+        "known_at": "2026-09-04T12:00:00Z",
+        "payload": {
+            "peggedAssets": [
+                {
+                    "id": "usdc",
+                    "name": "USD Coin",
+                    "symbol": "USDC",
+                    "pegType": "peggedUSD",
+                    "price": 1.0,
+                    "circulating": {"peggedUSD": 100.0},
+                    "chainCirculating": {
+                        "Ethereum": {"circulating": {"peggedUSD": 100.0}}
+                    },
+                }
+            ]
+        },
+    }
+
+    _, chains = parse_stablecoin_snapshot(envelope, _manifest())
+    assert chains.iloc[0]["circulating_native"] == pytest.approx(100.0)
 
 
 def test_parse_stablecoin_snapshot_supports_legacy_flat_chain_shape() -> None:
