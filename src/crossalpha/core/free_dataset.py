@@ -36,6 +36,24 @@ def _paths(data_root: Path, value: FreeCoreRange) -> dict[str, Path]:
     }
 
 
+def _range_boundary_counts(
+    dates: pd.Series,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[int, int, int]:
+    """Return rows before start, exactly at exclusive end, and strictly after end.
+
+    Some free vendors treat a date-only end parameter as inclusive. CrossAlpha preserves
+    those vendor rows in canonical data but normalizes them away in the derived research
+    layer. Rows strictly after the requested end remain a quality failure.
+    """
+    before = int((dates < start).sum())
+    exact_end = int((dates == end).sum())
+    after_end = int((dates > end).sum())
+    return before, exact_end, after_end
+
+
 def _series_audit(
     frame: pd.DataFrame,
     *,
@@ -75,7 +93,9 @@ def _series_audit(
                 "null_price": 0,
                 "non_positive_price": 0,
                 "rows_before_start": 0,
-                "rows_at_or_after_exclusive_end": 0,
+                "rows_exactly_at_exclusive_end": 0,
+                "rows_strictly_after_exclusive_end": 0,
+                "boundary_rows_normalized_in_derived": True,
                 "max_calendar_gap_days": None,
             }
             source_ok = False
@@ -84,8 +104,9 @@ def _series_audit(
         duplicate_dates = int(part["date"].duplicated().sum())
         null_price = int(part[price_col].isna().sum())
         non_positive = int((part[price_col].dropna() <= 0).sum())
-        rows_before_start = int((part["date"] < start).sum())
-        rows_after_end = int((part["date"] >= end).sum())
+        rows_before_start, exact_end_rows, rows_after_end = _range_boundary_counts(
+            part["date"], start=start, end=end
+        )
         gaps = part["date"].diff().dt.total_seconds().div(86_400.0).dropna()
         max_gap = float(gaps.max()) if not gaps.empty else None
         item_ok = (
@@ -105,7 +126,9 @@ def _series_audit(
             "null_price": null_price,
             "non_positive_price": non_positive,
             "rows_before_start": rows_before_start,
-            "rows_at_or_after_exclusive_end": rows_after_end,
+            "rows_exactly_at_exclusive_end": exact_end_rows,
+            "rows_strictly_after_exclusive_end": rows_after_end,
+            "boundary_rows_normalized_in_derived": True,
             "max_calendar_gap_days": max_gap,
         }
 
@@ -137,6 +160,7 @@ def audit_free_core(
             "mode": "free_only",
             "data_cost_usd": 0,
             "range_semantics": "start_inclusive_end_exclusive",
+            "canonical_vendor_boundary_policy": "preserve_exact_end_then_drop_in_derived",
             "start": value.start,
             "end": value.end,
             "missing_files": missing_files,
@@ -178,8 +202,9 @@ def audit_free_core(
     cash["date"] = pd.to_datetime(cash["date"], utc=True)
     cash["rate_percent"] = pd.to_numeric(cash["rate_percent"], errors="coerce")
     cash_duplicates = int(cash["date"].duplicated().sum())
-    cash_before_start = int((cash["date"] < start).sum())
-    cash_after_end = int((cash["date"] >= end).sum())
+    cash_before_start, cash_exact_end, cash_after_end = _range_boundary_counts(
+        cash["date"], start=start, end=end
+    )
     known_cash = cash.loc[cash["rate_percent"].notna()].sort_values("date")
     cash_audit = {
         "ok": bool(
@@ -196,7 +221,9 @@ def audit_free_core(
         "missing_rate_rows": int(cash["rate_percent"].isna().sum()),
         "duplicate_dates": cash_duplicates,
         "rows_before_start": cash_before_start,
-        "rows_at_or_after_exclusive_end": cash_after_end,
+        "rows_exactly_at_exclusive_end": cash_exact_end,
+        "rows_strictly_after_exclusive_end": cash_after_end,
+        "boundary_rows_normalized_in_derived": True,
         "start": cash["date"].min().isoformat() if not cash.empty else None,
         "end": cash["date"].max().isoformat() if not cash.empty else None,
         "first_known_rate": known_cash["date"].iloc[0].isoformat() if not known_cash.empty else None,
@@ -208,6 +235,7 @@ def audit_free_core(
         "mode": "free_only",
         "data_cost_usd": 0,
         "range_semantics": "start_inclusive_end_exclusive",
+        "canonical_vendor_boundary_policy": "preserve_exact_end_then_drop_in_derived",
         "start": value.start,
         "end": value.end,
         "missing_files": [],
@@ -223,17 +251,29 @@ def audit_free_core(
     return report
 
 
+def _clip_research_range(
+    frame: pd.DataFrame,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame:
+    result = frame.copy()
+    result["date"] = pd.to_datetime(result["date"], utc=True)
+    return result.loc[(result["date"] >= start) & (result["date"] < end)].copy()
+
+
 def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, Any]:
     quality = audit_free_core(data_root, value)
     if not quality.get("ok"):
         raise ValueError("free Core quality gate failed; inspect manifests/free_core_quality.json")
 
     paths = _paths(data_root, value)
-    tradfi = pd.read_parquet(paths["tradfi"]).copy()
-    crypto = pd.read_parquet(paths["crypto"]).copy()
-    cash = pd.read_parquet(paths["cash"]).copy()
+    start = pd.to_datetime(value.start, utc=True).normalize()
+    end = pd.to_datetime(value.end, utc=True).normalize()
+    tradfi = _clip_research_range(pd.read_parquet(paths["tradfi"]), start=start, end=end)
+    crypto = _clip_research_range(pd.read_parquet(paths["crypto"]), start=start, end=end)
+    cash = _clip_research_range(pd.read_parquet(paths["cash"]), start=start, end=end)
 
-    tradfi["date"] = pd.to_datetime(tradfi["date"], utc=True)
     tradfi["price"] = pd.to_numeric(tradfi["adj_close"], errors="coerce")
     tradfi["return"] = tradfi.groupby("economic_asset", sort=False)["price"].pct_change(
         fill_method=None
@@ -242,7 +282,6 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
         ["date", "economic_asset", "source", "symbol", "price", "return"]
     ].copy()
 
-    crypto["date"] = pd.to_datetime(crypto["date"], utc=True)
     crypto["price"] = pd.to_numeric(crypto["close"], errors="coerce")
     crypto["return"] = crypto.groupby("economic_asset", sort=False)["price"].pct_change(
         fill_method=None
@@ -251,10 +290,7 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
         ["date", "economic_asset", "source", "symbol", "price", "return"]
     ].copy()
 
-    cash["date"] = pd.to_datetime(cash["date"], utc=True)
     cash["rate_percent"] = pd.to_numeric(cash["rate_percent"], errors="coerce")
-    start = pd.to_datetime(value.start, utc=True).normalize()
-    end = pd.to_datetime(value.end, utc=True).normalize()
     calendar = pd.DataFrame(
         {"date": pd.date_range(start=start, end=end, inclusive="left", freq="D")}
     )
@@ -283,6 +319,8 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
     combined = combined.sort_values(["date", "economic_asset"]).reset_index(drop=True)
     if combined.duplicated(["date", "economic_asset"]).any():
         raise ValueError("free Core returns contain duplicate date/economic_asset rows")
+    if (combined["date"] < start).any() or (combined["date"] >= end).any():
+        raise ValueError("free Core derived returns violate [start, end) range semantics")
 
     paths["returns"].parent.mkdir(parents=True, exist_ok=True)
     tmp = paths["returns"].with_suffix(".parquet.tmp")
@@ -303,6 +341,7 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
         "mode": "free_only",
         "data_cost_usd": 0,
         "range_semantics": "start_inclusive_end_exclusive",
+        "canonical_vendor_boundary_policy": "preserve_exact_end_then_drop_in_derived",
         "rows": int(len(combined)),
         "assets": sorted(coverage),
         "coverage": coverage,
