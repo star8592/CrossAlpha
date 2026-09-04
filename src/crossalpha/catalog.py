@@ -29,6 +29,10 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     stablecoin_assets_glob = stablecoin_assets_root / "**" / "*.parquet"
     stablecoin_chains_root = data_root / "canonical" / "defillama" / "stablecoin_chain_supply"
     stablecoin_chains_glob = stablecoin_chains_root / "**" / "*.parquet"
+    stablecoin_system_root = data_root / "derived" / "stablecoins" / "system_state"
+    stablecoin_system_glob = stablecoin_system_root / "**" / "*.parquet"
+    stablecoin_chain_state_root = data_root / "derived" / "stablecoins" / "chain_state"
+    stablecoin_chain_state_glob = stablecoin_chain_state_root / "**" / "*.parquet"
 
     created_views: list[str] = []
     con = duckdb.connect(str(db_path))
@@ -40,6 +44,8 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.hyperliquid_market_state",
             "observatory.stablecoin_assets",
             "observatory.stablecoin_chain_supply",
+            "observatory.stablecoin_system_state",
+            "observatory.stablecoin_chain_state",
         ):
             con.execute(f"DROP VIEW IF EXISTS {view}")
 
@@ -81,6 +87,22 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.stablecoin_chain_supply")
+
+        if _has_parquet(stablecoin_system_root):
+            con.execute(
+                "CREATE VIEW observatory.stablecoin_system_state AS "
+                f"SELECT * FROM read_parquet({_sql_string(stablecoin_system_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.stablecoin_system_state")
+
+        if _has_parquet(stablecoin_chain_state_root):
+            con.execute(
+                "CREATE VIEW observatory.stablecoin_chain_state AS "
+                f"SELECT * FROM read_parquet({_sql_string(stablecoin_chain_state_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.stablecoin_chain_state")
     finally:
         con.close()
 
