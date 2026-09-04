@@ -5,9 +5,12 @@ import pytest
 
 from crossalpha.core.free_provider import (
     FreeCoreRange,
+    free_credential_status,
     parse_binance_klines,
     parse_fred_observations,
     parse_tiingo_eod_payload,
+    validate_fred_api_key,
+    validate_tiingo_token,
 )
 
 
@@ -77,3 +80,39 @@ def test_fred_parser_keeps_missing_rate_unknown() -> None:
     frame = parse_fred_observations("DGS3MO", payload)
     assert frame.iloc[0]["rate_percent"] == pytest.approx(4.25)
     assert pd.isna(frame.iloc[1]["rate_percent"])
+
+
+def test_tiingo_credential_rejects_unicode_placeholder_before_http() -> None:
+    valid, error = validate_tiingo_token("你的token")
+    assert valid is False
+    assert error is not None
+    assert "ASCII" in error
+
+
+def test_tiingo_credential_accepts_transport_safe_ascii_token() -> None:
+    valid, error = validate_tiingo_token("0123456789abcdef0123456789abcdef01234567")
+    assert valid is True
+    assert error is None
+
+
+def test_fred_credential_uses_documented_32_lowercase_alphanumeric_shape() -> None:
+    valid, error = validate_fred_api_key("abc123")
+    assert valid is False
+    assert error is not None
+    valid, error = validate_fred_api_key("abcdefghijklmnopqrstuvwxyz123456")
+    assert valid is True
+    assert error is None
+
+
+def test_free_credential_status_requires_both_valid_credentials() -> None:
+    bad = free_credential_status("你的token", "abcdefghijklmnopqrstuvwxyz123456")
+    assert bad["ready"] is False
+    assert bad["tiingo_token_configured"] is True
+    assert bad["tiingo_token_valid"] is False
+
+    good = free_credential_status(
+        "0123456789abcdef0123456789abcdef01234567",
+        "abcdefghijklmnopqrstuvwxyz123456",
+    )
+    assert good["ready"] is True
+    assert good["credential_errors"] == []
