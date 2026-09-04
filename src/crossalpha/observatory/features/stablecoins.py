@@ -204,8 +204,14 @@ def compute_stablecoin_system_state(
         grouped = (
             part.groupby("chain", dropna=False)
             .agg(
-                circulating_native=("circulating_native", "sum"),
-                market_value_usd=("market_value_usd", "sum"),
+                circulating_native=(
+                    "circulating_native",
+                    lambda values: values.sum(min_count=1),
+                ),
+                market_value_usd=(
+                    "market_value_usd",
+                    lambda values: values.sum(min_count=1),
+                ),
                 stablecoin_count=("stablecoin_id", "nunique"),
                 known_at=("known_at", "max"),
             )
