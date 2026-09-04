@@ -68,6 +68,8 @@ def update_series_state(data_root: Path, record: RawSnapshotManifest) -> Path:
             "max_interval_seconds": None,
             "raw_bytes_total": 0,
             "compressed_bytes_total": 0,
+            "compression_sample_records": 0,
+            "compression_sample_raw_bytes": 0,
         }
 
     previous = state.get("latest_observed_at")
@@ -78,8 +80,7 @@ def update_series_state(data_root: Path, record: RawSnapshotManifest) -> Path:
             previous_dt = previous_dt.replace(tzinfo=timezone.utc)
         interval_seconds = (record.observed_at - previous_dt).total_seconds()
 
-    count = int(state.get("count", 0)) + 1
-    state["count"] = count
+    state["count"] = int(state.get("count", 0)) + 1
     if state.get("first_observed_at") is None:
         state["first_observed_at"] = record.observed_at.isoformat()
     state["previous_observed_at"] = previous
@@ -89,7 +90,10 @@ def update_series_state(data_root: Path, record: RawSnapshotManifest) -> Path:
         old_max = state.get("max_interval_seconds")
         state["max_interval_seconds"] = max(float(old_max or 0.0), interval_seconds)
     state["raw_bytes_total"] = int(state.get("raw_bytes_total", 0)) + record.bytes
-    state["compressed_bytes_total"] = int(state.get("compressed_bytes_total", 0)) + int(record.compressed_bytes or 0)
+    if record.compressed_bytes is not None:
+        state["compressed_bytes_total"] = int(state.get("compressed_bytes_total", 0)) + record.compressed_bytes
+        state["compression_sample_records"] = int(state.get("compression_sample_records", 0)) + 1
+        state["compression_sample_raw_bytes"] = int(state.get("compression_sample_raw_bytes", 0)) + record.bytes
     state["latest_manifest"] = record.model_dump(mode="json")
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
