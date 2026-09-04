@@ -11,11 +11,12 @@ from crossalpha.doctor import storage_report
 from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
 from crossalpha.observatory.canonical.stablecoins import canonicalize_stablecoins
 from crossalpha.observatory.features.hyperliquid import build_hyperliquid_market_state
+from crossalpha.observatory.features.stablecoins import build_stablecoin_state
 from crossalpha.observatory.health import observatory_health, write_health_report
 from crossalpha.observatory.live_health import observatory_live_health
 from crossalpha.observatory.providers.defillama import DefiLlamaStablecoinProvider
 from crossalpha.observatory.providers.hyperliquid import HyperliquidProvider
-from crossalpha.observatory.query import latest_hyperliquid_market_state
+from crossalpha.observatory.query import latest_hyperliquid_market_state, latest_stablecoin_state
 from crossalpha.settings import Settings
 from crossalpha.storage.indexes import rebuild_manifest_indexes
 from crossalpha.storage.raw import RawSnapshotStore
@@ -38,12 +39,14 @@ def materialize_observatory(settings: Settings) -> dict[str, object]:
     canonical_hyperliquid = canonicalize_hyperliquid(settings.crossalpha_data_dir, recent_days=2)
     canonical_stablecoins = canonicalize_stablecoins(settings.crossalpha_data_dir, recent_days=2)
     market_state = build_hyperliquid_market_state(settings.crossalpha_data_dir, recent_only=True)
+    stablecoin_state = build_stablecoin_state(settings.crossalpha_data_dir, recent_only=True)
     catalog = build_catalog(settings.crossalpha_data_dir)
     return {
         "mode": "incremental",
         "canonical_hyperliquid": canonical_hyperliquid,
         "canonical_stablecoins": canonical_stablecoins,
         "hyperliquid_market_state": market_state,
+        "stablecoin_state": stablecoin_state,
         "catalog": catalog,
     }
 
@@ -88,11 +91,15 @@ def main() -> None:
     sub.add_parser("canonicalize-hyperliquid")
     sub.add_parser("canonicalize-stablecoins")
     sub.add_parser("build-market-state")
+    sub.add_parser("build-stablecoin-state")
     sub.add_parser("materialize-observatory")
     sub.add_parser("build-catalog")
 
     state = sub.add_parser("market-state")
     state.add_argument("--asset", action="append", dest="assets")
+
+    stable = sub.add_parser("stablecoin-state")
+    stable.add_argument("--top-chains", type=int, default=10)
 
     core = sub.add_parser("fetch-core")
     core.add_argument("--start", default="2010-06-01")
@@ -134,6 +141,8 @@ def main() -> None:
         print(json.dumps(canonicalize_stablecoins(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "build-market-state":
         print(json.dumps(build_hyperliquid_market_state(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
+    elif args.command == "build-stablecoin-state":
+        print(json.dumps(build_stablecoin_state(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "materialize-observatory":
         print(json.dumps(materialize_observatory(settings), ensure_ascii=False, indent=2))
     elif args.command == "build-catalog":
@@ -141,6 +150,9 @@ def main() -> None:
     elif args.command == "market-state":
         rows = latest_hyperliquid_market_state(settings.crossalpha_data_dir, args.assets)
         print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+    elif args.command == "stablecoin-state":
+        report = latest_stablecoin_state(settings.crossalpha_data_dir, top_chains=args.top_chains)
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     elif args.command == "fetch-core":
         fetch_core(settings, args.start, args.end)
     elif args.command == "doctor":
