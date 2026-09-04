@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from crossalpha.domain.models import RawSnapshotManifest
+from crossalpha.storage.indexes import manifest_lock
 
 
 DEFAULT_EXPECTED_SERIES = (
@@ -25,15 +26,16 @@ def load_manifest(data_root: Path) -> tuple[list[RawSnapshotManifest], list[str]
 
     records: list[RawSnapshotManifest] = []
     errors: list[str] = []
-    with path.open("r", encoding="utf-8") as fh:
-        for line_no, line in enumerate(fh, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(RawSnapshotManifest.model_validate_json(line))
-            except Exception as exc:  # noqa: BLE001 - manifest corruption must be reported, not hidden.
-                errors.append(f"line {line_no}: {exc}")
+    with manifest_lock(data_root):
+        with path.open("r", encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(RawSnapshotManifest.model_validate_json(line))
+                except Exception as exc:  # noqa: BLE001 - manifest corruption must be reported, not hidden.
+                    errors.append(f"line {line_no}: {exc}")
     return records, errors
 
 
