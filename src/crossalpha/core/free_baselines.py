@@ -38,12 +38,14 @@ SLEEVES: dict[str, tuple[tuple[str, ...], float]] = {
     "industrials": (("COPPER",), 0.25),
     "energy": (("WTI",), 0.25),
 }
+VOL_TARGET_STRATEGIES = set(STRATEGIES[2:])
 
 
 @dataclass(frozen=True)
 class FreeBaselineConfig:
     cost_bps: float = 5.0
     vol_window_days: int = 63
+    target_vol: float = 0.10
     trend_window_days: int = 365
     multi_horizons_days: tuple[int, ...] = (30, 90, 180, 365)
     hrp_window_days: int = 126
@@ -114,8 +116,9 @@ def _load_daily_panel(
         inception = part["date"].min()
         values = part.set_index("date")["return"].reindex(calendar)
         active = calendar >= inception
-        # Canonical audit already checks there are no suspicious long gaps. On calendar
-        # days when an ETF market is closed, economic mark-to-market return is zero.
+        # The free-core audit already checks for suspicious source gaps. For an
+        # investable ETF/ETP on a closed market day the economic mark-to-market return
+        # is zero, while pre-inception values remain unavailable rather than zero-filled.
         values.loc[active] = values.loc[active].fillna(0.0)
         risk[asset] = values
         available.loc[active, asset] = True
@@ -182,6 +185,42 @@ def _apply_constraints(raw: pd.Series, config: FreeBaselineConfig) -> pd.Series:
         gross = 1.0
     result = pd.Series(0.0, index=ALL_ASSETS, dtype=float)
     result.loc[list(RISK_ASSETS)] = weights
+    result.loc["CASH"] = max(0.0, 1.0 - gross)
+    return result
+
+
+def _scale_to_target_vol(
+    weights: pd.Series,
+    history: pd.DataFrame,
+    config: FreeBaselineConfig,
+) -> pd.Series:
+    """Scale risk down to target vol; never scale up or exceed gross 1.
+
+    This is deliberately one-sided because V0.1 forbids leverage. Any de-risked
+    notional is moved to CASH, preserving the economic budget and all sleeve caps.
+    """
+    result = weights.copy()
+    risk_weights = pd.to_numeric(result.loc[list(RISK_ASSETS)], errors="coerce").fillna(0.0)
+    selected = list(risk_weights[risk_weights > 0].index)
+    if not selected or config.target_vol <= 0:
+        return result
+
+    window = history.loc[:, selected].tail(config.vol_window_days)
+    if len(window) < config.vol_window_days:
+        return result
+    clean = window.fillna(0.0)
+    cov = clean.cov() * float(config.annualization_days)
+    vector = risk_weights.loc[selected].to_numpy(dtype=float)
+    variance = float(vector @ cov.to_numpy(dtype=float) @ vector)
+    if not math.isfinite(variance) or variance <= 0:
+        return result
+    predicted_vol = math.sqrt(variance)
+    scale = min(1.0, config.target_vol / predicted_vol)
+    if scale >= 1.0:
+        return result
+
+    result.loc[selected] = risk_weights.loc[selected] * scale
+    gross = float(result.loc[list(RISK_ASSETS)].sum())
     result.loc["CASH"] = max(0.0, 1.0 - gross)
     return result
 
@@ -312,7 +351,8 @@ def _targets_for_date(
     else:
         count = max(1, int(math.ceil(len(dual_candidates) * config.dual_momentum_top_fraction)))
         chosen = set(dual_candidates.index[:count])
-        dual_raw = inv_vol.where(inv_vol.index.to_series().isin(chosen), 0.0)
+        membership = pd.Series([asset in chosen for asset in RISK_ASSETS], index=RISK_ASSETS)
+        dual_raw = inv_vol.where(membership, 0.0)
     targets["B6_DUAL_MOMENTUM_INVERSE_VOLATILITY"] = _apply_constraints(dual_raw, config)
 
     hrp_assets = [asset for asset in RISK_ASSETS if positive_score.get(asset, 0.0) > 0]
@@ -329,6 +369,11 @@ def _targets_for_date(
     else:
         hrp_raw = empty.copy()
     targets["B7_MULTI_HORIZON_TREND_HRP"] = _apply_constraints(hrp_raw, config)
+
+    target_history_start = signal_date - pd.Timedelta(days=config.vol_window_days - 1)
+    target_history = risk_returns.loc[target_history_start:signal_date]
+    for strategy in VOL_TARGET_STRATEGIES:
+        targets[strategy] = _scale_to_target_vol(targets[strategy], target_history, config)
     return targets
 
 
@@ -438,6 +483,8 @@ def run_free_baselines(
     config = config or FreeBaselineConfig()
     if config.cost_bps < 0:
         raise ValueError("cost_bps must be non-negative")
+    if not 0 < config.target_vol <= 1:
+        raise ValueError("target_vol must be in (0, 1]")
 
     daily, available = _load_daily_panel(data_root, start, end)
     weights = _build_weight_history(daily, available, config)
@@ -450,6 +497,9 @@ def run_free_baselines(
         "start": start,
         "end": end,
         "cost_bps_per_one_way_turnover": config.cost_bps,
+        "target_vol": config.target_vol,
+        "leverage_cap": 1.0,
+        "vol_target_strategies": sorted(VOL_TARGET_STRATEGIES),
         "strategies": {},
     }
     for strategy in STRATEGIES:
