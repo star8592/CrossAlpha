@@ -25,6 +25,10 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     hyperliquid_glob = hyperliquid_root / "**" / "*.parquet"
     market_state_root = data_root / "derived" / "hyperliquid" / "market_state"
     market_state_glob = market_state_root / "**" / "*.parquet"
+    stablecoin_assets_root = data_root / "canonical" / "defillama" / "stablecoin_assets"
+    stablecoin_assets_glob = stablecoin_assets_root / "**" / "*.parquet"
+    stablecoin_chains_root = data_root / "canonical" / "defillama" / "stablecoin_chain_supply"
+    stablecoin_chains_glob = stablecoin_chains_root / "**" / "*.parquet"
 
     created_views: list[str] = []
     con = duckdb.connect(str(db_path))
@@ -34,6 +38,8 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.raw_manifest",
             "observatory.hyperliquid_asset_contexts",
             "observatory.hyperliquid_market_state",
+            "observatory.stablecoin_assets",
+            "observatory.stablecoin_chain_supply",
         ):
             con.execute(f"DROP VIEW IF EXISTS {view}")
 
@@ -59,6 +65,22 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.hyperliquid_market_state")
+
+        if _has_parquet(stablecoin_assets_root):
+            con.execute(
+                "CREATE VIEW observatory.stablecoin_assets AS "
+                f"SELECT * FROM read_parquet({_sql_string(stablecoin_assets_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.stablecoin_assets")
+
+        if _has_parquet(stablecoin_chains_root):
+            con.execute(
+                "CREATE VIEW observatory.stablecoin_chain_supply AS "
+                f"SELECT * FROM read_parquet({_sql_string(stablecoin_chains_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.stablecoin_chain_supply")
     finally:
         con.close()
 
