@@ -34,6 +34,8 @@ def test_parent_request_and_cost_estimate_use_parent_symbology(monkeypatch: pyte
     assert fake.metadata.kwargs["symbols"] == ["ES.FUT", "NQ.FUT"]
     assert fake.metadata.kwargs["stype_in"] == "parent"
     assert fake.metadata.kwargs["schema"] == "ohlcv-1d"
+    assert fake.metadata.kwargs["start"] == "2026-01-01"
+    assert fake.metadata.kwargs["end"] == "2026-02-01"
 
 
 def test_existing_paid_output_is_rejected_before_client_creation(
@@ -41,7 +43,7 @@ def test_existing_paid_output_is_rejected_before_client_creation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provider = DatabentoCoreProvider("db-test")
-    request = ParentFuturesRequest(roots=("ES",), start="2026-01-01")
+    request = ParentFuturesRequest(roots=("ES",), start="2026-01-01", end="2026-02-01")
     existing = tmp_path / "parent_ohlcv_1d.parquet"
     existing.write_bytes(b"already-downloaded")
 
