@@ -12,7 +12,11 @@ from crossalpha.core.databento_provider import (
     DatabentoRequest,
     ParentFuturesRequest,
 )
-from crossalpha.core.free_provider import FreeCoreProvider, FreeCoreRange
+from crossalpha.core.free_provider import (
+    FreeCoreProvider,
+    FreeCoreRange,
+    free_credential_status,
+)
 from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
 from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
@@ -63,13 +67,12 @@ def materialize_observatory(settings: Settings) -> dict[str, object]:
 
 
 def free_core_status(settings: Settings) -> dict[str, object]:
+    credentials = free_credential_status(settings.tiingo_api_token, settings.fred_api_key)
     return {
         "mode": "free_only",
         "required_data_cost_usd": 0,
-        "tiingo_token_configured": bool(settings.tiingo_api_token),
-        "fred_api_key_configured": bool(settings.fred_api_key),
+        **credentials,
         "binance_api_key_required": False,
-        "ready": bool(settings.tiingo_api_token and settings.fred_api_key),
         "tradfi_source": "Tiingo Starter ($0 account)",
         "crypto_source": "Binance public market data (no API key)",
         "cash_source": "FRED (free API key)",
@@ -78,13 +81,13 @@ def free_core_status(settings: Settings) -> dict[str, object]:
 
 
 def fetch_core_free(settings: Settings, start: str, end: str) -> dict[str, object]:
-    if not settings.tiingo_api_token:
-        raise SystemExit("TIINGO_API_TOKEN is missing in .env; Tiingo Starter is $0/month")
-    if not settings.fred_api_key:
-        raise SystemExit("FRED_API_KEY is missing in .env; FRED API keys are free")
+    credential_status = free_credential_status(settings.tiingo_api_token, settings.fred_api_key)
+    if not credential_status["ready"]:
+        errors = credential_status["credential_errors"]
+        raise SystemExit("FREE CORE CREDENTIAL CHECK FAILED: " + "; ".join(str(item) for item in errors))
     provider = FreeCoreProvider(
-        tiingo_token=settings.tiingo_api_token,
-        fred_api_key=settings.fred_api_key,
+        tiingo_token=settings.tiingo_api_token or "",
+        fred_api_key=settings.fred_api_key or "",
         timeout=settings.crossalpha_http_timeout,
     )
     return provider.fetch_all(
