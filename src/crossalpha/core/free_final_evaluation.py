@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Any
 
@@ -67,11 +66,16 @@ def _weight_concentration(weights: pd.DataFrame, strategy: str) -> dict[str, Any
     effective_n = pd.Series(np.where(hhi > 0, 1.0 / hhi, np.nan), index=hhi.index)
     asset_avg = risk.mean().sort_values(ascending=False)
     asset_max = risk.max().sort_values(ascending=False)
+    finite_effective = effective_n.dropna()
     return {
         "average_risk_gross": float(gross.mean()),
         "max_risk_gross": float(gross.max()),
-        "average_effective_asset_count": float(effective_n.dropna().mean()),
-        "min_effective_asset_count": float(effective_n.dropna().min()),
+        "average_effective_asset_count": (
+            float(finite_effective.mean()) if not finite_effective.empty else None
+        ),
+        "min_effective_asset_count": (
+            float(finite_effective.min()) if not finite_effective.empty else None
+        ),
         "average_weights": {k: float(v) for k, v in asset_avg.items()},
         "max_weights": {k: float(v) for k, v in asset_max.items()},
     }
@@ -88,7 +92,8 @@ def _asset_contribution(
     aligned = daily.reindex(columns=ALL_ASSETS).fillna(0.0)
     contribution = w * aligned
     rows: list[dict[str, Any]] = []
-    total_abs = float(contribution.loc[:, list(RISK_ASSETS)].sum().abs().sum())
+    risk_totals = contribution.loc[:, list(RISK_ASSETS)].sum()
+    total_abs = float(risk_totals.abs().sum())
     for asset in ALL_ASSETS:
         total = float(contribution[asset].sum())
         rows.append(
@@ -139,14 +144,22 @@ def _drawdown_episodes(part: pd.DataFrame) -> pd.DataFrame:
                 }
             )
             in_dd = False
+    if not episodes:
+        return pd.DataFrame(
+            columns=["peak_date", "trough_date", "recovery_date", "benchmark_drawdown"]
+        )
     return pd.DataFrame(episodes).sort_values("benchmark_drawdown").reset_index(drop=True)
 
 
-def _period_return(part: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> float:
+def _period_return_after_peak(part: pd.DataFrame, peak: pd.Timestamp, trough: pd.Timestamp) -> float:
     frame = part.copy()
     dates = pd.to_datetime(frame["date"], utc=True)
-    values = pd.to_numeric(frame.loc[(dates >= start) & (dates <= end), "net_return"], errors="coerce").fillna(0.0)
-    return float((1.0 + values).prod() - 1.0) if len(values) else float("nan")
+    # A drawdown is measured from the wealth level at the peak close, so the
+    # peak day's return belongs to the wealth that defines the starting point.
+    # Compare subsequent returns only: (peak, trough].
+    mask = (dates > peak) & (dates <= trough)
+    values = pd.to_numeric(frame.loc[mask, "net_return"], errors="coerce").fillna(0.0)
+    return float((1.0 + values).prod() - 1.0) if len(values) else 0.0
 
 
 def _benchmark_stress_comparison(strategy_returns: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
@@ -155,14 +168,14 @@ def _benchmark_stress_comparison(strategy_returns: pd.DataFrame, top_n: int = 5)
     episodes = _drawdown_episodes(benchmark).head(top_n)
     rows: list[dict[str, Any]] = []
     for rank, row in episodes.iterrows():
-        start = pd.Timestamp(row["peak_date"])
+        peak = pd.Timestamp(row["peak_date"])
         trough = pd.Timestamp(row["trough_date"])
-        b1_return = _period_return(benchmark, start, trough)
-        b3_return = _period_return(b3, start, trough)
+        b1_return = _period_return_after_peak(benchmark, peak, trough)
+        b3_return = _period_return_after_peak(b3, peak, trough)
         rows.append(
             {
                 "rank": rank + 1,
-                "peak_date": start,
+                "peak_date": peak,
                 "trough_date": trough,
                 "benchmark_drawdown": float(row["benchmark_drawdown"]),
                 "B1_period_return": b1_return,
