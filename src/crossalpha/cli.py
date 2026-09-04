@@ -12,6 +12,7 @@ from crossalpha.core.databento_provider import (
     DatabentoRequest,
     ParentFuturesRequest,
 )
+from crossalpha.core.free_provider import FreeCoreProvider, FreeCoreRange
 from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
 from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
@@ -61,9 +62,44 @@ def materialize_observatory(settings: Settings) -> dict[str, object]:
     }
 
 
+def free_core_status(settings: Settings) -> dict[str, object]:
+    return {
+        "mode": "free_only",
+        "required_data_cost_usd": 0,
+        "tiingo_token_configured": bool(settings.tiingo_api_token),
+        "fred_api_key_configured": bool(settings.fred_api_key),
+        "binance_api_key_required": False,
+        "ready": bool(settings.tiingo_api_token and settings.fred_api_key),
+        "tradfi_source": "Tiingo Starter ($0 account)",
+        "crypto_source": "Binance public market data (no API key)",
+        "cash_source": "FRED (free API key)",
+        "paid_vendor_required": False,
+    }
+
+
+def fetch_core_free(settings: Settings, start: str, end: str) -> dict[str, object]:
+    if not settings.tiingo_api_token:
+        raise SystemExit("TIINGO_API_TOKEN is missing in .env; Tiingo Starter is $0/month")
+    if not settings.fred_api_key:
+        raise SystemExit("FRED_API_KEY is missing in .env; FRED API keys are free")
+    provider = FreeCoreProvider(
+        tiingo_token=settings.tiingo_api_token,
+        fred_api_key=settings.fred_api_key,
+        timeout=settings.crossalpha_http_timeout,
+    )
+    return provider.fetch_all(
+        FreeCoreRange(start=start, end=end),
+        settings.crossalpha_data_dir,
+    )
+
+
+# --- Optional paid validation adapter below. Not required by V0.1. ---
+
 def _require_databento(settings: Settings) -> DatabentoCoreProvider:
     if not settings.databento_api_key:
-        raise SystemExit("DATABENTO_API_KEY is missing in .env")
+        raise SystemExit(
+            "DATABENTO_API_KEY is missing in .env; Databento is optional paid validation only"
+        )
     return DatabentoCoreProvider(settings.databento_api_key)
 
 
@@ -106,6 +142,7 @@ def estimate_core(settings: Settings, start: str, end: str) -> dict[str, object]
     request = _continuous_request(start, end)
     cost = provider.estimate_cost(request)
     return {
+        "mode": "optional_paid_validation",
         "dataset": request.dataset,
         "symbols": list(request.symbols),
         "start": start,
@@ -143,6 +180,7 @@ def fetch_core(
     if not quality.ok:
         raise SystemExit("QUALITY GATE FAILED")
     return {
+        "mode": "optional_paid_validation",
         "dataset": request.dataset,
         "symbols": list(request.symbols),
         "start": start,
@@ -161,6 +199,7 @@ def estimate_core_parent(settings: Settings, start: str, end: str) -> dict[str, 
     definition_cost = provider.estimate_parent_cost(request, schema="definition")
     daily_cost = provider.estimate_parent_cost(request, schema="ohlcv-1d")
     return {
+        "mode": "optional_paid_validation",
         "dataset": request.dataset,
         "symbols": list(request.symbols),
         "start": start,
@@ -213,6 +252,7 @@ def fetch_core_parent(
         paths["canonical"],
     )
     return {
+        "mode": "optional_paid_validation",
         "dataset": request.dataset,
         "symbols": list(request.symbols),
         "start": start,
@@ -236,13 +276,9 @@ def normalize_core_parent(settings: Settings, start: str, end: str) -> dict[str,
     return {"canonical": str(out)}
 
 
-def _add_explicit_range(parser: argparse.ArgumentParser) -> None:
+def _add_range(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--start", default="2010-06-01")
-    parser.add_argument(
-        "--end",
-        required=True,
-        help="Explicit exclusive Databento end timestamp; never inferred as 'latest'.",
-    )
+    parser.add_argument("--end", required=True, help="Explicit end date/timestamp for reproducibility.")
 
 
 def main() -> None:
@@ -275,22 +311,28 @@ def main() -> None:
     stable = sub.add_parser("stablecoin-state")
     stable.add_argument("--top-chains", type=int, default=10)
 
+    sub.add_parser("free-core-status")
+
+    free_core = sub.add_parser("fetch-core-free")
+    _add_range(free_core)
+
+    # Optional paid validation commands. They are not part of the free-only V0.1 path.
     estimate = sub.add_parser("estimate-core")
-    _add_explicit_range(estimate)
+    _add_range(estimate)
 
     core = sub.add_parser("fetch-core")
-    _add_explicit_range(core)
+    _add_range(core)
     core.add_argument("--max-cost-usd", type=float, required=True)
 
     estimate_parent = sub.add_parser("estimate-core-parent")
-    _add_explicit_range(estimate_parent)
+    _add_range(estimate_parent)
 
     fetch_parent = sub.add_parser("fetch-core-parent")
-    _add_explicit_range(fetch_parent)
+    _add_range(fetch_parent)
     fetch_parent.add_argument("--max-cost-usd", type=float, required=True)
 
     normalize_parent = sub.add_parser("normalize-core-parent")
-    _add_explicit_range(normalize_parent)
+    _add_range(normalize_parent)
 
     sub.add_parser("doctor")
 
@@ -340,6 +382,10 @@ def main() -> None:
     elif args.command == "stablecoin-state":
         report = latest_stablecoin_state(settings.crossalpha_data_dir, top_chains=args.top_chains)
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    elif args.command == "free-core-status":
+        print(json.dumps(free_core_status(settings), ensure_ascii=False, indent=2))
+    elif args.command == "fetch-core-free":
+        print(json.dumps(fetch_core_free(settings, args.start, args.end), ensure_ascii=False, indent=2))
     elif args.command == "estimate-core":
         print(json.dumps(estimate_core(settings, args.start, args.end), ensure_ascii=False, indent=2))
     elif args.command == "fetch-core":
