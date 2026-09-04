@@ -1,0 +1,54 @@
+version: 1
+policy:
+  required_data_cost_usd: 0
+  paid_data_required: false
+  note: "All V0.1 research must be reproducible without purchasing market data. Paid vendors may only be optional validation sources."
+
+tradfi_proxies:
+  US_EQUITY:
+    source: tiingo_eod
+    symbol: SPY
+    proxy_for: S&P 500 / broad US equity beta
+  US_GROWTH:
+    source: tiingo_eod
+    symbol: QQQ
+    proxy_for: Nasdaq-100 / US growth beta
+  GOLD:
+    source: tiingo_eod
+    symbol: GLD
+    proxy_for: gold exposure
+  SILVER:
+    source: tiingo_eod
+    symbol: SLV
+    proxy_for: silver exposure
+  COPPER:
+    source: tiingo_eod
+    symbol: CPER
+    proxy_for: copper exposure
+  WTI:
+    source: tiingo_eod
+    symbol: USO
+    proxy_for: WTI crude exposure
+
+crypto:
+  BTC:
+    source: binance_spot_public
+    symbol: BTCUSDT
+    seasoning_days: 63
+  ETH:
+    source: binance_spot_public
+    symbol: ETHUSDT
+    seasoning_days: 63
+
+cash:
+  source: fred
+  series_id: DGS3MO
+  description: 3-Month Treasury Constant Maturity Rate
+
+research_rules:
+  use_adjusted_close_for_tradfi: true
+  availability_aware: true
+  no_backfill_before_proxy_inception: true
+  no_short: true
+  no_leverage: true
+  note: "ETF/ETP proxies are not identical to CME futures. Commodity proxy returns include fund roll/fee effects by construction."
