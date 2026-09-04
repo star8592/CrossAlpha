@@ -117,7 +117,7 @@ def test_future_state_rows_cannot_change_past_snapshot() -> None:
         hl,
         stable,
         as_of=past,
-        generated_at="2026-09-05T02:00:00Z",
+        generated_at="2026-09-05T00:05:00Z",
     )
     assert result["state_band"] == "NORMAL"
     assert result["shadow_risk_multiplier"] == 1.0
