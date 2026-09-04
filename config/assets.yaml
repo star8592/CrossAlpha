@@ -1,36 +1,59 @@
-version: 1
+version: 2
+policy:
+  required_data_cost_usd: 0
+  research_mode: free_proxy
+
 economic_assets:
   - id: US_EQUITY
-    research_symbol: ES
-    asset_class: equity_index
+    research_symbol: SPY
+    source: tiingo_eod
+    proxy_for: ES
+    asset_class: equity_index_proxy
     risk_sleeve: equity
   - id: US_GROWTH
-    research_symbol: NQ
-    asset_class: equity_index
+    research_symbol: QQQ
+    source: tiingo_eod
+    proxy_for: NQ
+    asset_class: equity_index_proxy
     risk_sleeve: equity
   - id: GOLD
-    research_symbol: GC
-    asset_class: commodity
+    research_symbol: GLD
+    source: tiingo_eod
+    proxy_for: GC
+    asset_class: commodity_proxy
     risk_sleeve: precious_metals
   - id: SILVER
-    research_symbol: SI
-    asset_class: commodity
+    research_symbol: SLV
+    source: tiingo_eod
+    proxy_for: SI
+    asset_class: commodity_proxy
     risk_sleeve: precious_metals
   - id: COPPER
-    research_symbol: HG
-    asset_class: commodity
+    research_symbol: CPER
+    source: tiingo_eod
+    proxy_for: HG
+    asset_class: commodity_proxy
     risk_sleeve: industrials
   - id: WTI
-    research_symbol: CL
-    asset_class: commodity
+    research_symbol: USO
+    source: tiingo_eod
+    proxy_for: CL
+    asset_class: commodity_proxy
     risk_sleeve: energy
   - id: BTC
-    research_symbol: BTC
-    asset_class: crypto_future
+    research_symbol: BTCUSDT
+    source: binance_spot_public
+    asset_class: crypto_spot
     risk_sleeve: crypto
     seasoning_days: 63
   - id: ETH
-    research_symbol: ETH
-    asset_class: crypto_future
+    research_symbol: ETHUSDT
+    source: binance_spot_public
+    asset_class: crypto_spot
     risk_sleeve: crypto
     seasoning_days: 63
+
+notes:
+  - "V0.1 free-proxy research does not claim to be CME futures excess-return research."
+  - "Commodity ETF/ETP returns include fund fees and roll effects by construction."
+  - "Availability is respected; no proxy is backfilled before inception/listing."
