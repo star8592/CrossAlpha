@@ -4,13 +4,16 @@ import argparse
 import asyncio
 import json
 
+from crossalpha.catalog import build_catalog
 from crossalpha.core.databento_provider import DatabentoCoreProvider, DatabentoRequest
 from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
+from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
 from crossalpha.observatory.health import observatory_health, write_health_report
 from crossalpha.observatory.providers.defillama import DefiLlamaStablecoinProvider
 from crossalpha.observatory.providers.hyperliquid import HyperliquidProvider
 from crossalpha.settings import Settings
+from crossalpha.storage.indexes import rebuild_manifest_indexes
 from crossalpha.storage.raw import RawSnapshotStore
 
 
@@ -59,6 +62,10 @@ def main() -> None:
     health.add_argument("--stale-after", type=int, default=900)
     health.add_argument("--no-verify-latest", action="store_true")
 
+    sub.add_parser("manifest-rebuild-indexes")
+    sub.add_parser("canonicalize-hyperliquid")
+    sub.add_parser("build-catalog")
+
     core = sub.add_parser("fetch-core")
     core.add_argument("--start", default="2010-06-01")
     core.add_argument("--end", default=None)
@@ -82,6 +89,12 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if not report["ok"]:
             raise SystemExit("OBSERVATORY HEALTH FAILED")
+    elif args.command == "manifest-rebuild-indexes":
+        print(json.dumps(rebuild_manifest_indexes(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
+    elif args.command == "canonicalize-hyperliquid":
+        print(json.dumps(canonicalize_hyperliquid(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
+    elif args.command == "build-catalog":
+        print(json.dumps(build_catalog(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "fetch-core":
         fetch_core(settings, args.start, args.end)
     elif args.command == "doctor":
