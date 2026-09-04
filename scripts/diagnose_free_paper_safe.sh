@@ -48,11 +48,17 @@ run_critical() {
 
 TODAY_UTC="$(date -u +%F)"
 
+if [[ $- == *e* ]]; then
+  SHELL_ERREXIT=on
+else
+  SHELL_ERREXIT=off
+fi
+
 echo "CrossAlpha frozen paper safe diagnostic"
 echo "repo=$REPO_DIR"
 echo "today_utc=$TODAY_UTC"
 echo "log=$LOG"
-echo "shell_errexit=$(set -o | awk '$1==\"errexit\" {print $2}')"
+echo "shell_errexit=$SHELL_ERREXIT"
 
 echo
 python --version || true
@@ -100,7 +106,7 @@ echo
 echo "Last 120 log lines:"
 tail -n 120 "$LOG" || true
 
-# Safety rule for interactive use: always return success to the caller.  The
-# real diagnostic result is reported above and persisted in the log.  This
+# Safety rule for interactive use: always return success to the caller. The
+# real diagnostic result is reported above and persisted in the log. This
 # prevents an interactive parent shell with `set -e` from closing its terminal.
 exit 0
