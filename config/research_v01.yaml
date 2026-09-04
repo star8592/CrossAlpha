@@ -3,6 +3,16 @@ frozen: true
 purpose: >-
   Test whether simple cross-asset trend, relative momentum and risk budgeting
   survive strict robustness checks before any regime/ML/onchain alpha is allowed.
+
+data_policy:
+  required_data_cost_usd: 0
+  paid_vendor_required: false
+  mode: free_proxy
+  note: >-
+    V0.1 studies freely reproducible investable economic-exposure proxies. It does
+    not claim to be a CME futures excess-return study. Paid futures data may only
+    be used later as an optional validation track.
+
 start: "2010-06-01"
 end: null
 rebalance: weekly
