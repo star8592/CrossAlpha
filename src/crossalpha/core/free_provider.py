@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +27,67 @@ FREE_CRYPTO_PROXIES: dict[str, str] = {
 
 FRED_CASH_SERIES = "DGS3MO"
 
+_PLACEHOLDER_TOKENS = {
+    "token",
+    "yourtoken",
+    "your_token",
+    "your-api-token",
+    "your_api_token",
+    "changeme",
+    "replace_me",
+    "example",
+}
+
 
 def _utc(value: str) -> pd.Timestamp:
     return pd.to_datetime(value, utc=True)
+
+
+def _normalized_secret(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def validate_tiingo_token(value: str | None) -> tuple[bool, str | None]:
+    """Validate only transport-safe properties without assuming a vendor token length."""
+    token = _normalized_secret(value)
+    if not token:
+        return False, "TIINGO_API_TOKEN is missing"
+    if not token.isascii():
+        return False, "TIINGO_API_TOKEN must contain ASCII characters only; replace placeholder text with the real token"
+    if any(character.isspace() for character in token):
+        return False, "TIINGO_API_TOKEN must not contain whitespace"
+    if token.lower() in _PLACEHOLDER_TOKENS or "yourtoken" in token.lower():
+        return False, "TIINGO_API_TOKEN still looks like a placeholder"
+    return True, None
+
+
+def validate_fred_api_key(value: str | None) -> tuple[bool, str | None]:
+    """FRED v1 API keys are 32-character lowercase alphanumeric strings."""
+    key = _normalized_secret(value)
+    if not key:
+        return False, "FRED_API_KEY is missing"
+    if not key.isascii():
+        return False, "FRED_API_KEY must contain ASCII characters only; replace placeholder text with the real key"
+    if re.fullmatch(r"[a-z0-9]{32}", key) is None:
+        return False, "FRED_API_KEY must be a 32-character lowercase alphanumeric key"
+    return True, None
+
+
+def free_credential_status(
+    tiingo_token: str | None,
+    fred_api_key: str | None,
+) -> dict[str, object]:
+    tiingo_valid, tiingo_error = validate_tiingo_token(tiingo_token)
+    fred_valid, fred_error = validate_fred_api_key(fred_api_key)
+    errors = [error for error in (tiingo_error, fred_error) if error]
+    return {
+        "tiingo_token_configured": bool(_normalized_secret(tiingo_token)),
+        "tiingo_token_valid": tiingo_valid,
+        "fred_api_key_configured": bool(_normalized_secret(fred_api_key)),
+        "fred_api_key_valid": fred_valid,
+        "ready": tiingo_valid and fred_valid,
+        "credential_errors": errors,
+    }
 
 
 @dataclass(frozen=True)
@@ -191,12 +250,14 @@ class FreeCoreProvider:
         fred_api_key: str,
         timeout: float = 30.0,
     ) -> None:
-        if not tiingo_token:
-            raise ValueError("TIINGO_API_TOKEN is required; the Starter account is free")
-        if not fred_api_key:
-            raise ValueError("FRED_API_KEY is required; FRED API keys are free")
-        self.tiingo_token = tiingo_token
-        self.fred_api_key = fred_api_key
+        tiingo_valid, tiingo_error = validate_tiingo_token(tiingo_token)
+        fred_valid, fred_error = validate_fred_api_key(fred_api_key)
+        if not tiingo_valid:
+            raise ValueError(tiingo_error)
+        if not fred_valid:
+            raise ValueError(fred_error)
+        self.tiingo_token = _normalized_secret(tiingo_token)
+        self.fred_api_key = _normalized_secret(fred_api_key)
         self.timeout = timeout
 
     def _client(self) -> httpx.Client:
