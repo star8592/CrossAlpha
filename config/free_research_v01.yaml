@@ -1,0 +1,83 @@
+protocol: CROSSALPHA_FREE_V0_1
+frozen: true
+data_policy:
+  required_data_cost_usd: 0
+  paid_vendor_required: false
+purpose: >-
+  Test whether simple cross-asset trend, relative momentum and risk budgeting
+  survive on a fully free, availability-aware economic-proxy universe before
+  any regime, ML, onchain alpha, leverage or shorting is allowed.
+universe:
+  risk_assets:
+    US_EQUITY: SPY
+    US_GROWTH: QQQ
+    GOLD: GLD
+    SILVER: SLV
+    COPPER: CPER
+    WTI: USO
+    BTC: BTCUSDT
+    ETH: ETHUSDT
+  cash: DGS3MO
+calendar:
+  type: daily_utc
+  start_inclusive: true
+  end_exclusive: true
+  closed_market_return: 0.0
+rebalance:
+  frequency: weekly
+  weekday: monday
+  execution_lag_calendar_days: 1
+allow_short: false
+max_gross_exposure: 1.0
+costs:
+  baseline_bps_per_one_way_turnover: 5.0
+  robustness_double_cost_bps: 10.0
+volatility:
+  window_calendar_days: 63
+  annualization_days: 365
+signals:
+  absolute_trend_calendar_days: 365
+  multi_horizon_calendar_days: [30, 90, 180, 365]
+  dual_momentum_top_fraction: 0.5
+hrp:
+  covariance_window_calendar_days: 126
+constraints:
+  single_asset_max: 0.25
+  sleeves:
+    crypto:
+      assets: [BTC, ETH]
+      max: 0.35
+    equity:
+      assets: [US_EQUITY, US_GROWTH]
+      max: 0.40
+    precious_metals:
+      assets: [GOLD, SILVER]
+      max: 0.35
+    industrials:
+      assets: [COPPER]
+      max: 0.25
+    energy:
+      assets: [WTI]
+      max: 0.25
+strategies:
+  B0: CASH
+  B1: EQUAL_WEIGHT
+  B2: INVERSE_VOLATILITY
+  B3: ABSOLUTE_TREND_EQUAL_WEIGHT
+  B4: ABSOLUTE_TREND_INVERSE_VOLATILITY
+  B5: MULTI_HORIZON_TREND_INVERSE_VOLATILITY
+  B6: DUAL_MOMENTUM_INVERSE_VOLATILITY
+  B7: MULTI_HORIZON_TREND_HRP
+validation_next_stage:
+  walk_forward: true
+  double_cost: true
+  leave_one_asset_out: true
+  leave_one_year_out: true
+  signal_delay_days: [1, 2, 3]
+  volatility_windows_calendar_days: [42, 63, 126]
+  trend_windows_calendar_days: [270, 315, 365, 420, 455]
+final_decisions:
+  - SUPPORTED
+  - PROMISING_BUT_UNPROVEN
+  - REJECTED
+  - INVALID_RESEARCH
