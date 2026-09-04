@@ -108,6 +108,36 @@ def append_indexes_unlocked(data_root: Path, record: RawSnapshotManifest) -> Non
     update_series_state(data_root, record)
 
 
+def load_recent_daily_manifests(
+    data_root: Path,
+    *,
+    days: int = 2,
+) -> tuple[list[RawSnapshotManifest], list[str]]:
+    """Read only the most recent daily manifest partitions for online materialization."""
+    if days < 1:
+        raise ValueError("days must be >= 1")
+    daily_root = data_root / "manifests" / "daily"
+    paths = sorted(daily_root.glob("year=*/month=*/day=*/raw_snapshots.jsonl")) if daily_root.exists() else []
+    selected = paths[-days:]
+    if not selected:
+        return [], [f"daily manifests missing under: {daily_root}"]
+
+    records: list[RawSnapshotManifest] = []
+    errors: list[str] = []
+    with manifest_lock(data_root):
+        for path in selected:
+            with path.open("r", encoding="utf-8") as fh:
+                for line_no, line in enumerate(fh, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        records.append(RawSnapshotManifest.model_validate_json(line))
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f"{path}: line {line_no}: {exc}")
+    return records, errors
+
+
 def rebuild_manifest_indexes(data_root: Path) -> dict[str, object]:
     """Rebuild derived daily manifests and series state from the immutable audit ledger."""
     audit_path = data_root / "manifests" / "raw_snapshots.jsonl"
