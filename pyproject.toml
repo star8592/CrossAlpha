@@ -40,6 +40,7 @@ crossalpha-free-paper-refresh = "crossalpha.core.free_commands:paper_refresh_mai
 crossalpha-free-paper-snapshot = "crossalpha.core.free_commands:paper_snapshot_main"
 crossalpha-free-paper-mark = "crossalpha.core.free_commands:paper_mark_main"
 crossalpha-free-paper-status = "crossalpha.core.free_commands:paper_status_main"
+crossalpha-state-shadow = "crossalpha.state.commands:shadow_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
