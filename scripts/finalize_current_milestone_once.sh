@@ -5,7 +5,7 @@
 #   * no historical robustness/bootstrap reruns
 #   * failures are collected and reported at the end
 #   * never closes an interactive parent terminal (always exits 0)
-#   * Frozen B3 paper hash must remain unchanged
+#   * Frozen B3 paper hash must remain unchanged after its freeze baseline is established
 #   * State Shadow remains fault-isolated from Core/Paper
 
 set -u -o pipefail
@@ -74,7 +74,8 @@ sha_or_missing() {
   fi
 }
 
-PAPER_HASH_BEFORE="$(sha_or_missing "$PAPER_FREEZE")"
+PAPER_HASH_AT_START="$(sha_or_missing "$PAPER_FREEZE")"
+PAPER_HASH_BASELINE="$PAPER_HASH_AT_START"
 TODAY_UTC="$(date -u +%F)"
 
 echo "CrossAlpha one-shot milestone finalizer"
@@ -82,7 +83,7 @@ echo "repo=$REPO_DIR"
 echo "data_root=$DATA_ROOT"
 echo "today_utc=$TODAY_UTC"
 echo "log=$LOG"
-echo "paper_hash_before=$PAPER_HASH_BEFORE"
+echo "paper_hash_at_start=$PAPER_HASH_AT_START"
 echo
 python --version || true
 git rev-parse --short HEAD || true
@@ -97,35 +98,48 @@ run_critical "A3. full pytest suite (single run)" pytest -q
 # Do not mutate services or ledgers if code validation failed.
 if [[ ${#FAILURES[@]} -eq 0 ]]; then
   # -------------------------------------------------------------------------
-  # Phase B: immutable Core/Paper validation.
+  # Phase B: establish/verify immutable Core/Paper baseline.
+  # Freeze is idempotent. If this machine had not frozen V0.1 yet, do it once
+  # here and only then establish the hash baseline used by all later isolation
+  # checks in this run.
   # -------------------------------------------------------------------------
   run_critical "B1. free Core credential/status gate" crossalpha free-core-status
-  run_critical "B2. Frozen B3 paper status" bash -lc "source .venv/bin/activate && crossalpha-free-paper-status > '$PAPER_STATUS_JSON' && cat '$PAPER_STATUS_JSON'"
-  run_critical "B3. Frozen B3 ledger integrity" python scripts/check_free_paper_integrity.py
+  run_critical "B2. ensure Frozen B3 protocol" crossalpha-free-paper-freeze --historical-start 2010-06-01 --historical-end 2026-09-01
+  PAPER_HASH_BASELINE="$(sha_or_missing "$PAPER_FREEZE")"
+  if [[ "$PAPER_HASH_BASELINE" == "MISSING" ]]; then
+    FAILURES+=("B2b. establish Frozen B3 paper hash::98")
+  fi
+  run_critical "B3. Frozen B3 paper status" bash -lc "source .venv/bin/activate && crossalpha-free-paper-status > '$PAPER_STATUS_JSON' && cat '$PAPER_STATUS_JSON'"
+  run_critical "B4. Frozen B3 ledger integrity" python scripts/check_free_paper_integrity.py
 
   # -------------------------------------------------------------------------
   # Phase C: install/update all local services idempotently.
   # Child scripts may use set -e; failures are captured here and cannot close
   # the parent interactive terminal.
   # -------------------------------------------------------------------------
-  run_critical "C1. install Observatory + materializer services" bash scripts/install_all_user_services.sh
-  run_critical "C2. install Frozen B3 paper services" bash scripts/install_free_paper_user_services.sh
+  if [[ ${#FAILURES[@]} -eq 0 ]]; then
+    run_critical "C1. install Observatory + materializer services" bash scripts/install_all_user_services.sh
+    run_critical "C2. install Frozen B3 paper services" bash scripts/install_free_paper_user_services.sh
+  fi
 
   # -------------------------------------------------------------------------
-  # Phase D: one current materialization; no historical research reruns.
+  # Phase D: one explicit current materialization; no historical research reruns.
   # -------------------------------------------------------------------------
-  run_critical "D1. materialize Observatory + State Shadow once" python scripts/materialize_observatory_and_state.py
-  run_critical "D2. compute current State Shadow" bash -lc "source .venv/bin/activate && crossalpha-state-shadow --no-write > '$STATE_STATUS_JSON' && cat '$STATE_STATUS_JSON'"
-  run_critical "D3. rebuild DuckDB catalog" crossalpha build-catalog
+  if [[ ${#FAILURES[@]} -eq 0 ]]; then
+    run_critical "D1. materialize Observatory + State Shadow once" python scripts/materialize_observatory_and_state.py
+    run_critical "D2. compute current State Shadow" bash -lc "source .venv/bin/activate && crossalpha-state-shadow --no-write > '$STATE_STATUS_JSON' && cat '$STATE_STATUS_JSON'"
+    run_critical "D3. rebuild DuckDB catalog" crossalpha build-catalog
 
-  # Live health is operationally important but may fail because of a transient
-  # upstream/network outage. Record it as a warning, not a code-integrity failure.
-  run_warning "D4. Observatory live health" crossalpha observatory-live-health
+    # Live health can fail because of a transient upstream/network outage. Keep
+    # that visible, but separate it from code/protocol integrity.
+    run_warning "D4. Observatory live health" crossalpha observatory-live-health
+  fi
 
   # -------------------------------------------------------------------------
   # Phase E: hard invariants, database visibility, service state.
   # -------------------------------------------------------------------------
-  run_critical "E1. final hard invariant audit" python - "$DATA_ROOT" "$PAPER_HASH_BEFORE" "$PAPER_STATUS_JSON" "$STATE_STATUS_JSON" <<'PY'
+  if [[ ${#FAILURES[@]} -eq 0 ]]; then
+    run_critical "E1. final hard invariant audit" python - "$DATA_ROOT" "$PAPER_HASH_BASELINE" "$PAPER_STATUS_JSON" "$STATE_STATUS_JSON" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -271,6 +285,7 @@ print(f"FINAL_STATUS_FILE={summary_path}")
 if errors:
     raise SystemExit(1)
 PY
+  fi
 fi
 
 # Always show systemd/timer context, even after a critical failure.
@@ -286,7 +301,7 @@ PAPER_HASH_FINAL="$(sha_or_missing "$PAPER_FREEZE")"
 export CROSSALPHA_FINAL_FAILURES="$(printf '%s\n' "${FAILURES[@]-}")"
 export CROSSALPHA_FINAL_WARNINGS="$(printf '%s\n' "${WARNINGS[@]-}")"
 export CROSSALPHA_FINAL_LOG="$LOG"
-export CROSSALPHA_FINAL_PAPER_HASH_BEFORE="$PAPER_HASH_BEFORE"
+export CROSSALPHA_FINAL_PAPER_HASH_BEFORE="$PAPER_HASH_BASELINE"
 export CROSSALPHA_FINAL_PAPER_HASH_FINAL="$PAPER_HASH_FINAL"
 python - "$SUMMARY" <<'PY'
 import json
@@ -329,7 +344,8 @@ if [[ ${#WARNINGS[@]} -gt 0 ]]; then
   echo "WARNING_COUNT=${#WARNINGS[@]}"
   printf 'WARNING=%s\n' "${WARNINGS[@]}"
 fi
-echo "PAPER_HASH_BEFORE=$PAPER_HASH_BEFORE"
+echo "PAPER_HASH_AT_START=$PAPER_HASH_AT_START"
+echo "PAPER_HASH_BASELINE=$PAPER_HASH_BASELINE"
 echo "PAPER_HASH_FINAL=$PAPER_HASH_FINAL"
 echo "LOG=$LOG"
 echo "LATEST_LOG=$LATEST"
