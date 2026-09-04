@@ -161,6 +161,27 @@ def test_stablecoin_state_does_not_turn_unknown_into_zero() -> None:
     assert row["chain_abs_residual_native"] == pytest.approx(50.0)
 
 
+def test_stablecoin_chain_group_all_unknown_stays_null() -> None:
+    now = datetime(2026, 9, 4, 13, 0, tzinfo=timezone.utc)
+    assets, chains = _frames(now)
+    unknown = {
+        "observed_at": now,
+        "known_at": now,
+        "stablecoin_id": "unknown",
+        "symbol": "UNK",
+        "peg_type": "peggedUSD",
+        "chain": "UnknownChain",
+        "circulating_native": None,
+        "market_value_usd": None,
+        "raw_sha256": "z",
+    }
+    chains = pd.concat([chains, pd.DataFrame([unknown])], ignore_index=True)
+    _, chain_state = compute_stablecoin_system_state(assets, chains)
+    row = chain_state.loc[chain_state["chain"] == "UnknownChain"].iloc[0]
+    assert pd.isna(row["circulating_native"])
+    assert pd.isna(row["market_value_usd"])
+
+
 def test_stablecoin_materialization_and_query_return_latest_snapshot(tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 4, 13, 0, tzinfo=timezone.utc)
     latest = t0 + timedelta(minutes=5)
