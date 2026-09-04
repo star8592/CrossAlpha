@@ -33,6 +33,8 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     stablecoin_system_glob = stablecoin_system_root / "**" / "*.parquet"
     stablecoin_chain_state_root = data_root / "derived" / "stablecoins" / "chain_state"
     stablecoin_chain_state_glob = stablecoin_chain_state_root / "**" / "*.parquet"
+    state_shadow_root = data_root / "derived" / "state" / "shadow_v01"
+    state_shadow_glob = state_shadow_root / "**" / "*.parquet"
     free_core_returns_root = data_root / "derived" / "core" / "free_v01"
     free_core_returns_glob = free_core_returns_root / "**" / "asset_returns.parquet"
 
@@ -41,6 +43,7 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     try:
         con.execute("CREATE SCHEMA IF NOT EXISTS observatory")
         con.execute("CREATE SCHEMA IF NOT EXISTS core")
+        con.execute("CREATE SCHEMA IF NOT EXISTS state_engine")
         for view in (
             "observatory.raw_manifest",
             "observatory.hyperliquid_asset_contexts",
@@ -49,6 +52,7 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.stablecoin_chain_supply",
             "observatory.stablecoin_system_state",
             "observatory.stablecoin_chain_state",
+            "state_engine.shadow_v01",
             "core.free_asset_returns",
         ):
             con.execute(f"DROP VIEW IF EXISTS {view}")
@@ -107,6 +111,14 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.stablecoin_chain_state")
+
+        if _has_parquet(state_shadow_root):
+            con.execute(
+                "CREATE VIEW state_engine.shadow_v01 AS "
+                f"SELECT * FROM read_parquet({_sql_string(state_shadow_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("state_engine.shadow_v01")
 
         if _has_parquet(free_core_returns_root):
             con.execute(
