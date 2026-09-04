@@ -6,11 +6,11 @@ CrossAlpha is a research-first, crypto-native systematic global macro platform. 
 
 - **Core Engine**: long-history cross-asset trend / momentum / risk research.
 - **Observatory**: immutable point-in-time capital-state data collection.
-- **Market Engine**: funding / basis / liquidity / instrument / venue routing (later phase).
+- **Market Engine**: funding / basis / liquidity / instrument / venue routing.
 
-## Current milestone: V0.1 + Observatory O0.2
+## Current milestone: V0.1 + Observatory O0.3
 
-V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory O0.2 keeps immutable raw point-in-time facts while adding rebuildable daily manifests, per-series state, canonical Hyperliquid market-state Parquet and a local DuckDB research catalog.
+V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory O0.3 keeps immutable raw point-in-time facts, rebuildable indexes/canonical data, and adds a causal descriptive Hyperliquid market-state feature layer. No composite risk or trading score is emitted yet.
 
 ### Frozen research universe
 
@@ -63,13 +63,14 @@ Start one public Observatory collection:
 crossalpha collect-observatory
 ```
 
-Check freshness and latest-file integrity:
+Check full historical freshness/gap audit or constant-time live health:
 
 ```bash
 crossalpha observatory-health
+crossalpha observatory-live-health
 ```
 
-For unattended collection on Linux:
+For unattended raw collection on Linux:
 
 ```bash
 bash scripts/install_user_service.sh
@@ -77,7 +78,7 @@ systemctl --user status crossalpha-observatory.service
 journalctl --user -u crossalpha-observatory.service -f
 ```
 
-## O0.2 derived indexes and canonical research layer
+## O0.2 indexes and canonical layer
 
 The global audit manifest remains immutable. Derived indexes can always be deleted and rebuilt from it:
 
@@ -100,7 +101,34 @@ Convert Hyperliquid `metaAndAssetCtxs` raw envelopes into typed per-asset Parque
 crossalpha canonicalize-hyperliquid
 ```
 
-Build the local DuckDB catalog:
+## O0.3 market-state layer
+
+Build causal descriptive features from canonical Hyperliquid observations:
+
+```bash
+crossalpha build-market-state
+```
+
+Current features include:
+
+- mark/oracle basis in bps;
+- impact-price spread in bps;
+- day return;
+- current funding and premium in bps;
+- estimated open-interest notional (`open_interest * mark_price`);
+- observation-to-observation OI/funding/basis changes;
+- causal 24h rolling z-scores for funding, basis, OI change and impact spread;
+- rolling observation count to make insufficient history explicit.
+
+The 24h z-scores require at least 24 observations; before that they remain null rather than manufacturing an early signal.
+
+Run the full rebuildable derived pipeline in one command:
+
+```bash
+crossalpha materialize-observatory
+```
+
+Build/rebuild the local DuckDB catalog:
 
 ```bash
 crossalpha build-catalog
@@ -112,12 +140,30 @@ The database is stored at:
 /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb
 ```
 
-Example local query:
+Query latest BTC/ETH state without writing SQL:
+
+```bash
+crossalpha market-state --asset BTC --asset ETH
+```
+
+Or query DuckDB directly:
 
 ```bash
 duckdb /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb \
-  -c "select observed_at, asset, mark_price, funding_rate, open_interest from observatory.hyperliquid_asset_contexts where asset='BTC' order by observed_at desc limit 20;"
+  -c "select observed_at, asset, mark_price, funding_bps, mark_oracle_basis_bps, open_interest_notional from observatory.hyperliquid_market_state where asset='BTC' order by observed_at desc limit 20;"
 ```
+
+### Independent derived-data timer
+
+Raw collection is the critical path; canonicalization/features/catalog are deliberately isolated in a separate timer so a parser/feature failure cannot stop raw history accumulation.
+
+```bash
+bash scripts/install_materializer_timer.sh
+systemctl --user status crossalpha-materializer.timer
+journalctl --user -u crossalpha-materializer.service -n 100 --no-pager
+```
+
+The materializer runs every 15 minutes. Raw collection remains every 5 minutes.
 
 ## Core V0.1
 
@@ -136,6 +182,8 @@ crossalpha fetch-core --start 2010-06-01
 - Manifest records keep both uncompressed `bytes` and, for new snapshots, `compressed_bytes`.
 - `observed_at` and `known_at` are preserved for point-in-time research.
 - Historical gaps are reported, not silently filled.
+- Audit-manifest reads are locked against concurrent appends.
+- Canonical and derived Parquet writes use temporary files plus atomic replacement.
 - `canonical/`, `derived/`, `catalog/`, and manifest indexes are disposable/rebuildable; `raw/` and the global audit ledger are not.
 
 ## Repository policy
