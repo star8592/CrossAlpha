@@ -43,6 +43,8 @@ def _series_audit(
     price_col: str,
     expected_assets: set[str],
     source_name: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
 ) -> dict[str, Any]:
     missing_columns = sorted({"date", asset_col, price_col} - set(frame.columns))
     if missing_columns:
@@ -72,6 +74,8 @@ def _series_audit(
                 "duplicate_dates": 0,
                 "null_price": 0,
                 "non_positive_price": 0,
+                "rows_before_start": 0,
+                "rows_at_or_after_exclusive_end": 0,
                 "max_calendar_gap_days": None,
             }
             source_ok = False
@@ -80,9 +84,17 @@ def _series_audit(
         duplicate_dates = int(part["date"].duplicated().sum())
         null_price = int(part[price_col].isna().sum())
         non_positive = int((part[price_col].dropna() <= 0).sum())
+        rows_before_start = int((part["date"] < start).sum())
+        rows_after_end = int((part["date"] >= end).sum())
         gaps = part["date"].diff().dt.total_seconds().div(86_400.0).dropna()
         max_gap = float(gaps.max()) if not gaps.empty else None
-        item_ok = duplicate_dates == 0 and null_price == 0 and non_positive == 0
+        item_ok = (
+            duplicate_dates == 0
+            and null_price == 0
+            and non_positive == 0
+            and rows_before_start == 0
+            and rows_after_end == 0
+        )
         source_ok = source_ok and item_ok
         series[asset] = {
             "ok": item_ok,
@@ -92,6 +104,8 @@ def _series_audit(
             "duplicate_dates": duplicate_dates,
             "null_price": null_price,
             "non_positive_price": non_positive,
+            "rows_before_start": rows_before_start,
+            "rows_at_or_after_exclusive_end": rows_after_end,
             "max_calendar_gap_days": max_gap,
         }
 
@@ -122,6 +136,7 @@ def audit_free_core(
             "ok": False,
             "mode": "free_only",
             "data_cost_usd": 0,
+            "range_semantics": "start_inclusive_end_exclusive",
             "start": value.start,
             "end": value.end,
             "missing_files": missing_files,
@@ -134,6 +149,8 @@ def audit_free_core(
             )
         return report
 
+    start = pd.to_datetime(value.start, utc=True).normalize()
+    end = pd.to_datetime(value.end, utc=True).normalize()
     tradfi = pd.read_parquet(paths["tradfi"])
     crypto = pd.read_parquet(paths["crypto"])
     cash = pd.read_parquet(paths["cash"])
@@ -144,6 +161,8 @@ def audit_free_core(
         price_col="adj_close",
         expected_assets=set(FREE_TRADFI_PROXIES),
         source_name="tiingo_eod",
+        start=start,
+        end=end,
     )
     crypto_audit = _series_audit(
         crypto,
@@ -151,21 +170,33 @@ def audit_free_core(
         price_col="close",
         expected_assets=set(FREE_CRYPTO_PROXIES),
         source_name="binance_spot_public",
+        start=start,
+        end=end,
     )
 
     cash = cash.copy()
     cash["date"] = pd.to_datetime(cash["date"], utc=True)
     cash["rate_percent"] = pd.to_numeric(cash["rate_percent"], errors="coerce")
     cash_duplicates = int(cash["date"].duplicated().sum())
+    cash_before_start = int((cash["date"] < start).sum())
+    cash_after_end = int((cash["date"] >= end).sum())
     known_cash = cash.loc[cash["rate_percent"].notna()].sort_values("date")
     cash_audit = {
-        "ok": bool(len(cash) > 0 and cash_duplicates == 0 and not known_cash.empty),
+        "ok": bool(
+            len(cash) > 0
+            and cash_duplicates == 0
+            and cash_before_start == 0
+            and cash_after_end == 0
+            and not known_cash.empty
+        ),
         "source": "fred",
         "series_id": FRED_CASH_SERIES,
         "rows": int(len(cash)),
         "known_rate_rows": int(len(known_cash)),
         "missing_rate_rows": int(cash["rate_percent"].isna().sum()),
         "duplicate_dates": cash_duplicates,
+        "rows_before_start": cash_before_start,
+        "rows_at_or_after_exclusive_end": cash_after_end,
         "start": cash["date"].min().isoformat() if not cash.empty else None,
         "end": cash["date"].max().isoformat() if not cash.empty else None,
         "first_known_rate": known_cash["date"].iloc[0].isoformat() if not known_cash.empty else None,
@@ -176,6 +207,7 @@ def audit_free_core(
         "ok": bool(tradfi_audit["ok"] and crypto_audit["ok"] and cash_audit["ok"]),
         "mode": "free_only",
         "data_cost_usd": 0,
+        "range_semantics": "start_inclusive_end_exclusive",
         "start": value.start,
         "end": value.end,
         "missing_files": [],
@@ -270,6 +302,7 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
     return {
         "mode": "free_only",
         "data_cost_usd": 0,
+        "range_semantics": "start_inclusive_end_exclusive",
         "rows": int(len(combined)),
         "assets": sorted(coverage),
         "coverage": coverage,
