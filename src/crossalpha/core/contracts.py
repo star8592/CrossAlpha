@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from numbers import Integral
 from pathlib import Path
 
 import pandas as pd
@@ -7,9 +8,9 @@ import pandas as pd
 
 def _class_code(value: object) -> str:
     raw = getattr(value, "value", value)
-    if isinstance(raw, int) and 0 <= raw <= 255:
+    if isinstance(raw, Integral) and 0 <= int(raw) <= 255:
         try:
-            return chr(raw)
+            return chr(int(raw))
         except ValueError:
             pass
     text = str(raw)
@@ -87,7 +88,6 @@ def normalize_parent_futures_daily(
     for instrument_id, bar_part in bars.groupby("instrument_id", sort=False):
         def_part = defs.loc[defs["instrument_id"] == instrument_id, definition_columns].copy()
         if def_part.empty:
-            # Parent OHLCV includes spreads; unmatched records are intentionally dropped.
             continue
         bar_part = bar_part.sort_values(bar_time_col)
         def_part = def_part.sort_values(definition_time_col)
