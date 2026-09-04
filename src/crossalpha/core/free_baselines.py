@@ -287,7 +287,12 @@ def _hrp_weights(history: pd.DataFrame) -> pd.Series:
         return pd.Series({assets[0]: 1.0})
     cov = clean.cov()
     corr = clean.corr().fillna(0.0)
-    np.fill_diagonal(corr.values, 1.0)
+    # Pandas 3 copy-on-write may expose .values as a read-only NumPy view.
+    # HRP only needs a correlation matrix with an exact unit diagonal, so make
+    # an explicit writable copy rather than mutating pandas-owned memory.
+    corr_values = corr.to_numpy(dtype=float, copy=True)
+    np.fill_diagonal(corr_values, 1.0)
+    corr = pd.DataFrame(corr_values, index=corr.index, columns=corr.columns)
     order = _hrp_leaf_order(corr)
     weights = pd.Series(1.0, index=order, dtype=float)
     clusters = [order]
