@@ -68,14 +68,35 @@ strategies:
   B5: MULTI_HORIZON_TREND_INVERSE_VOLATILITY
   B6: DUAL_MOMENTUM_INVERSE_VOLATILITY
   B7: MULTI_HORIZON_TREND_HRP
-validation_next_stage:
-  walk_forward: true
+validation_stage1:
   double_cost: true
   leave_one_asset_out: true
   leave_one_year_out: true
   signal_delay_days: [1, 2, 3]
   volatility_windows_calendar_days: [42, 63, 126]
   trend_windows_calendar_days: [270, 315, 365, 420, 455]
+validation_stage2:
+  focus_strategies: [B3, B4]
+  parameter_family_size: 15
+  circular_block_bootstrap:
+    block_days: [21, 63]
+    replications: 2000
+    deterministic_seed: 8592
+  deflated_sharpe:
+    approximation: bailey_lopez_de_prado_style
+    minimum_probability: 0.95
+  cscv_pbo:
+    contiguous_slices: 8
+    split_count: 70
+    maximum_pbo: 0.25
+  walk_forward:
+    training_years: 4
+    testing_years: 1
+    rolling_step_years: 1
+    include_parameter_switch_turnover: true
+    minimum_positive_fold_share: 0.60
+    selected_oos_sharpe_must_be_positive: true
+  screening_only: true
 final_decisions:
   - SUPPORTED
   - PROMISING_BUT_UNPROVEN
