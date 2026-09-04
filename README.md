@@ -24,18 +24,29 @@ ES, NQ, GC, SI, HG, CL, CME BTC futures, CME ETH futures, plus cash in the later
 
 No wallet labeling, whale-following or alpha inference is performed in O0.
 
-## Local quick start
+## Local deployment layout
+
+This deployment uses the dedicated 16 TB `/mnt/disk2` volume:
+
+```text
+/mnt/disk2/
+├── CrossAlpha/       # Git repository / source code
+└── CrossAlphaData/   # raw, canonical, derived and manifest data
+```
+
+Clone the repository:
 
 ```bash
+cd /mnt/disk2
 git clone https://github.com/star8592/CrossAlpha.git
 cd CrossAlpha
 bash scripts/bootstrap_local.sh
 ```
 
-Edit `.env` and preferably store data outside the Git working tree:
+The generated `.env` defaults to:
 
 ```bash
-CROSSALPHA_DATA_DIR=/mnt/disk1/CrossAlphaData
+CROSSALPHA_DATA_DIR=/mnt/disk2/CrossAlphaData
 DATABENTO_API_KEY=db-...
 ```
 
@@ -45,6 +56,12 @@ Start public Observatory collection immediately:
 source .venv/bin/activate
 crossalpha collect-observatory
 python scripts/collect_loop.py --interval 300
+```
+
+For unattended collection on Linux:
+
+```bash
+bash scripts/install_user_service.sh
 ```
 
 Fetch first-pass core historical futures staging data:
@@ -57,6 +74,6 @@ crossalpha fetch-core --start 2010-06-01
 
 ## Repository policy
 
-GitHub stores source code, config, tests and research protocol only. Raw market/onchain data, backtests and heavy compute remain local.
+GitHub stores source code, config, tests and research protocol only. Raw market/onchain data, backtests and heavy compute remain local under `/mnt/disk2/CrossAlphaData`.
 
 See `docs/ARCHITECTURE.md` and `docs/LOCAL_DATA.md`.
