@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +23,24 @@ def _partition_day(path: Path) -> date:
     month_value = int(path.parent.parent.name.split("=", 1)[1])
     year_value = int(path.parent.parent.parent.name.split("=", 1)[1])
     return date(year_value, month_value, day_value)
+
+
+def _day_dir(root: Path, value: date) -> Path:
+    return root / f"year={value:%Y}" / f"month={value:%m}" / f"day={value:%d}"
+
+
+def _latest_stablecoin_day_from_series_state(data_root: Path) -> date:
+    path = data_root / "manifests" / "series" / "defillama" / "stablecoins_snapshot.json"
+    if not path.exists():
+        raise FileNotFoundError(f"DefiLlama series state missing: {path}")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    latest = state.get("latest_observed_at")
+    if not isinstance(latest, str):
+        raise ValueError("DefiLlama series state has no latest_observed_at")
+    latest_dt = datetime.fromisoformat(latest)
+    if latest_dt.tzinfo is None:
+        latest_dt = latest_dt.replace(tzinfo=timezone.utc)
+    return latest_dt.astimezone(timezone.utc).date()
 
 
 def compute_stablecoin_system_state(
@@ -191,18 +210,70 @@ def compute_stablecoin_system_state(
             )
 
     system = pd.DataFrame(system_rows).sort_values("observed_at").reset_index(drop=True)
-    chain_state = pd.DataFrame(chain_rows).sort_values(["observed_at", "market_value_usd"], ascending=[True, False]).reset_index(drop=True)
+    chain_state = pd.DataFrame(chain_rows).sort_values(
+        ["observed_at", "market_value_usd"], ascending=[True, False]
+    ).reset_index(drop=True)
     return system, chain_state
+
+
+def _write_state_day(data_root: Path, current_day: date, asset_files: list[Path], chain_files: list[Path]) -> tuple[int, int]:
+    if not asset_files or not chain_files:
+        raise ValueError(f"missing canonical stablecoin inputs for {current_day}")
+    assets = pd.concat((pd.read_parquet(path) for path in asset_files), ignore_index=True)
+    chains = pd.concat((pd.read_parquet(path) for path in chain_files), ignore_index=True)
+    system, chain_state = compute_stablecoin_system_state(assets, chains)
+
+    output_system_root = data_root / "derived" / "stablecoins" / "system_state"
+    output_chain_root = data_root / "derived" / "stablecoins" / "chain_state"
+    sys_dir = _day_dir(output_system_root, current_day)
+    chn_dir = _day_dir(output_chain_root, current_day)
+    sys_dir.mkdir(parents=True, exist_ok=True)
+    chn_dir.mkdir(parents=True, exist_ok=True)
+    sys_path = sys_dir / "stablecoin_system_state.parquet"
+    chn_path = chn_dir / "stablecoin_chain_state.parquet"
+    sys_tmp = sys_path.with_suffix(".parquet.tmp")
+    chn_tmp = chn_path.with_suffix(".parquet.tmp")
+    system.to_parquet(sys_tmp, index=False)
+    chain_state.to_parquet(chn_tmp, index=False)
+    sys_tmp.replace(sys_path)
+    chn_tmp.replace(chn_path)
+    return len(system), len(chain_state)
 
 
 def build_stablecoin_state(data_root: Path, *, recent_only: bool = False) -> dict[str, int | str]:
     asset_root = data_root / "canonical" / "defillama" / "stablecoin_assets"
     chain_root = data_root / "canonical" / "defillama" / "stablecoin_chain_supply"
-    asset_files = sorted(asset_root.glob("**/*.parquet")) if asset_root.exists() else []
-    chain_files = sorted(chain_root.glob("**/*.parquet")) if chain_root.exists() else []
-    if not asset_files or not chain_files:
+    if not asset_root.exists() or not chain_root.exists():
         return {
             "mode": "recent" if recent_only else "full",
+            "asset_source_files": 0,
+            "chain_source_files": 0,
+            "days": 0,
+            "written_days": 0,
+            "rows_written": 0,
+            "chain_rows_written": 0,
+        }
+
+    if recent_only:
+        latest_day = _latest_stablecoin_day_from_series_state(data_root)
+        asset_files = sorted(_day_dir(asset_root, latest_day).glob("*.parquet"))
+        chain_files = sorted(_day_dir(chain_root, latest_day).glob("*.parquet"))
+        rows, chain_rows = _write_state_day(data_root, latest_day, asset_files, chain_files)
+        return {
+            "mode": "recent",
+            "asset_source_files": len(asset_files),
+            "chain_source_files": len(chain_files),
+            "days": 1,
+            "written_days": 1,
+            "rows_written": rows,
+            "chain_rows_written": chain_rows,
+        }
+
+    asset_files = sorted(asset_root.glob("**/*.parquet"))
+    chain_files = sorted(chain_root.glob("**/*.parquet"))
+    if not asset_files or not chain_files:
+        return {
+            "mode": "full",
             "asset_source_files": len(asset_files),
             "chain_source_files": len(chain_files),
             "days": 0,
@@ -218,38 +289,23 @@ def build_stablecoin_state(data_root: Path, *, recent_only: bool = False) -> dic
     for path in chain_files:
         chains_by_day[_partition_day(path)].append(path)
     days = sorted(set(assets_by_day) & set(chains_by_day))
-    if recent_only and days:
-        days = [days[-1]]
 
-    output_system_root = data_root / "derived" / "stablecoins" / "system_state"
-    output_chain_root = data_root / "derived" / "stablecoins" / "chain_state"
     written_days = 0
     rows_written = 0
     chain_rows_written = 0
-
     for current_day in days:
-        assets = pd.concat((pd.read_parquet(path) for path in assets_by_day[current_day]), ignore_index=True)
-        chains = pd.concat((pd.read_parquet(path) for path in chains_by_day[current_day]), ignore_index=True)
-        system, chain_state = compute_stablecoin_system_state(assets, chains)
-
-        sys_dir = output_system_root / f"year={current_day:%Y}" / f"month={current_day:%m}" / f"day={current_day:%d}"
-        chn_dir = output_chain_root / f"year={current_day:%Y}" / f"month={current_day:%m}" / f"day={current_day:%d}"
-        sys_dir.mkdir(parents=True, exist_ok=True)
-        chn_dir.mkdir(parents=True, exist_ok=True)
-        sys_path = sys_dir / "stablecoin_system_state.parquet"
-        chn_path = chn_dir / "stablecoin_chain_state.parquet"
-        sys_tmp = sys_path.with_suffix(".parquet.tmp")
-        chn_tmp = chn_path.with_suffix(".parquet.tmp")
-        system.to_parquet(sys_tmp, index=False)
-        chain_state.to_parquet(chn_tmp, index=False)
-        sys_tmp.replace(sys_path)
-        chn_tmp.replace(chn_path)
+        rows, chain_rows = _write_state_day(
+            data_root,
+            current_day,
+            assets_by_day[current_day],
+            chains_by_day[current_day],
+        )
         written_days += 1
-        rows_written += len(system)
-        chain_rows_written += len(chain_state)
+        rows_written += rows
+        chain_rows_written += chain_rows
 
     return {
-        "mode": "recent" if recent_only else "full",
+        "mode": "full",
         "asset_source_files": len(asset_files),
         "chain_source_files": len(chain_files),
         "days": len(days),
