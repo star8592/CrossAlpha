@@ -126,6 +126,7 @@ def test_stablecoin_state_keeps_usd_accounting_and_conservation_explicit() -> No
     assert row["usd_supply_native"] == pytest.approx(150.0)
     assert row["usd_market_value_usd"] == pytest.approx(149.95)
     assert row["usd_delta_1d_native"] == pytest.approx(5.0)
+    assert row["delta_1d_market_value_coverage"] == pytest.approx(1.0)
     assert row["chain_coverage_ratio"] == pytest.approx(1.0)
     assert row["chain_abs_residual_ratio"] == pytest.approx(0.0)
     assert row["usdt_share"] == pytest.approx(100.0 / 149.95)
@@ -144,6 +145,20 @@ def test_stablecoin_state_reports_chain_coverage_residual_without_hiding_it() ->
     assert row["chain_residual_native"] == pytest.approx(-10.0)
     assert row["chain_abs_residual_native"] == pytest.approx(10.0)
     assert row["chain_abs_residual_ratio"] == pytest.approx(10.0 / 150.0)
+
+
+def test_stablecoin_state_does_not_turn_unknown_into_zero() -> None:
+    now = datetime(2026, 9, 4, 13, 0, tzinfo=timezone.utc)
+    assets, chains = _frames(now)
+    assets.loc[assets["symbol"] == "USDC", "delta_1d_native"] = None
+    chains = chains.loc[chains["stablecoin_id"] != "usdc"].copy()
+
+    system, _ = compute_stablecoin_system_state(assets, chains)
+    row = system.iloc[0]
+    assert row["usd_delta_1d_native"] == pytest.approx(3.0)
+    assert row["delta_1d_market_value_coverage"] == pytest.approx(100.0 / 149.95)
+    assert row["chain_coverage_ratio"] == pytest.approx(100.0 / 150.0)
+    assert row["chain_abs_residual_native"] == pytest.approx(50.0)
 
 
 def test_stablecoin_materialization_and_query_return_latest_snapshot(tmp_path: Path) -> None:
@@ -174,5 +189,6 @@ def test_stablecoin_materialization_and_query_return_latest_snapshot(tmp_path: P
     state = latest_stablecoin_state(tmp_path, top_chains=2)
     assert state["system"] is not None
     assert state["system"]["observed_at"] == latest
+    assert state["system"]["delta_1d_market_value_coverage"] == pytest.approx(1.0)
     assert len(state["top_chains"]) == 2
     assert state["top_chains"][0]["chain"] == "Ethereum"
