@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from crossalpha.core.free_dataset import audit_free_core, build_free_core_returns
 from crossalpha.core.free_provider import FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FreeCoreRange
@@ -46,9 +47,21 @@ def _write_fixture(root: Path, value: FreeCoreRange) -> None:
 
     pd.DataFrame(
         [
-            {"date": pd.Timestamp("2026-01-02", tz="UTC"), "series_id": "DGS3MO", "rate_percent": 4.0},
-            {"date": pd.Timestamp("2026-01-03", tz="UTC"), "series_id": "DGS3MO", "rate_percent": None},
-            {"date": pd.Timestamp("2026-01-05", tz="UTC"), "series_id": "DGS3MO", "rate_percent": 4.1},
+            {
+                "date": pd.Timestamp("2026-01-02", tz="UTC"),
+                "series_id": "DGS3MO",
+                "rate_percent": 4.0,
+            },
+            {
+                "date": pd.Timestamp("2026-01-03", tz="UTC"),
+                "series_id": "DGS3MO",
+                "rate_percent": None,
+            },
+            {
+                "date": pd.Timestamp("2026-01-05", tz="UTC"),
+                "series_id": "DGS3MO",
+                "rate_percent": 4.1,
+            },
         ]
     ).to_parquet(cash / "DGS3MO.parquet", index=False)
 
@@ -80,7 +93,7 @@ def test_free_core_returns_do_not_fill_before_asset_inception(tmp_path: Path) ->
     btc = frame.loc[frame["economic_asset"] == "BTC"].sort_values("date")
     assert len(btc) == 3
     assert pd.isna(btc.iloc[0]["return"])
-    assert btc.iloc[1]["return"] == 0.1
+    assert btc.iloc[1]["return"] == pytest.approx(0.1)
 
 
 def test_cash_return_uses_only_prior_known_rate(tmp_path: Path) -> None:
