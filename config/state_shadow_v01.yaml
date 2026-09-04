@@ -1,0 +1,58 @@
+protocol: CROSSALPHA_STATE_SHADOW_V0_1
+mode: SHADOW_ONLY
+frozen_core_reference: CROSSALPHA_FREE_V0_1
+purpose: >-
+  Test whether independently observed capital-state stress can reduce risk during
+  bad periods without changing Frozen B3's relative asset weights, selection rules,
+  parameters, or prospective paper ledger.
+core_mutation_allowed: false
+alpha_selection_allowed: false
+risk_increase_allowed: false
+focus_assets: [BTC, ETH]
+data_policy:
+  required_data_cost_usd: 0
+  hyperliquid: public market state
+  stablecoins: DefiLlama public stablecoin state
+point_in_time:
+  observed_at_must_be_lte_as_of: true
+  known_at_must_be_lte_generated_at: true
+  max_source_age_minutes: 30
+hyperliquid:
+  minimum_rolling_observations_24h: 24
+  inputs:
+    - funding_z_24h
+    - basis_z_24h
+    - oi_change_z_24h
+    - spread_z_24h
+  component_rule: equal_mean_of_positive_clipped_zscores
+  full_stress_z: 3.0
+  aggregate_rule: max_of_BTC_ETH
+stablecoins:
+  minimum_delta_7d_market_value_coverage: 0.80
+  chain_coverage_range: [0.98, 1.02]
+  maximum_chain_abs_residual_ratio: 0.02
+  supply_contraction_full_stress_ratio: 0.02
+  peg_full_stress_bps: 100.0
+  aggregate_rule: max_supply_contraction_or_weighted_peg_stress
+system_pressure:
+  aggregate_rule: max_valid_component
+  unknown_policy: no_modifier
+risk_multiplier:
+  normal:
+    pressure_lt: 0.3333333333333333
+    multiplier: 1.0
+  moderate:
+    pressure_gte: 0.3333333333333333
+    pressure_lt: 0.6666666666666666
+    multiplier: 0.75
+  severe:
+    pressure_gte: 0.6666666666666666
+    multiplier: 0.50
+application:
+  risky_assets_scaled_uniformly: true
+  released_notional_goes_to_cash: true
+  changes_relative_core_weights: false
+  writes_to_frozen_B3_paper_ledger: false
+research_maturity:
+  current: O1_DESCRIPTION_TO_O2_SHADOW
+  promotion_requires_prospective_AB_evidence: true
