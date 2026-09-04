@@ -97,6 +97,31 @@ validation_stage2:
     minimum_positive_fold_share: 0.60
     selected_oos_sharpe_must_be_positive: true
   screening_only: true
+prospective_validation:
+  candidate: B3
+  role: FROZEN_CORE_V0_1_CANDIDATE
+  parameter_optimization_allowed: false
+  snapshots:
+    frequency: weekly
+    weekday: monday_utc
+    historical_backfill_allowed: false
+    immutable: true
+  marks:
+    frequency: daily
+    immutable: true
+    vendor_history_rewrite_allowed: false
+  supported_gate:
+    minimum_calendar_days: 730
+    minimum_weekly_snapshots: 90
+    minimum_sharpe_excess_cash: 0.25
+    cumulative_return_must_exceed_cash: true
+    ledger_integrity_required: true
+    implementation_hash_must_be_unchanged: true
+    protocol_mutation_allowed: false
+  interpretation: >-
+    Historical evidence can nominate B3 as PROMISING_BUT_UNPROVEN but cannot
+    upgrade it to SUPPORTED. Only genuinely prospective immutable paper records
+    generated after the protocol freeze can satisfy the supported gate.
 final_decisions:
   - SUPPORTED
   - PROMISING_BUT_UNPROVEN
