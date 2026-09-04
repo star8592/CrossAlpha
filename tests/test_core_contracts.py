@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -108,7 +109,7 @@ def test_definition_join_is_point_in_time_not_latest_revision() -> None:
     assert result.iloc[1]["definition_known_at"] == pd.Timestamp("2026-02-01", tz="UTC")
 
 
-def test_future_instrument_class_integer_code_is_supported() -> None:
+def test_future_instrument_class_numpy_integer_code_is_supported() -> None:
     bars = pd.DataFrame(
         [
             {
@@ -129,7 +130,7 @@ def test_future_instrument_class_integer_code_is_supported() -> None:
                 "instrument_id": 1,
                 "raw_symbol": "ESH6",
                 "expiration": "2026-03-20T13:30:00Z",
-                "instrument_class": ord("F"),
+                "instrument_class": np.uint8(ord("F")),
             }
         ]
     )
