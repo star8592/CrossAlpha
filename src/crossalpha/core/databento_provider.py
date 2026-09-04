@@ -47,7 +47,18 @@ class DatabentoCoreProvider:
             kwargs["end"] = end
         return kwargs
 
+    @staticmethod
+    def _refuse_existing(path: Path) -> None:
+        if path.exists():
+            raise FileExistsError(
+                f"refusing duplicate paid download because output already exists: {path}"
+            )
+
     def fetch_continuous_daily(self, request: DatabentoRequest, output_dir: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = output_dir / "continuous_daily.parquet"
+        self._refuse_existing(out)
+
         _, client = self._client()
         kwargs: dict[str, object] = {
             "dataset": request.dataset,
@@ -59,8 +70,6 @@ class DatabentoCoreProvider:
         self._with_optional_end(kwargs, request.end)
         data = client.timeseries.get_range(**kwargs)
         df = data.to_df()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        out = output_dir / "continuous_daily.parquet"
         df.to_parquet(out)
         return out
 
@@ -78,11 +87,11 @@ class DatabentoCoreProvider:
         return float(client.metadata.get_cost(**kwargs))
 
     def fetch_parent_definitions(self, request: ParentFuturesRequest, output_dir: Path) -> Path:
-        """Fetch point-in-time parent definitions, including outrights and spreads.
+        """Fetch point-in-time parent definitions, including outrights and spreads."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = output_dir / "parent_definitions.parquet"
+        self._refuse_existing(out)
 
-        Filtering to outright futures is deliberately deferred to canonicalization so
-        the raw staging file preserves exactly what the parent request returned.
-        """
         _, client = self._client()
         kwargs: dict[str, object] = {
             "dataset": request.dataset,
@@ -98,13 +107,15 @@ class DatabentoCoreProvider:
             frame = frame.reset_index()
         else:
             frame = frame.reset_index(drop=True)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        out = output_dir / "parent_definitions.parquet"
         frame.to_parquet(out, index=False)
         return out
 
     def fetch_parent_daily(self, request: ParentFuturesRequest, output_dir: Path) -> Path:
         """Fetch all parent futures/spread daily bars as immutable staging data."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = output_dir / "parent_ohlcv_1d.parquet"
+        self._refuse_existing(out)
+
         _, client = self._client()
         kwargs: dict[str, object] = {
             "dataset": request.dataset,
@@ -120,7 +131,5 @@ class DatabentoCoreProvider:
             frame = frame.reset_index()
         else:
             frame = frame.reset_index(drop=True)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        out = output_dir / "parent_ohlcv_1d.parquet"
         frame.to_parquet(out, index=False)
         return out
