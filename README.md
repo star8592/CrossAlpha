@@ -50,10 +50,16 @@ CROSSALPHA_DATA_DIR=/mnt/disk2/CrossAlphaData
 DATABENTO_API_KEY=db-...
 ```
 
-Start public Observatory collection immediately:
+Verify the storage layout before starting collectors:
 
 ```bash
 source .venv/bin/activate
+crossalpha doctor
+```
+
+Start public Observatory collection immediately:
+
+```bash
 crossalpha collect-observatory
 python scripts/collect_loop.py --interval 300
 ```
