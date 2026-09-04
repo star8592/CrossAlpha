@@ -1,0 +1,12 @@
+[Unit]
+Description=CrossAlpha Observatory derived-data materializer
+After=crossalpha-observatory.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/CrossAlpha
+EnvironmentFile=%h/CrossAlpha/.env
+ExecStart=%h/CrossAlpha/.venv/bin/python -m crossalpha.cli materialize-observatory
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
