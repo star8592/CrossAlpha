@@ -8,21 +8,37 @@ CrossAlpha is a research-first, crypto-native systematic global macro platform. 
 - **Observatory**: immutable point-in-time capital-state data collection.
 - **Market Engine**: funding / basis / liquidity / instrument / venue routing.
 
-## Current milestone: V0.1 + Observatory O0.4
+## Hard data policy: V0.1 must be free
+
+CrossAlpha V0.1 has a hard requirement:
+
+```text
+required market-data cost = $0
+```
+
+Every required research, backtest and Observatory path must work without purchasing data. Paid vendors are optional validation adapters only; the project must remain fully usable if no paid key is configured.
+
+This changes the Core research object. V0.1 **does not claim to be a CME futures excess-return study**. It studies free, investable economic-exposure proxies:
+
+| Economic exposure | Free V0.1 research proxy | Required source |
+|---|---|---|
+| Broad US equity | SPY | Tiingo Starter |
+| US growth / Nasdaq-100 | QQQ | Tiingo Starter |
+| Gold | GLD | Tiingo Starter |
+| Silver | SLV | Tiingo Starter |
+| Copper | CPER | Tiingo Starter |
+| WTI crude | USO | Tiingo Starter |
+| Bitcoin | BTCUSDT spot | Binance public market data |
+| Ether | ETHUSDT spot | Binance public market data |
+| Cash rate | DGS3MO | FRED |
+
+Tiingo Starter is a free account/token path used only for local/internal research. Raw Tiingo data is not intended for redistribution. Binance spot market data requires no API key. FRED API keys are free.
+
+Commodity ETF/ETP returns include fund fees and roll effects by construction. Availability is respected: no proxy or crypto series is backfilled before its actual inception/listing.
+
+## Current milestone: Core V0.1 + Observatory O0.4
 
 V0.1 tests simple economic alpha before regime models, ML or RL are allowed. Observatory keeps immutable raw point-in-time facts, rebuildable indexes/canonical data, a causal descriptive Hyperliquid market-state feature layer, and a stablecoin stock/chain accounting layer. No composite risk or trading score is emitted yet.
-
-### Frozen research universe
-
-ES, NQ, GC, SI, HG, CL, CME BTC futures, CME ETH futures, plus cash in the later return engine.
-
-### O0 collectors
-
-- Hyperliquid public market-state snapshots (`metaAndAssetCtxs`, `allMids`).
-- DefiLlama stablecoin state snapshot.
-- Generic EVM ERC-20 transfer-log collector scaffold (disabled until RPC/contracts are configured).
-
-No wallet labeling, whale-following or alpha inference is performed in O0.
 
 ## Local deployment layout
 
@@ -34,7 +50,7 @@ This deployment uses the dedicated 16 TB `/mnt/disk2` volume:
 └── CrossAlphaData/   # raw, canonical, derived and manifest data
 ```
 
-Clone the repository:
+Clone/bootstrap:
 
 ```bash
 cd /mnt/disk2
@@ -43,19 +59,98 @@ cd CrossAlpha
 bash scripts/bootstrap_local.sh
 ```
 
-The generated `.env` defaults to:
+The generated `.env` uses the free path by default:
 
 ```bash
+TIINGO_API_TOKEN=
+FRED_API_KEY=
+DATABENTO_API_KEY=        # optional paid validation only
+EVM_RPC_URL=
 CROSSALPHA_DATA_DIR=/mnt/disk2/CrossAlphaData
-DATABENTO_API_KEY=db-...
+CROSSALPHA_HTTP_TIMEOUT=30
 ```
 
-Verify the storage layout before starting collectors:
+`bootstrap_local.sh` installs only `.[dev]`; Databento is not installed by default.
+
+Check storage and free-data readiness:
 
 ```bash
 source .venv/bin/activate
 crossalpha doctor
+crossalpha free-core-status
 ```
+
+## Free Core V0.1
+
+After adding a free Tiingo token and free FRED API key to `.env`, fetch the complete required Core dataset:
+
+```bash
+crossalpha fetch-core-free \
+  --start 2010-06-01 \
+  --end 2026-09-01
+```
+
+The output explicitly reports:
+
+```text
+mode = free_only
+data_cost_usd = 0
+```
+
+Source layout:
+
+```text
+raw/free_core/
+├── tiingo/      # SPY QQQ GLD SLV CPER USO raw EOD responses
+├── binance/     # BTCUSDT ETHUSDT public daily kline pages
+└── fred/        # DGS3MO raw observations
+
+canonical/core/
+├── free_proxy_daily/
+│   ├── tradfi.parquet
+│   └── crypto.parquet
+└── cash_rate/
+    └── DGS3MO.parquet
+```
+
+For TradFi proxies both raw and adjusted prices are retained. Strategy research uses adjusted close so splits/distributions do not create artificial return jumps. Crypto spot uses raw daily OHLCV. Cash rate is stored separately and will be converted to accrual in the portfolio return engine.
+
+### What free V0.1 can test honestly
+
+The primary question is:
+
+> Without macro prediction, ML, leverage or shorts, can trend + relative momentum + risk allocation across freely reproducible economic-exposure proxies deliver robust out-of-sample results?
+
+It can test allocation robustness across equities, precious metals, industrial commodities, energy and crypto. It cannot claim to isolate CME roll mechanics, exchange-specific futures carry or institutional futures execution costs.
+
+## Optional paid futures validation
+
+The old Databento adapter is retained only for future validation of the free-proxy conclusions against actual CME child contracts. It is not required for V0.1 and is not installed by bootstrap.
+
+If intentionally needed later:
+
+```bash
+pip install -e ".[databento]"
+```
+
+Then the existing cost-first commands remain available:
+
+```bash
+crossalpha estimate-core-parent --start 2010-06-01 --end 2026-09-01
+crossalpha fetch-core-parent --start 2010-06-01 --end 2026-09-01 --max-cost-usd 5
+```
+
+These commands are **outside the free V0.1 research requirement**.
+
+## O0 collectors
+
+Current required Observatory sources are free/public:
+
+- Hyperliquid public market-state snapshots (`metaAndAssetCtxs`, `allMids`).
+- DefiLlama stablecoin state snapshot.
+- Generic EVM ERC-20 transfer-log collector scaffold (disabled until free/public RPC/contracts are configured).
+
+No wallet labeling, whale-following or alpha inference is performed in O0.
 
 Start one public Observatory collection:
 
@@ -95,24 +190,22 @@ manifests/
 └── series/<source>/<type>.json  # incremental latest/count/interval state
 ```
 
-Manual full-history canonical rebuilds use:
+Manual canonical rebuilds:
 
 ```bash
 crossalpha canonicalize-hyperliquid
 crossalpha canonicalize-stablecoins
 ```
 
-The scheduled materializer does not scan the full audit ledger. It reads only recent daily partitions and skips already canonicalized snapshots.
-
 ## O0.3 Hyperliquid market-state layer
 
-A manual full-history feature rebuild uses:
+Build full-history features:
 
 ```bash
 crossalpha build-market-state
 ```
 
-Current features include:
+Current descriptive features include:
 
 - mark/oracle basis in bps;
 - impact-price spread in bps;
@@ -125,7 +218,7 @@ Current features include:
 
 The 24h z-scores require at least 24 observations; before that they remain null rather than manufacturing an early signal.
 
-Query latest BTC/ETH state without writing SQL:
+Query latest BTC/ETH state:
 
 ```bash
 crossalpha market-state --asset BTC --asset ETH
@@ -133,7 +226,7 @@ crossalpha market-state --asset BTC --asset ETH
 
 ## O0.4 stablecoin accounting layer
 
-DefiLlama raw snapshots are canonicalized into two independent tables:
+DefiLlama raw snapshots are canonicalized into:
 
 ```text
 canonical/defillama/
@@ -141,7 +234,7 @@ canonical/defillama/
 └── stablecoin_chain_supply/
 ```
 
-The accounting layer then materializes:
+The accounting layer materializes:
 
 ```text
 derived/stablecoins/
@@ -149,30 +242,13 @@ derived/stablecoins/
 └── chain_state/
 ```
 
-Build it manually:
-
-```bash
-crossalpha build-stablecoin-state
-```
-
-Query the latest system and top chains:
+Query the latest state:
 
 ```bash
 crossalpha stablecoin-state --top-chains 10
 ```
 
-The system state currently reports:
-
-- USD-pegged stablecoin count and total stock;
-- market value and snapshot-provided 1d/7d/30d supply changes;
-- market-value coverage ratios for those historical-change fields, so missing upstream history stays unknown rather than becoming zero;
-- USDT/USDC market shares;
-- asset concentration HHI;
-- weighted and maximum USD-peg deviation;
-- market value more than 50 bps away from the USD peg;
-- summed observed chain supply, chain coverage ratio and conservation residual.
-
-The chain state reports per-chain stock, market value, market share, stablecoin count and chain concentration HHI. Missing chain rows count as missing coverage and therefore remain visible in the conservation residual.
+The system reports USD-pegged supply, 1d/7d/30d changes with coverage ratios, USDT/USDC shares, asset concentration, peg stress, observed chain supply, coverage and conservation residual.
 
 **Important:** this is a stock/accounting layer, not a liquidity-creation signal. CrossAlpha does not assume:
 
@@ -180,29 +256,27 @@ The chain state reports per-chain stock, market value, market share, stablecoin 
 stablecoin supply increase = external capital creation = risk-on
 ```
 
-A later capital-flow layer must distinguish issuer mint/burn, bridge migration, inventory movement, exchange/protocol deployment and true external capital creation. Chain coverage/residuals are recorded now but are not yet hard quality gates until the upstream accounting behavior is empirically characterized.
+A later capital-flow layer must distinguish issuer mint/burn, bridge migration, inventory movement, exchange/protocol deployment and true external capital creation.
 
-### Incremental online materialization
-
-The command used by the timer is incremental:
+## Incremental online materialization
 
 ```bash
 crossalpha materialize-observatory
 ```
 
-It canonicalizes only recent daily partitions, rebuilds only the latest Hyperliquid and stablecoin state days, and refreshes the DuckDB catalog. Its online runtime therefore does not grow linearly with total history.
+It canonicalizes recent partitions, rebuilds only the latest state days and refreshes DuckDB. Derived failures cannot stop raw collection.
 
-For an explicit full rebuild after changing parsers or feature definitions:
+Install the independent derived-data timer:
 
 ```bash
-crossalpha canonicalize-hyperliquid
-crossalpha canonicalize-stablecoins
-crossalpha build-market-state
-crossalpha build-stablecoin-state
-crossalpha build-catalog
+bash scripts/install_materializer_timer.sh
+systemctl --user status crossalpha-materializer.timer
+journalctl --user -u crossalpha-materializer.service -n 100 --no-pager
 ```
 
-The database is stored at:
+Raw collection runs every 5 minutes; materialization runs every 15 minutes.
+
+DuckDB is stored at:
 
 ```text
 /mnt/disk2/CrossAlphaData/catalog/crossalpha.duckdb
@@ -220,82 +294,16 @@ observatory.stablecoin_system_state
 observatory.stablecoin_chain_state
 ```
 
-### Independent derived-data timer
-
-Raw collection is the critical path; canonicalization/features/catalog are deliberately isolated in a separate timer so a parser/feature failure cannot stop raw history accumulation.
-
-```bash
-bash scripts/install_materializer_timer.sh
-systemctl --user status crossalpha-materializer.timer
-journalctl --user -u crossalpha-materializer.service -n 100 --no-pager
-```
-
-The materializer runs every 15 minutes. Raw collection remains every 5 minutes.
-
-## Core V0.1: cost-first real-contract futures pipeline
-
-Databento historical requests are never issued with an implicit end. Every Core request requires an explicit exclusive `--end`, because an omitted Databento end is forward-filled from the precision of `start`; it does not mean "latest".
-
-The primary Core path uses parent symbology (`ES.FUT`, `NQ.FUT`, etc.), point-in-time definitions, actual child-contract OHLCV, prior-day volume rolls and same-contract MTM returns.
-
-First estimate cost only:
-
-```bash
-crossalpha estimate-core-parent \
-  --start 2010-06-01 \
-  --end 2026-09-01
-```
-
-This uses Databento metadata cost estimation and does not download the historical time series.
-
-Only after reviewing the estimate, perform the paid download with an explicit hard cap:
-
-```bash
-crossalpha fetch-core-parent \
-  --start 2010-06-01 \
-  --end 2026-09-01 \
-  --max-cost-usd 5.00
-```
-
-If the estimated cost of missing files exceeds the cap, CrossAlpha exits before the paid download begins. Existing staging files are reused instead of downloaded again.
-
-The parent pipeline is:
-
-```text
-Databento parent definitions + OHLCV
-        ↓
-point-in-time definition as-of join
-        ↓
-filter outright futures
-        ↓
-actual contract daily bars
-        ↓
-previous-trading-day volume roll map
-        ↓
-expiry safety / no backward rolls
-        ↓
-same-contract MTM excess-return index
-```
-
-Continuous contracts are retained only as a diagnostic/reference series. They also use cost-first commands:
-
-```bash
-crossalpha estimate-core --start 2010-06-01 --end 2026-09-01
-crossalpha fetch-core --start 2010-06-01 --end 2026-09-01 --max-cost-usd 1.00
-```
-
-> Important: continuous futures staging data is **not** used as naive strategy PnL across rolls. `src/crossalpha/core/futures_roll.py` constructs explicit same-contract MTM returns across a point-in-time-safe roll map.
-
 ## Raw-data invariants
 
-- Raw snapshots are append-only gzip envelopes.
+- Raw Observatory snapshots are append-only gzip envelopes.
 - Every snapshot is SHA-256 hashed.
-- Manifest records keep both uncompressed `bytes` and, for new snapshots, `compressed_bytes`.
+- Manifest records keep both uncompressed `bytes` and `compressed_bytes` when available.
 - `observed_at` and `known_at` are preserved for point-in-time research.
 - Historical gaps are reported, not silently filled.
 - Audit-manifest reads are locked against concurrent appends.
 - Canonical and derived Parquet writes use temporary files plus atomic replacement.
-- `canonical/`, `derived/`, `catalog/`, and manifest indexes are disposable/rebuildable; `raw/` and the global audit ledger are not.
+- `canonical/`, `derived/`, `catalog/`, and manifest indexes are disposable/rebuildable; Observatory `raw/` and the global audit ledger are not.
 
 ## Repository policy
 
