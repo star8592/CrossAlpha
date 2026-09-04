@@ -1,0 +1,36 @@
+version: 1
+economic_assets:
+  - id: US_EQUITY
+    research_symbol: ES
+    asset_class: equity_index
+    risk_sleeve: equity
+  - id: US_GROWTH
+    research_symbol: NQ
+    asset_class: equity_index
+    risk_sleeve: equity
+  - id: GOLD
+    research_symbol: GC
+    asset_class: commodity
+    risk_sleeve: precious_metals
+  - id: SILVER
+    research_symbol: SI
+    asset_class: commodity
+    risk_sleeve: precious_metals
+  - id: COPPER
+    research_symbol: HG
+    asset_class: commodity
+    risk_sleeve: industrials
+  - id: WTI
+    research_symbol: CL
+    asset_class: commodity
+    risk_sleeve: energy
+  - id: BTC
+    research_symbol: BTC
+    asset_class: crypto_future
+    risk_sleeve: crypto
+    seasoning_days: 63
+  - id: ETH
+    research_symbol: ETH
+    asset_class: crypto_future
+    risk_sleeve: crypto
+    seasoning_days: 63

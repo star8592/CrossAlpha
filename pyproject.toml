@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crossalpha"
+version = "0.1.0"
+description = "Cross-asset systematic macro research and point-in-time capital-state observatory."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Proprietary - research use"}
+authors = [{name = "CrossAlpha"}]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+  "python-dotenv>=1.0",
+  "PyYAML>=6.0",
+  "pandas>=2.2",
+  "polars>=1.0",
+  "pyarrow>=16",
+  "duckdb>=1.0",
+]
+
+[project.optional-dependencies]
+databento = ["databento>=0.57"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+crossalpha = "crossalpha.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,44 @@
+protocol: CROSSALPHA_V0_1
+frozen: true
+purpose: >-
+  Test whether simple cross-asset trend, relative momentum and risk budgeting
+  survive strict robustness checks before any regime/ML/onchain alpha is allowed.
+start: "2010-06-01"
+end: null
+rebalance: weekly
+execution_lag_sessions: 1
+allow_short: false
+max_gross_exposure: 1.0
+volatility:
+  window_days: 63
+  target_annualized: 0.10
+signals:
+  primary:
+    type: absolute_trend
+    lookback_days: 252
+  challenger:
+    type: multi_horizon_sign
+    horizons_days: [21, 63, 126, 252]
+portfolio:
+  primary: inverse_volatility
+  challenger: hrp
+constraints:
+  single_asset_max: 0.25
+  sleeves:
+    crypto: 0.35
+    equity: 0.40
+    precious_metals: 0.35
+    industrials: 0.35
+    energy: 0.35
+validation:
+  double_cost: true
+  leave_one_asset_out: true
+  leave_one_year_out: true
+  signal_delay_days: [1, 2, 3]
+  volatility_windows: [42, 63, 126]
+  trend_lookback_days: [189, 210, 231, 252, 273, 294, 315]
+final_decisions:
+  - SUPPORTED
+  - PROMISING_BUT_UNPROVEN
+  - REJECTED
+  - INVALID_RESEARCH

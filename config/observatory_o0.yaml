@@ -1,0 +1,23 @@
+protocol: CROSSALPHA_OBSERVATORY_O0
+mode: raw_facts_only
+principles:
+  immutable_raw: true
+  point_in_time: true
+  no_wallet_labels: true
+  no_smart_money_inference: true
+collectors:
+  hyperliquid:
+    enabled: true
+    interval_seconds: 300
+    snapshots:
+      - metaAndAssetCtxs
+      - allMids
+  defillama_stablecoins:
+    enabled: true
+    interval_seconds: 3600
+    endpoint: "https://stablecoins.llama.fi/stablecoins?includePrices=true"
+  evm_erc20:
+    enabled: false
+    interval_seconds: 60
+    chain: ethereum
+    contracts: []
