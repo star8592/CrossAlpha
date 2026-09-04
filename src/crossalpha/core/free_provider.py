@@ -27,14 +27,18 @@ FREE_CRYPTO_PROXIES: dict[str, str] = {
 FRED_CASH_SERIES = "DGS3MO"
 
 
+def _utc(value: str) -> pd.Timestamp:
+    return pd.to_datetime(value, utc=True)
+
+
 @dataclass(frozen=True)
 class FreeCoreRange:
     start: str
     end: str
 
     def __post_init__(self) -> None:
-        start = pd.Timestamp(self.start, tz="UTC")
-        end = pd.Timestamp(self.end, tz="UTC")
+        start = _utc(self.start)
+        end = _utc(self.end)
         if end <= start:
             raise ValueError("end must be after start")
 
@@ -246,8 +250,8 @@ class FreeCoreProvider:
         value: FreeCoreRange,
         raw_dir: Path,
     ) -> pd.DataFrame:
-        start_ms = int(pd.Timestamp(value.start, tz="UTC").timestamp() * 1000)
-        end_ms = int(pd.Timestamp(value.end, tz="UTC").timestamp() * 1000) - 1
+        start_ms = int(_utc(value.start).timestamp() * 1000)
+        end_ms = int(_utc(value.end).timestamp() * 1000) - 1
         cursor = start_ms
         pages: list[list[Any]] = []
         page_no = 0
@@ -296,13 +300,7 @@ class FreeCoreProvider:
         frames: list[pd.DataFrame] = []
         with self._client() as client:
             for economic_asset, symbol in FREE_CRYPTO_PROXIES.items():
-                frame = self._fetch_binance_symbol(
-                    client,
-                    economic_asset,
-                    symbol,
-                    value,
-                    raw_root,
-                )
+                frame = self._fetch_binance_symbol(client, economic_asset, symbol, value, raw_root)
                 if frame.empty:
                     raise ValueError(f"Binance returned no data for {symbol}")
                 frames.append(frame)
