@@ -7,6 +7,7 @@ import json
 from crossalpha.core.databento_provider import DatabentoCoreProvider, DatabentoRequest
 from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
+from crossalpha.observatory.health import observatory_health, write_health_report
 from crossalpha.observatory.providers.defillama import DefiLlamaStablecoinProvider
 from crossalpha.observatory.providers.hyperliquid import HyperliquidProvider
 from crossalpha.settings import Settings
@@ -53,6 +54,11 @@ def main() -> None:
     obs = sub.add_parser("collect-observatory")
     obs.add_argument("--source", action="append", choices=["hyperliquid", "defillama"], dest="sources")
 
+    health = sub.add_parser("observatory-health")
+    health.add_argument("--expected-interval", type=int, default=300)
+    health.add_argument("--stale-after", type=int, default=900)
+    health.add_argument("--no-verify-latest", action="store_true")
+
     core = sub.add_parser("fetch-core")
     core.add_argument("--start", default="2010-06-01")
     core.add_argument("--end", default=None)
@@ -65,6 +71,17 @@ def main() -> None:
 
     if args.command == "collect-observatory":
         asyncio.run(collect_observatory(settings, args.sources or ["hyperliquid", "defillama"]))
+    elif args.command == "observatory-health":
+        report = observatory_health(
+            settings.crossalpha_data_dir,
+            expected_interval_seconds=args.expected_interval,
+            stale_after_seconds=args.stale_after,
+            verify_latest=not args.no_verify_latest,
+        )
+        write_health_report(settings.crossalpha_data_dir, report)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["ok"]:
+            raise SystemExit("OBSERVATORY HEALTH FAILED")
     elif args.command == "fetch-core":
         fetch_core(settings, args.start, args.end)
     elif args.command == "doctor":
