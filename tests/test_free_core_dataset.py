@@ -9,7 +9,7 @@ from crossalpha.core.free_dataset import audit_free_core, build_free_core_return
 from crossalpha.core.free_provider import FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FreeCoreRange
 
 
-def _write_fixture(root: Path, value: FreeCoreRange) -> None:
+def _write_fixture(root: Path, value: FreeCoreRange, *, include_vendor_end: bool = False) -> None:
     range_dir = Path(f"start={value.start}", f"end={value.end}")
     proxy = root / "canonical" / "core" / "free_proxy_daily" / range_dir
     cash = root / "canonical" / "core" / "cash_rate" / range_dir
@@ -29,6 +29,16 @@ def _write_fixture(root: Path, value: FreeCoreRange) -> None:
                     "adj_close": price,
                 }
             )
+        if include_vendor_end:
+            tradfi_rows.append(
+                {
+                    "date": pd.Timestamp(value.end, tz="UTC"),
+                    "economic_asset": asset,
+                    "source": "tiingo_eod",
+                    "symbol": symbol,
+                    "adj_close": 104.0,
+                }
+            )
     pd.DataFrame(tradfi_rows).to_parquet(proxy / "tradfi.parquet", index=False)
 
     crypto_rows = []
@@ -45,25 +55,32 @@ def _write_fixture(root: Path, value: FreeCoreRange) -> None:
             )
     pd.DataFrame(crypto_rows).to_parquet(proxy / "crypto.parquet", index=False)
 
-    pd.DataFrame(
-        [
+    cash_rows = [
+        {
+            "date": pd.Timestamp("2026-01-02", tz="UTC"),
+            "series_id": "DGS3MO",
+            "rate_percent": 4.0,
+        },
+        {
+            "date": pd.Timestamp("2026-01-03", tz="UTC"),
+            "series_id": "DGS3MO",
+            "rate_percent": None,
+        },
+        {
+            "date": pd.Timestamp("2026-01-05", tz="UTC"),
+            "series_id": "DGS3MO",
+            "rate_percent": 4.1,
+        },
+    ]
+    if include_vendor_end:
+        cash_rows.append(
             {
-                "date": pd.Timestamp("2026-01-02", tz="UTC"),
+                "date": pd.Timestamp(value.end, tz="UTC"),
                 "series_id": "DGS3MO",
-                "rate_percent": 4.0,
-            },
-            {
-                "date": pd.Timestamp("2026-01-03", tz="UTC"),
-                "series_id": "DGS3MO",
-                "rate_percent": None,
-            },
-            {
-                "date": pd.Timestamp("2026-01-05", tz="UTC"),
-                "series_id": "DGS3MO",
-                "rate_percent": 4.1,
-            },
-        ]
-    ).to_parquet(cash / "DGS3MO.parquet", index=False)
+                "rate_percent": 4.2,
+            }
+        )
+    pd.DataFrame(cash_rows).to_parquet(cash / "DGS3MO.parquet", index=False)
 
 
 def test_free_core_audit_accepts_availability_aware_starts(tmp_path: Path) -> None:
@@ -104,8 +121,21 @@ def test_cash_return_uses_only_prior_known_rate(tmp_path: Path) -> None:
     frame = pd.read_parquet(result["output"])
     cash = frame.loc[frame["economic_asset"] == "CASH"].set_index("date")
 
-    # Jan 2 rate is only used from Jan 3 onward because allow_exact_matches=False.
     assert pd.isna(cash.loc[pd.Timestamp("2026-01-02", tz="UTC"), "return"])
     assert cash.loc[pd.Timestamp("2026-01-03", tz="UTC"), "return"] > 0
-    # The missing Jan 3 FRED observation does not erase the last known Jan 2 rate.
     assert cash.loc[pd.Timestamp("2026-01-04", tz="UTC"), "return"] > 0
+
+
+def test_exact_vendor_end_is_reported_but_dropped_from_derived(tmp_path: Path) -> None:
+    value = FreeCoreRange("2026-01-01", "2026-01-10")
+    _write_fixture(tmp_path, value, include_vendor_end=True)
+
+    report = audit_free_core(tmp_path, value)
+    assert report["ok"] is True
+    assert report["tradfi"]["series"]["US_EQUITY"]["rows_exactly_at_exclusive_end"] == 1
+    assert report["tradfi"]["series"]["US_EQUITY"]["rows_strictly_after_exclusive_end"] == 0
+    assert report["cash"]["rows_exactly_at_exclusive_end"] == 1
+
+    result = build_free_core_returns(tmp_path, value)
+    frame = pd.read_parquet(result["output"])
+    assert frame["date"].max() < pd.Timestamp(value.end, tz="UTC")
