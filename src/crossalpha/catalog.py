@@ -33,11 +33,14 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     stablecoin_system_glob = stablecoin_system_root / "**" / "*.parquet"
     stablecoin_chain_state_root = data_root / "derived" / "stablecoins" / "chain_state"
     stablecoin_chain_state_glob = stablecoin_chain_state_root / "**" / "*.parquet"
+    free_core_returns_root = data_root / "derived" / "core" / "free_v01"
+    free_core_returns_glob = free_core_returns_root / "**" / "asset_returns.parquet"
 
     created_views: list[str] = []
     con = duckdb.connect(str(db_path))
     try:
         con.execute("CREATE SCHEMA IF NOT EXISTS observatory")
+        con.execute("CREATE SCHEMA IF NOT EXISTS core")
         for view in (
             "observatory.raw_manifest",
             "observatory.hyperliquid_asset_contexts",
@@ -46,6 +49,7 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.stablecoin_chain_supply",
             "observatory.stablecoin_system_state",
             "observatory.stablecoin_chain_state",
+            "core.free_asset_returns",
         ):
             con.execute(f"DROP VIEW IF EXISTS {view}")
 
@@ -103,6 +107,14 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("observatory.stablecoin_chain_state")
+
+        if _has_parquet(free_core_returns_root):
+            con.execute(
+                "CREATE VIEW core.free_asset_returns AS "
+                f"SELECT * FROM read_parquet({_sql_string(free_core_returns_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("core.free_asset_returns")
     finally:
         con.close()
 
