@@ -35,8 +35,7 @@ SLEEVES: dict[str, tuple[tuple[str, ...], float]] = {
     "crypto": (("BTC", "ETH"), 0.35),
     "equity": (("US_EQUITY", "US_GROWTH"), 0.40),
     "precious_metals": (("GOLD", "SILVER"), 0.35),
-    "industrials": (("COPPER",), 0.25),
-    "energy": (("WTI",), 0.25),
+    "cyclical_commodities": (("COPPER", "WTI"), 0.35),
 }
 VOL_TARGET_STRATEGIES = set(STRATEGIES[2:])
 
