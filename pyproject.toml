@@ -29,6 +29,8 @@ dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 crossalpha = "crossalpha.cli:main"
+crossalpha-free-audit = "crossalpha.core.free_commands:audit_main"
+crossalpha-free-returns = "crossalpha.core.free_commands:returns_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
