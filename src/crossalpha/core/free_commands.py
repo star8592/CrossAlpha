@@ -11,10 +11,10 @@ from crossalpha.core.free_paper import (
     HISTORICAL_START,
     create_paper_snapshot,
     freeze_paper_protocol,
-    mark_paper_forward,
     paper_status,
     refresh_paper_core,
 )
+from crossalpha.core.free_paper_guard import strict_mark_paper_forward
 from crossalpha.core.free_provider import FreeCoreRange
 from crossalpha.core.free_robustness import run_free_robustness_stage1
 from crossalpha.core.free_robustness_stage2 import run_free_robustness_stage2
@@ -171,7 +171,7 @@ def paper_mark_main() -> None:
     args = parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    report = mark_paper_forward(
+    report = strict_mark_paper_forward(
         settings.crossalpha_data_dir,
         end=args.end,
         research_start=args.research_start,
