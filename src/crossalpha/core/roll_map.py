@@ -65,7 +65,7 @@ def build_previous_volume_roll_map(
     held_expiry: pd.Timestamp | None = None
     rows: list[dict[str, object]] = []
 
-    for previous_date, current_date in zip(dates, dates[1:], strict=True):
+    for previous_date, current_date in zip(dates, dates[1:]):
         previous = merged.loc[merged[date_col] == previous_date].copy()
         current_available = set(
             merged.loc[merged[date_col] == current_date, contract_col].astype(str)
@@ -81,7 +81,6 @@ def build_previous_volume_roll_map(
         if eligible.empty:
             raise ValueError(f"no eligible contract for {pd.Timestamp(current_date).isoformat()}")
 
-        # Highest prior-day volume wins; ties prefer the nearer expiry, then symbol.
         eligible[contract_col] = eligible[contract_col].astype(str)
         eligible = eligible.sort_values(
             [volume_col, expiry_col, contract_col],
@@ -100,7 +99,6 @@ def build_previous_volume_roll_map(
             if held_is_available and held_is_safe and not held_prior.empty:
                 held_volume = float(held_prior.iloc[0][volume_col])
                 candidate_volume = float(eligible.iloc[0][volume_col])
-                # Stay put unless a later contract strictly exceeds held prior-day volume.
                 if candidate_expiry == held_expiry or candidate_volume <= held_volume:
                     candidate = held_contract
                     candidate_expiry = held_expiry
