@@ -9,6 +9,7 @@ from crossalpha.core.databento_provider import DatabentoCoreProvider, DatabentoR
 from crossalpha.data.quality import validate_ohlcv_parquet
 from crossalpha.doctor import storage_report
 from crossalpha.observatory.canonical.hyperliquid import canonicalize_hyperliquid
+from crossalpha.observatory.canonical.stablecoins import canonicalize_stablecoins
 from crossalpha.observatory.features.hyperliquid import build_hyperliquid_market_state
 from crossalpha.observatory.health import observatory_health, write_health_report
 from crossalpha.observatory.live_health import observatory_live_health
@@ -34,12 +35,14 @@ async def collect_observatory(settings: Settings, sources: list[str]) -> None:
 
 
 def materialize_observatory(settings: Settings) -> dict[str, object]:
-    canonical = canonicalize_hyperliquid(settings.crossalpha_data_dir, recent_days=2)
+    canonical_hyperliquid = canonicalize_hyperliquid(settings.crossalpha_data_dir, recent_days=2)
+    canonical_stablecoins = canonicalize_stablecoins(settings.crossalpha_data_dir, recent_days=2)
     market_state = build_hyperliquid_market_state(settings.crossalpha_data_dir, recent_only=True)
     catalog = build_catalog(settings.crossalpha_data_dir)
     return {
         "mode": "incremental",
-        "canonical_hyperliquid": canonical,
+        "canonical_hyperliquid": canonical_hyperliquid,
+        "canonical_stablecoins": canonical_stablecoins,
         "hyperliquid_market_state": market_state,
         "catalog": catalog,
     }
@@ -83,6 +86,7 @@ def main() -> None:
 
     sub.add_parser("manifest-rebuild-indexes")
     sub.add_parser("canonicalize-hyperliquid")
+    sub.add_parser("canonicalize-stablecoins")
     sub.add_parser("build-market-state")
     sub.add_parser("materialize-observatory")
     sub.add_parser("build-catalog")
@@ -126,6 +130,8 @@ def main() -> None:
         print(json.dumps(rebuild_manifest_indexes(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "canonicalize-hyperliquid":
         print(json.dumps(canonicalize_hyperliquid(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
+    elif args.command == "canonicalize-stablecoins":
+        print(json.dumps(canonicalize_stablecoins(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "build-market-state":
         print(json.dumps(build_hyperliquid_market_state(settings.crossalpha_data_dir), ensure_ascii=False, indent=2))
     elif args.command == "materialize-observatory":
