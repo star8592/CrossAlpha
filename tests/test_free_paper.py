@@ -131,8 +131,16 @@ def test_paper_freeze_is_immutable_and_sets_next_monday(tmp_path: Path) -> None:
     )
     assert first["first_eligible_effective_date"] == "2026-09-07"
     assert first["record_sha256"] == second["record_sha256"]
+    assert first["status"] == "frozen"
     assert second["status"] == "already_frozen"
-    assert _verify_sealed(first)
+
+    # ``status`` is response metadata and is deliberately not written into the
+    # immutable ledger record. Verify the bytes that actually persist on disk.
+    freeze_path = tmp_path / "research" / "free_v01" / "paper" / "freeze.json"
+    persisted = __import__("json").loads(freeze_path.read_text(encoding="utf-8"))
+    assert "status" not in persisted
+    assert persisted["record_sha256"] == first["record_sha256"]
+    assert _verify_sealed(persisted)
 
 
 def test_snapshot_is_live_only_and_immutable(tmp_path: Path) -> None:
