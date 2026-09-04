@@ -13,8 +13,8 @@ ROLLING_MIN_PERIODS = 24
 def _zscore(series: pd.Series, *, window: str = "24h", min_periods: int = ROLLING_MIN_PERIODS) -> pd.Series:
     rolling = series.rolling(window, min_periods=min_periods)
     mean = rolling.mean()
-    std = rolling.std(ddof=0)
-    return (series - mean) / std.replace(0.0, pd.NA)
+    std = rolling.std(ddof=0).mask(lambda value: value == 0.0)
+    return (series - mean) / std
 
 
 def compute_hyperliquid_market_state(frame: pd.DataFrame) -> pd.DataFrame:
