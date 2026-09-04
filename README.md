@@ -102,7 +102,7 @@ crossalpha canonicalize-hyperliquid
 crossalpha canonicalize-stablecoins
 ```
 
-The scheduled materializer does not scan the full audit ledger. It reads only the latest two daily manifest partitions and skips already canonicalized snapshots.
+The scheduled materializer does not scan the full audit ledger. It reads only recent daily partitions and skips already canonicalized snapshots.
 
 ## O0.3 Hyperliquid market-state layer
 
@@ -165,13 +165,14 @@ The system state currently reports:
 
 - USD-pegged stablecoin count and total stock;
 - market value and snapshot-provided 1d/7d/30d supply changes;
+- market-value coverage ratios for those historical-change fields, so missing upstream history stays unknown rather than becoming zero;
 - USDT/USDC market shares;
 - asset concentration HHI;
 - weighted and maximum USD-peg deviation;
 - market value more than 50 bps away from the USD peg;
-- summed chain supply, chain coverage ratio and conservation residual.
+- summed observed chain supply, chain coverage ratio and conservation residual.
 
-The chain state reports per-chain stock, market value, market share, stablecoin count and chain concentration HHI.
+The chain state reports per-chain stock, market value, market share, stablecoin count and chain concentration HHI. Missing chain rows count as missing coverage and therefore remain visible in the conservation residual.
 
 **Important:** this is a stock/accounting layer, not a liquidity-creation signal. CrossAlpha does not assume:
 
@@ -231,12 +232,56 @@ journalctl --user -u crossalpha-materializer.service -n 100 --no-pager
 
 The materializer runs every 15 minutes. Raw collection remains every 5 minutes.
 
-## Core V0.1
+## Core V0.1: cost-first real-contract futures pipeline
 
-Fetch first-pass historical futures staging data after adding a Databento API key:
+Databento historical requests are never issued with an implicit end. Every Core request requires an explicit exclusive `--end`, because an omitted Databento end is forward-filled from the precision of `start`; it does not mean "latest".
+
+The primary Core path uses parent symbology (`ES.FUT`, `NQ.FUT`, etc.), point-in-time definitions, actual child-contract OHLCV, prior-day volume rolls and same-contract MTM returns.
+
+First estimate cost only:
 
 ```bash
-crossalpha fetch-core --start 2010-06-01
+crossalpha estimate-core-parent \
+  --start 2010-06-01 \
+  --end 2026-09-01
+```
+
+This uses Databento metadata cost estimation and does not download the historical time series.
+
+Only after reviewing the estimate, perform the paid download with an explicit hard cap:
+
+```bash
+crossalpha fetch-core-parent \
+  --start 2010-06-01 \
+  --end 2026-09-01 \
+  --max-cost-usd 5.00
+```
+
+If the estimated cost of missing files exceeds the cap, CrossAlpha exits before the paid download begins. Existing staging files are reused instead of downloaded again.
+
+The parent pipeline is:
+
+```text
+Databento parent definitions + OHLCV
+        ↓
+point-in-time definition as-of join
+        ↓
+filter outright futures
+        ↓
+actual contract daily bars
+        ↓
+previous-trading-day volume roll map
+        ↓
+expiry safety / no backward rolls
+        ↓
+same-contract MTM excess-return index
+```
+
+Continuous contracts are retained only as a diagnostic/reference series. They also use cost-first commands:
+
+```bash
+crossalpha estimate-core --start 2010-06-01 --end 2026-09-01
+crossalpha fetch-core --start 2010-06-01 --end 2026-09-01 --max-cost-usd 1.00
 ```
 
 > Important: continuous futures staging data is **not** used as naive strategy PnL across rolls. `src/crossalpha/core/futures_roll.py` constructs explicit same-contract MTM returns across a point-in-time-safe roll map.
