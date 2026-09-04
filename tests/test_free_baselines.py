@@ -102,6 +102,19 @@ def test_constraints_never_break_caps_or_budget() -> None:
     assert weights["CASH"] >= 0
 
 
+def test_copper_and_oil_share_the_preregistered_35pct_sleeve() -> None:
+    config = FreeBaselineConfig()
+    raw = pd.Series(0.0, index=RISK_ASSETS)
+    raw["COPPER"] = 1.0
+    raw["WTI"] = 1.0
+    weights = _apply_constraints(raw, config)
+
+    assert weights["COPPER"] <= 0.25 + 1e-12
+    assert weights["WTI"] <= 0.25 + 1e-12
+    assert weights[["COPPER", "WTI"]].sum() == pytest.approx(0.35)
+    assert weights["CASH"] == pytest.approx(0.65)
+
+
 def test_target_vol_only_derisks_and_never_leverages() -> None:
     config = FreeBaselineConfig(target_vol=0.10, vol_window_days=63)
     weights = pd.Series(0.0, index=ALL_ASSETS)
@@ -148,6 +161,7 @@ def test_baseline_run_writes_all_strategies_and_respects_budget(tmp_path: Path) 
     assert np.allclose(sums.to_numpy(), 1.0)
     assert (weights.loc[:, list(RISK_ASSETS)] >= -1e-12).all().all()
     assert (weights.loc[:, list(RISK_ASSETS)] <= 0.25 + 1e-12).all().all()
+    assert (weights[["COPPER", "WTI"]].sum(axis=1) <= 0.35 + 1e-12).all()
 
 
 def test_future_shock_cannot_rewrite_past_weights(tmp_path: Path) -> None:
