@@ -95,15 +95,17 @@ manifests/
 └── series/<source>/<type>.json  # incremental latest/count/interval state
 ```
 
-Convert Hyperliquid `metaAndAssetCtxs` raw envelopes into typed per-asset Parquet:
+A manual full-history canonical rebuild uses:
 
 ```bash
 crossalpha canonicalize-hyperliquid
 ```
 
+The scheduled materializer does not scan the full audit ledger. It reads only the latest two daily manifest partitions and skips already canonicalized snapshots.
+
 ## O0.3 market-state layer
 
-Build causal descriptive features from canonical Hyperliquid observations:
+A manual full-history feature rebuild uses:
 
 ```bash
 crossalpha build-market-state
@@ -122,15 +124,21 @@ Current features include:
 
 The 24h z-scores require at least 24 observations; before that they remain null rather than manufacturing an early signal.
 
-Run the full rebuildable derived pipeline in one command:
+### Incremental online materialization
+
+The command used by the timer is incremental:
 
 ```bash
 crossalpha materialize-observatory
 ```
 
-Build/rebuild the local DuckDB catalog:
+It canonicalizes only the recent daily partitions, rebuilds only the latest market-state day with the previous day as causal 24h lookback, and refreshes the DuckDB catalog. Its online runtime therefore does not grow linearly with total history.
+
+For an explicit full rebuild after changing a parser or feature definition:
 
 ```bash
+crossalpha canonicalize-hyperliquid
+crossalpha build-market-state
 crossalpha build-catalog
 ```
 
