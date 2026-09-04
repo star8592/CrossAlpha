@@ -6,6 +6,15 @@ import json
 from crossalpha.core.free_baselines import FreeBaselineConfig, run_free_baselines
 from crossalpha.core.free_dataset import audit_free_core, build_free_core_returns
 from crossalpha.core.free_final_evaluation import run_free_final_evaluation
+from crossalpha.core.free_paper import (
+    HISTORICAL_END,
+    HISTORICAL_START,
+    create_paper_snapshot,
+    freeze_paper_protocol,
+    mark_paper_forward,
+    paper_status,
+    refresh_paper_core,
+)
 from crossalpha.core.free_provider import FreeCoreRange
 from crossalpha.core.free_robustness import run_free_robustness_stage1
 from crossalpha.core.free_robustness_stage2 import run_free_robustness_stage2
@@ -110,4 +119,70 @@ def final_evaluation_main() -> None:
         start=args.start,
         end=args.end,
     )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def paper_freeze_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-free-paper-freeze")
+    parser.add_argument("--historical-start", default=HISTORICAL_START)
+    parser.add_argument("--historical-end", default=HISTORICAL_END)
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = freeze_paper_protocol(
+        settings.crossalpha_data_dir,
+        historical_start=args.historical_start,
+        historical_end=args.historical_end,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def paper_refresh_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-free-paper-refresh")
+    parser.add_argument("--start", default=HISTORICAL_START)
+    parser.add_argument("--end", required=True, help="UTC date, exclusive")
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = refresh_paper_core(settings, start=args.start, end=args.end)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def paper_snapshot_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-free-paper-snapshot")
+    parser.add_argument("--effective-date", required=True, help="Current Monday UTC date")
+    parser.add_argument("--research-start", default=HISTORICAL_START)
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = create_paper_snapshot(
+        settings.crossalpha_data_dir,
+        effective_date=args.effective_date,
+        research_start=args.research_start,
+        strict_live=True,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def paper_mark_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-free-paper-mark")
+    parser.add_argument("--end", required=True, help="UTC date, exclusive")
+    parser.add_argument("--research-start", default=HISTORICAL_START)
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = mark_paper_forward(
+        settings.crossalpha_data_dir,
+        end=args.end,
+        research_start=args.research_start,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def paper_status_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-free-paper-status")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = paper_status(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
