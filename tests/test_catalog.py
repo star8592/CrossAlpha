@@ -47,6 +47,27 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
         ]
     ).to_parquet(canonical_dir / "part.parquet", index=False)
 
+    state_dir = (
+        tmp_path
+        / "derived"
+        / "state"
+        / "shadow_v01"
+        / "year=2026"
+        / "month=09"
+        / "day=04"
+    )
+    state_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "as_of": "2026-09-04T12:00:00Z",
+                "protocol": "CROSSALPHA_STATE_SHADOW_V0_1",
+                "state_band": "NORMAL",
+                "shadow_risk_multiplier": 1.0,
+            }
+        ]
+    ).to_parquet(state_dir / "state_at=120000.parquet", index=False)
+
     core_dir = (
         tmp_path
         / "derived"
@@ -72,6 +93,7 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
     result = build_catalog(tmp_path)
     assert "observatory.raw_manifest" in result["views"]
     assert "observatory.hyperliquid_asset_contexts" in result["views"]
+    assert "state_engine.shadow_v01" in result["views"]
     assert "core.free_asset_returns" in result["views"]
 
     con = duckdb.connect(result["database"], read_only=True)
@@ -81,6 +103,10 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
             "SELECT asset, mark_price FROM observatory.hyperliquid_asset_contexts"
         ).fetchone()
         assert row == ("BTC", 100.0)
+        state_row = con.execute(
+            "SELECT state_band, shadow_risk_multiplier FROM state_engine.shadow_v01"
+        ).fetchone()
+        assert state_row == ("NORMAL", 1.0)
         core_row = con.execute(
             "SELECT economic_asset, symbol, return FROM core.free_asset_returns"
         ).fetchone()
