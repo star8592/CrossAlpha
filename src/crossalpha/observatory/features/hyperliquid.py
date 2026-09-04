@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -111,18 +112,96 @@ def _partition_day(path: Path) -> date:
     return date(year_value, month_value, day_value)
 
 
-def build_hyperliquid_market_state(data_root: Path) -> dict[str, int]:
-    """Materialize daily market-state parquet from canonical Hyperliquid snapshots.
+def _day_dir(root: Path, value: date) -> Path:
+    return root / f"year={value:%Y}" / f"month={value:%m}" / f"day={value:%d}"
 
-    Historical output days are immutable once built; the latest day is recomputed on
-    every run so newly arrived snapshots appear quickly. Each day's features are built
-    with the previous calendar day's canonical snapshots included, giving causal 24h
-    rolling statistics enough lookback without rescanning the full history.
+
+def _latest_canonical_day_from_series_state(data_root: Path) -> date:
+    path = data_root / "manifests" / "series" / "hyperliquid" / "metaAndAssetCtxs.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Hyperliquid series state missing: {path}")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    latest = state.get("latest_observed_at")
+    if not isinstance(latest, str):
+        raise ValueError("Hyperliquid series state has no latest_observed_at")
+    latest_dt = datetime.fromisoformat(latest)
+    if latest_dt.tzinfo is None:
+        latest_dt = latest_dt.replace(tzinfo=timezone.utc)
+    return latest_dt.astimezone(timezone.utc).date()
+
+
+def _write_market_state_day(
+    data_root: Path,
+    current_day: date,
+    input_files: list[Path],
+) -> int:
+    if not input_files:
+        raise ValueError(f"no canonical input files for market-state day {current_day}")
+    input_frame = pd.concat((pd.read_parquet(path) for path in input_files), ignore_index=True)
+    features = compute_hyperliquid_market_state(input_frame)
+    current_mask = features["observed_at"].dt.date == current_day
+    current = features.loc[current_mask].copy()
+    if current.empty:
+        raise ValueError(f"market-state materialization produced zero rows for {current_day}")
+
+    output_root = data_root / "derived" / "hyperliquid" / "market_state"
+    out_dir = _day_dir(output_root, current_day)
+    out_path = out_dir / "market_state.parquet"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(".parquet.tmp")
+    current.to_parquet(tmp, index=False)
+    tmp.replace(out_path)
+    return len(current)
+
+
+def build_hyperliquid_market_state(
+    data_root: Path,
+    *,
+    recent_only: bool = False,
+) -> dict[str, int | str]:
+    """Materialize market-state parquet from canonical Hyperliquid snapshots.
+
+    Full mode is for explicit rebuilds. Online mode reads only the latest canonical day
+    plus its previous day for causal 24h lookback, then rewrites only the latest day's
+    derived partition. Runtime therefore stays bounded as history grows.
     """
     source_root = data_root / "canonical" / "hyperliquid" / "asset_contexts"
-    files = sorted(source_root.glob("**/*.parquet")) if source_root.exists() else []
+    if not source_root.exists():
+        return {
+            "mode": "recent" if recent_only else "full",
+            "source_files": 0,
+            "days": 0,
+            "written_days": 0,
+            "skipped_days": 0,
+            "rows_written": 0,
+        }
+
+    if recent_only:
+        latest_day = _latest_canonical_day_from_series_state(data_root)
+        previous_day = latest_day - timedelta(days=1)
+        previous_files = sorted(_day_dir(source_root, previous_day).glob("*.parquet"))
+        current_files = sorted(_day_dir(source_root, latest_day).glob("*.parquet"))
+        input_files = previous_files + current_files
+        rows = _write_market_state_day(data_root, latest_day, input_files)
+        return {
+            "mode": "recent",
+            "source_files": len(input_files),
+            "days": 1,
+            "written_days": 1,
+            "skipped_days": 0,
+            "rows_written": rows,
+        }
+
+    files = sorted(source_root.glob("**/*.parquet"))
     if not files:
-        return {"source_files": 0, "days": 0, "written_days": 0, "skipped_days": 0, "rows_written": 0}
+        return {
+            "mode": "full",
+            "source_files": 0,
+            "days": 0,
+            "written_days": 0,
+            "skipped_days": 0,
+            "rows_written": 0,
+        }
 
     by_day: dict[date, list[Path]] = defaultdict(list)
     for path in files:
@@ -136,35 +215,17 @@ def build_hyperliquid_market_state(data_root: Path) -> dict[str, int]:
     rows_written = 0
 
     for current_day in days:
-        out_dir = (
-            output_root
-            / f"year={current_day:%Y}"
-            / f"month={current_day:%m}"
-            / f"day={current_day:%d}"
-        )
-        out_path = out_dir / "market_state.parquet"
+        out_path = _day_dir(output_root, current_day) / "market_state.parquet"
         if out_path.exists() and current_day != latest_day:
             skipped_days += 1
             continue
-
-        input_files = list(by_day[current_day])
         previous_day = current_day - timedelta(days=1)
-        input_files = list(by_day.get(previous_day, [])) + input_files
-        input_frame = pd.concat((pd.read_parquet(path) for path in input_files), ignore_index=True)
-        features = compute_hyperliquid_market_state(input_frame)
-        current_mask = features["observed_at"].dt.date == current_day
-        current = features.loc[current_mask].copy()
-        if current.empty:
-            raise ValueError(f"market-state materialization produced zero rows for {current_day}")
-
-        out_dir.mkdir(parents=True, exist_ok=True)
-        tmp = out_path.with_suffix(".parquet.tmp")
-        current.to_parquet(tmp, index=False)
-        tmp.replace(out_path)
+        input_files = list(by_day.get(previous_day, [])) + list(by_day[current_day])
+        rows_written += _write_market_state_day(data_root, current_day, input_files)
         written_days += 1
-        rows_written += len(current)
 
     return {
+        "mode": "full",
         "source_files": len(files),
         "days": len(days),
         "written_days": written_days,
