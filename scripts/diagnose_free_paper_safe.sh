@@ -66,7 +66,7 @@ git rev-parse --short HEAD || true
 
 run_critical "1. editable install" python -m pip install -e ".[dev]" || true
 if [[ -z "$FAIL_STEP" ]]; then
-  run_critical "2. paper/final tests" pytest -q tests/test_free_paper.py tests/test_free_paper_guard.py tests/test_free_final_evaluation.py || true
+  run_critical "2. full pytest suite" pytest -q || true
 fi
 if [[ -z "$FAIL_STEP" ]]; then
   run_critical "3. freeze protocol" crossalpha-free-paper-freeze --historical-start 2010-06-01 --historical-end 2026-09-01 || true
