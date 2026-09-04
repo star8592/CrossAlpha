@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
+import yaml
 
 from crossalpha.core import frozen_b3_v01
-from crossalpha.state.shadow import apply_shadow_multiplier, compute_shadow_state
+from crossalpha.state.shadow import (
+    StateShadowConfig,
+    apply_shadow_multiplier,
+    compute_shadow_state,
+)
 
 
 def _hl_rows(*, observed: str, z: float, rolling: int = 30) -> pd.DataFrame:
@@ -156,3 +163,39 @@ def test_shadow_multiplier_preserves_relative_core_risk_weights() -> None:
     assert scaled["BTC"] / scaled["GOLD"] == pytest.approx(
         weights["BTC"] / weights["GOLD"]
     )
+
+
+def test_preregistered_state_yaml_matches_implementation() -> None:
+    root = Path(__file__).resolve().parents[1]
+    spec = yaml.safe_load((root / "config" / "state_shadow_v01.yaml").read_text(encoding="utf-8"))
+    cfg = StateShadowConfig()
+
+    assert spec["protocol"] == "CROSSALPHA_STATE_SHADOW_V0_1"
+    assert spec["mode"] == "SHADOW_ONLY"
+    assert spec["core_mutation_allowed"] is False
+    assert spec["risk_increase_allowed"] is False
+    assert spec["point_in_time"]["max_source_age_minutes"] == cfg.max_source_age_minutes
+    assert (
+        spec["hyperliquid"]["minimum_rolling_observations_24h"]
+        == cfg.min_hyperliquid_rolling_observations
+    )
+    assert spec["hyperliquid"]["full_stress_z"] == cfg.z_full_stress
+    assert (
+        spec["stablecoins"]["minimum_delta_7d_market_value_coverage"]
+        == cfg.stablecoin_min_delta_7d_coverage
+    )
+    assert spec["stablecoins"]["chain_coverage_range"] == [
+        cfg.stablecoin_min_chain_coverage,
+        cfg.stablecoin_max_chain_coverage,
+    ]
+    assert (
+        spec["stablecoins"]["maximum_chain_abs_residual_ratio"]
+        == cfg.stablecoin_max_chain_abs_residual_ratio
+    )
+    assert (
+        spec["stablecoins"]["supply_contraction_full_stress_ratio"]
+        == cfg.stablecoin_contraction_full_stress
+    )
+    assert spec["stablecoins"]["peg_full_stress_bps"] == cfg.peg_full_stress_bps
+    assert spec["risk_multiplier"]["moderate"]["multiplier"] == cfg.moderate_risk_multiplier
+    assert spec["risk_multiplier"]["severe"]["multiplier"] == cfg.severe_risk_multiplier
