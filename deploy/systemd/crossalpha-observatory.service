@@ -1,0 +1,17 @@
+[Unit]
+Description=CrossAlpha Observatory O0 collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/CrossAlpha
+EnvironmentFile=%h/CrossAlpha/.env
+ExecStart=%h/CrossAlpha/.venv/bin/python scripts/collect_loop.py --interval 300
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
