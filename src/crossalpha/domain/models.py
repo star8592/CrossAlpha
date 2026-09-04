@@ -34,6 +34,7 @@ class RawSnapshotManifest(BaseModel):
     path: str
     sha256: str
     bytes: int
+    compressed_bytes: int | None = None
     observed_at: datetime
     source_id: str
     observation_type: str
