@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -147,23 +148,31 @@ def test_stablecoin_state_reports_chain_coverage_residual_without_hiding_it() ->
 
 def test_stablecoin_materialization_and_query_return_latest_snapshot(tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 4, 13, 0, tzinfo=timezone.utc)
+    latest = t0 + timedelta(minutes=5)
     day_dir_assets = tmp_path / "canonical" / "defillama" / "stablecoin_assets" / "year=2026" / "month=09" / "day=04"
     day_dir_chains = tmp_path / "canonical" / "defillama" / "stablecoin_chain_supply" / "year=2026" / "month=09" / "day=04"
     day_dir_assets.mkdir(parents=True)
     day_dir_chains.mkdir(parents=True)
 
-    for index, observed in enumerate((t0, t0 + timedelta(minutes=5))):
+    for index, observed in enumerate((t0, latest)):
         assets, chains = _frames(observed)
         assets.to_parquet(day_dir_assets / f"snapshot_{index}.parquet", index=False)
         chains.to_parquet(day_dir_chains / f"snapshot_{index}.parquet", index=False)
+
+    series_path = tmp_path / "manifests" / "series" / "defillama" / "stablecoins_snapshot.json"
+    series_path.parent.mkdir(parents=True)
+    series_path.write_text(
+        json.dumps({"latest_observed_at": latest.isoformat()}),
+        encoding="utf-8",
+    )
 
     result = build_stablecoin_state(tmp_path, recent_only=True)
     assert result["written_days"] == 1
     assert result["rows_written"] == 2
 
     build_catalog(tmp_path)
-    latest = latest_stablecoin_state(tmp_path, top_chains=2)
-    assert latest["system"] is not None
-    assert latest["system"]["observed_at"] == t0 + timedelta(minutes=5)
-    assert len(latest["top_chains"]) == 2
-    assert latest["top_chains"][0]["chain"] == "Ethereum"
+    state = latest_stablecoin_state(tmp_path, top_chains=2)
+    assert state["system"] is not None
+    assert state["system"]["observed_at"] == latest
+    assert len(state["top_chains"]) == 2
+    assert state["top_chains"][0]["chain"] == "Ethereum"
