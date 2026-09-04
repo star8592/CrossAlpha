@@ -14,5 +14,5 @@ class Settings(BaseSettings):
     crossalpha_http_timeout: float = 30.0
 
     def ensure_dirs(self) -> None:
-        for name in ("raw", "canonical", "derived", "manifests"):
+        for name in ("raw", "canonical", "derived", "manifests", "research", "archive", "catalog"):
             (self.crossalpha_data_dir / name).mkdir(parents=True, exist_ok=True)
