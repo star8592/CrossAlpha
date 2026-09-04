@@ -17,6 +17,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "PyYAML>=6.0",
   "pandas>=2.2",
+  "pytz>=2024.1",
   "polars>=1.0",
   "pyarrow>=16",
   "duckdb>=1.0",
