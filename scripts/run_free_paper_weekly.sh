@@ -33,6 +33,8 @@ retry_refresh() {
 }
 
 retry_refresh
+python scripts/check_free_paper_integrity.py
 crossalpha-free-paper-snapshot --effective-date "$TODAY_UTC"
 crossalpha-free-paper-mark --end "$TODAY_UTC"
+python scripts/check_free_paper_integrity.py
 crossalpha-free-paper-status
