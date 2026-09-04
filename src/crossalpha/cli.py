@@ -29,6 +29,7 @@ from crossalpha.storage.raw import RawSnapshotStore
 
 
 CORE_FUTURES_ROOTS = ("ES", "NQ", "GC", "SI", "HG", "CL", "BTC", "ETH")
+CORE_CONTINUOUS_SYMBOLS = tuple(f"{root}.v.0" for root in CORE_FUTURES_ROOTS)
 
 
 async def collect_observatory(settings: Settings, sources: list[str]) -> None:
@@ -66,16 +67,24 @@ def _require_databento(settings: Settings) -> DatabentoCoreProvider:
     return DatabentoCoreProvider(settings.databento_api_key)
 
 
-def _parent_request(start: str, end: str | None) -> ParentFuturesRequest:
+def _parent_request(start: str, end: str) -> ParentFuturesRequest:
     return ParentFuturesRequest(roots=CORE_FUTURES_ROOTS, start=start, end=end)
+
+
+def _continuous_request(start: str, end: str) -> DatabentoRequest:
+    return DatabentoRequest(symbols=CORE_CONTINUOUS_SYMBOLS, start=start, end=end)
 
 
 def _safe_slug(value: str) -> str:
     return value.replace(":", "-").replace("/", "-").replace(" ", "_")
 
 
-def _parent_paths(data_root: Path, start: str, end: str | None) -> dict[str, Path]:
-    range_dir = Path(f"start={_safe_slug(start)}", f"end={_safe_slug(end or 'latest')}")
+def _range_dir(start: str, end: str) -> Path:
+    return Path(f"start={_safe_slug(start)}", f"end={_safe_slug(end)}")
+
+
+def _parent_paths(data_root: Path, start: str, end: str) -> dict[str, Path]:
+    range_dir = _range_dir(start, end)
     staging = data_root / "raw" / "databento" / "GLBX.MDP3" / "parent" / range_dir
     canonical = data_root / "canonical" / "core" / "futures_contract_daily" / range_dir
     return {
@@ -86,7 +95,67 @@ def _parent_paths(data_root: Path, start: str, end: str | None) -> dict[str, Pat
     }
 
 
-def estimate_core_parent(settings: Settings, start: str, end: str | None) -> dict[str, object]:
+def _continuous_paths(data_root: Path, start: str, end: str) -> dict[str, Path]:
+    range_dir = _range_dir(start, end)
+    staging = data_root / "raw" / "databento" / "GLBX.MDP3" / "continuous" / range_dir
+    return {"staging": staging, "bars": staging / "continuous_daily.parquet"}
+
+
+def estimate_core(settings: Settings, start: str, end: str) -> dict[str, object]:
+    provider = _require_databento(settings)
+    request = _continuous_request(start, end)
+    cost = provider.estimate_cost(request)
+    return {
+        "dataset": request.dataset,
+        "symbols": list(request.symbols),
+        "start": start,
+        "end": end,
+        "schema": request.schema,
+        "estimated_cost_usd": cost,
+    }
+
+
+def fetch_core(
+    settings: Settings,
+    start: str,
+    end: str,
+    *,
+    max_cost_usd: float,
+) -> dict[str, object]:
+    if max_cost_usd < 0:
+        raise SystemExit("--max-cost-usd must be non-negative")
+    provider = _require_databento(settings)
+    request = _continuous_request(start, end)
+    paths = _continuous_paths(settings.crossalpha_data_dir, start, end)
+
+    estimated_cost = 0.0
+    fetched = False
+    if not paths["bars"].exists():
+        estimated_cost = provider.estimate_cost(request)
+        if estimated_cost > max_cost_usd:
+            raise SystemExit(
+                f"estimated cost ${estimated_cost:.6f} exceeds --max-cost-usd ${max_cost_usd:.6f}; no paid download started"
+            )
+        provider.fetch_continuous_daily(request, paths["staging"])
+        fetched = True
+
+    quality = validate_ohlcv_parquet(paths["bars"])
+    if not quality.ok:
+        raise SystemExit("QUALITY GATE FAILED")
+    return {
+        "dataset": request.dataset,
+        "symbols": list(request.symbols),
+        "start": start,
+        "end": end,
+        "max_cost_usd": max_cost_usd,
+        "estimated_missing_cost_usd": estimated_cost,
+        "fetched": fetched,
+        "bars": str(paths["bars"]),
+        "quality_ok": True,
+    }
+
+
+def estimate_core_parent(settings: Settings, start: str, end: str) -> dict[str, object]:
     provider = _require_databento(settings)
     request = _parent_request(start, end)
     definition_cost = provider.estimate_parent_cost(request, schema="definition")
@@ -105,7 +174,7 @@ def estimate_core_parent(settings: Settings, start: str, end: str | None) -> dic
 def fetch_core_parent(
     settings: Settings,
     start: str,
-    end: str | None,
+    end: str,
     *,
     max_cost_usd: float,
 ) -> dict[str, object]:
@@ -115,14 +184,14 @@ def fetch_core_parent(
     request = _parent_request(start, end)
     paths = _parent_paths(settings.crossalpha_data_dir, start, end)
 
-    missing: list[tuple[str, str, Path]] = []
+    missing: list[tuple[str, str]] = []
     if not paths["definitions"].exists():
-        missing.append(("definition", "definitions", paths["definitions"]))
+        missing.append(("definition", "definitions"))
     if not paths["bars"].exists():
-        missing.append(("ohlcv-1d", "bars", paths["bars"]))
+        missing.append(("ohlcv-1d", "bars"))
 
     estimates: dict[str, float] = {}
-    for schema, label, _ in missing:
+    for schema, label in missing:
         estimates[label] = provider.estimate_parent_cost(request, schema=schema)
     missing_cost = sum(estimates.values())
     if missing_cost > max_cost_usd:
@@ -158,7 +227,7 @@ def fetch_core_parent(
     }
 
 
-def normalize_core_parent(settings: Settings, start: str, end: str | None) -> dict[str, str]:
+def normalize_core_parent(settings: Settings, start: str, end: str) -> dict[str, str]:
     paths = _parent_paths(settings.crossalpha_data_dir, start, end)
     for key in ("definitions", "bars"):
         if not paths[key].exists():
@@ -167,22 +236,13 @@ def normalize_core_parent(settings: Settings, start: str, end: str | None) -> di
     return {"canonical": str(out)}
 
 
-def fetch_core(settings: Settings, start: str, end: str | None) -> None:
-    provider = _require_databento(settings)
-    request = DatabentoRequest(
-        symbols=("ES.v.0", "NQ.v.0", "GC.v.0", "SI.v.0", "HG.v.0", "CL.v.0", "BTC.v.0", "ETH.v.0"),
-        start=start,
-        end=end,
+def _add_explicit_range(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--start", default="2010-06-01")
+    parser.add_argument(
+        "--end",
+        required=True,
+        help="Explicit exclusive Databento end timestamp; never inferred as 'latest'.",
     )
-    out = provider.fetch_continuous_daily(
-        request,
-        settings.crossalpha_data_dir / "raw" / "databento" / "GLBX.MDP3",
-    )
-    quality = validate_ohlcv_parquet(out)
-    print(f"saved={out}")
-    print(f"quality={quality}")
-    if not quality.ok:
-        raise SystemExit("QUALITY GATE FAILED")
 
 
 def main() -> None:
@@ -215,22 +275,22 @@ def main() -> None:
     stable = sub.add_parser("stablecoin-state")
     stable.add_argument("--top-chains", type=int, default=10)
 
+    estimate = sub.add_parser("estimate-core")
+    _add_explicit_range(estimate)
+
     core = sub.add_parser("fetch-core")
-    core.add_argument("--start", default="2010-06-01")
-    core.add_argument("--end", default=None)
+    _add_explicit_range(core)
+    core.add_argument("--max-cost-usd", type=float, required=True)
 
     estimate_parent = sub.add_parser("estimate-core-parent")
-    estimate_parent.add_argument("--start", default="2010-06-01")
-    estimate_parent.add_argument("--end", default=None)
+    _add_explicit_range(estimate_parent)
 
     fetch_parent = sub.add_parser("fetch-core-parent")
-    fetch_parent.add_argument("--start", default="2010-06-01")
-    fetch_parent.add_argument("--end", default=None)
+    _add_explicit_range(fetch_parent)
     fetch_parent.add_argument("--max-cost-usd", type=float, required=True)
 
     normalize_parent = sub.add_parser("normalize-core-parent")
-    normalize_parent.add_argument("--start", default="2010-06-01")
-    normalize_parent.add_argument("--end", default=None)
+    _add_explicit_range(normalize_parent)
 
     sub.add_parser("doctor")
 
@@ -280,6 +340,16 @@ def main() -> None:
     elif args.command == "stablecoin-state":
         report = latest_stablecoin_state(settings.crossalpha_data_dir, top_chains=args.top_chains)
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    elif args.command == "estimate-core":
+        print(json.dumps(estimate_core(settings, args.start, args.end), ensure_ascii=False, indent=2))
+    elif args.command == "fetch-core":
+        print(
+            json.dumps(
+                fetch_core(settings, args.start, args.end, max_cost_usd=args.max_cost_usd),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     elif args.command == "estimate-core-parent":
         print(json.dumps(estimate_core_parent(settings, args.start, args.end), ensure_ascii=False, indent=2))
     elif args.command == "fetch-core-parent":
@@ -297,8 +367,6 @@ def main() -> None:
         )
     elif args.command == "normalize-core-parent":
         print(json.dumps(normalize_core_parent(settings, args.start, args.end), ensure_ascii=False, indent=2))
-    elif args.command == "fetch-core":
-        fetch_core(settings, args.start, args.end)
     elif args.command == "doctor":
         report = storage_report(settings.crossalpha_data_dir)
         print(json.dumps(report, ensure_ascii=False, indent=2))
