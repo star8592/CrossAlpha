@@ -6,6 +6,7 @@ import json
 from crossalpha.core.free_baselines import FreeBaselineConfig, run_free_baselines
 from crossalpha.core.free_dataset import audit_free_core, build_free_core_returns
 from crossalpha.core.free_provider import FreeCoreRange
+from crossalpha.core.free_robustness import run_free_robustness_stage1
 from crossalpha.settings import Settings
 
 
@@ -58,5 +59,18 @@ def baselines_main() -> None:
         start=args.start,
         end=args.end,
         config=FreeBaselineConfig(cost_bps=args.cost_bps),
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def robustness_main() -> None:
+    parser = _range_parser("crossalpha-free-robustness")
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = run_free_robustness_stage1(
+        settings.crossalpha_data_dir,
+        start=args.start,
+        end=args.end,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
