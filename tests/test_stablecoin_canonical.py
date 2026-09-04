@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pandas as pd
 import pytest
 
 from crossalpha.domain.models import RawSnapshotManifest
@@ -87,7 +88,7 @@ def test_parse_stablecoin_snapshot_preserves_native_peg_units() -> None:
     eurt = assets.loc[assets["symbol"] == "EURT"].iloc[0]
     assert eurt["circulating_native"] == 100.0
     assert eurt["market_value_usd"] == pytest.approx(108.0)
-    assert eurt["peg_deviation_bps"] != eurt["peg_deviation_bps"]  # NaN: no fake USD peg target.
+    assert pd.isna(eurt["peg_deviation_bps"])  # no fake USD peg target.
 
     eth_usdc = chains[(chains["symbol"] == "USDC") & (chains["chain"] == "Ethereum")].iloc[0]
     assert eth_usdc["canonical_schema_version"] == CANONICAL_SCHEMA_VERSION
@@ -120,7 +121,7 @@ def test_parse_stablecoin_snapshot_supports_legacy_flat_chain_shape() -> None:
 
     _, chains = parse_stablecoin_snapshot(envelope, _manifest())
     assert chains.iloc[0]["circulating_native"] == pytest.approx(100.0)
-    assert chains.iloc[0]["circulating_prev_day_native"] != chains.iloc[0]["circulating_prev_day_native"]
+    assert pd.isna(chains.iloc[0]["circulating_prev_day_native"])
 
 
 def test_parse_stablecoin_snapshot_rejects_duplicate_ids() -> None:
