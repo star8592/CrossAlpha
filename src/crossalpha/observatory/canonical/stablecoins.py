@@ -12,6 +12,9 @@ from crossalpha.observatory.health import load_manifest
 from crossalpha.storage.indexes import load_recent_daily_manifests
 
 
+CANONICAL_SCHEMA_VERSION = 2
+
+
 def _to_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -32,6 +35,42 @@ def _peg_amount(value: Any, peg_type: str | None) -> float | None:
             return numeric[0]
         return None
     return _to_float(value)
+
+
+def _chain_measure(chain_value: Any, field: str, peg_type: str | None) -> float | None:
+    """Extract a DefiLlama per-chain supply measure.
+
+    Current DefiLlama payloads nest chain values as::
+
+        chainCirculating[chain][field][pegType]
+
+    Older fixtures/wrappers may expose the current amount directly as::
+
+        chainCirculating[chain][pegType]
+
+    Supporting both shapes makes the parser robust while preserving the upstream
+    point-in-time fields instead of flattening missing history to zero.
+    """
+    if not isinstance(chain_value, dict):
+        return None
+    if field in chain_value:
+        return _peg_amount(chain_value.get(field), peg_type)
+    if field == "circulating":
+        return _peg_amount(chain_value, peg_type)
+    return None
+
+
+def _canonical_file_version(path: Path) -> int:
+    if not path.exists():
+        return 0
+    try:
+        frame = pd.read_parquet(path, columns=["canonical_schema_version"])
+    except Exception:  # noqa: BLE001 - old schema intentionally falls back to zero.
+        return 0
+    if frame.empty:
+        return 0
+    value = pd.to_numeric(frame["canonical_schema_version"], errors="coerce").dropna()
+    return int(value.iloc[0]) if not value.empty else 0
 
 
 def parse_stablecoin_snapshot(
@@ -74,6 +113,7 @@ def parse_stablecoin_snapshot(
 
         asset_rows.append(
             {
+                "canonical_schema_version": CANONICAL_SCHEMA_VERSION,
                 "observed_at": observed_at,
                 "known_at": known_at,
                 "stablecoin_id": asset_id,
@@ -99,9 +139,13 @@ def parse_stablecoin_snapshot(
         )
 
         for chain, chain_value in chain_map.items():
-            chain_native = _peg_amount(chain_value, peg_type)
+            chain_current = _chain_measure(chain_value, "circulating", peg_type)
+            chain_prev_day = _chain_measure(chain_value, "circulatingPrevDay", peg_type)
+            chain_prev_week = _chain_measure(chain_value, "circulatingPrevWeek", peg_type)
+            chain_prev_month = _chain_measure(chain_value, "circulatingPrevMonth", peg_type)
             chain_rows.append(
                 {
+                    "canonical_schema_version": CANONICAL_SCHEMA_VERSION,
                     "observed_at": observed_at,
                     "known_at": known_at,
                     "stablecoin_id": asset_id,
@@ -109,10 +153,28 @@ def parse_stablecoin_snapshot(
                     "symbol": symbol,
                     "peg_type": peg_type,
                     "chain": chain,
-                    "circulating_native": chain_native,
+                    "circulating_native": chain_current,
+                    "circulating_prev_day_native": chain_prev_day,
+                    "circulating_prev_week_native": chain_prev_week,
+                    "circulating_prev_month_native": chain_prev_month,
+                    "delta_1d_native": (
+                        chain_current - chain_prev_day
+                        if chain_current is not None and chain_prev_day is not None
+                        else None
+                    ),
+                    "delta_7d_native": (
+                        chain_current - chain_prev_week
+                        if chain_current is not None and chain_prev_week is not None
+                        else None
+                    ),
+                    "delta_30d_native": (
+                        chain_current - chain_prev_month
+                        if chain_current is not None and chain_prev_month is not None
+                        else None
+                    ),
                     "market_value_usd": (
-                        chain_native * price_usd
-                        if chain_native is not None and price_usd is not None
+                        chain_current * price_usd
+                        if chain_current is not None and price_usd is not None
                         else None
                     ),
                     "price_usd": price_usd,
@@ -146,6 +208,7 @@ def canonicalize_stablecoins(data_root: Path, *, recent_days: int | None = None)
         if record.source_id == "defillama" and record.observation_type == "stablecoins_snapshot"
     ]
     written = 0
+    rewritten = 0
     skipped = 0
     asset_rows = 0
     chain_rows = 0
@@ -158,9 +221,12 @@ def canonicalize_stablecoins(data_root: Path, *, recent_days: int | None = None)
         )
         asset_path = data_root / "canonical" / "defillama" / "stablecoin_assets" / base
         chain_path = data_root / "canonical" / "defillama" / "stablecoin_chain_supply" / base
-        if asset_path.exists() and chain_path.exists():
+        asset_version = _canonical_file_version(asset_path)
+        chain_version = _canonical_file_version(chain_path)
+        if asset_version >= CANONICAL_SCHEMA_VERSION and chain_version >= CANONICAL_SCHEMA_VERSION:
             skipped += 1
             continue
+        replacing_old = asset_path.exists() or chain_path.exists()
 
         with gzip.open(record.path, "rt", encoding="utf-8") as fh:
             envelope = json.load(fh)
@@ -175,13 +241,17 @@ def canonicalize_stablecoins(data_root: Path, *, recent_days: int | None = None)
         asset_tmp.replace(asset_path)
         chain_tmp.replace(chain_path)
         written += 1
+        if replacing_old:
+            rewritten += 1
         asset_rows += len(assets)
         chain_rows += len(chains)
 
     return {
         "mode": mode,
+        "canonical_schema_version": CANONICAL_SCHEMA_VERSION,
         "snapshots": len(selected),
         "written": written,
+        "rewritten": rewritten,
         "skipped": skipped,
         "asset_rows_written": asset_rows,
         "chain_rows_written": chain_rows,
