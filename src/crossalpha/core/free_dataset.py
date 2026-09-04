@@ -6,7 +6,12 @@ from typing import Any
 
 import pandas as pd
 
-from crossalpha.core.free_provider import FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FRED_CASH_SERIES, FreeCoreRange
+from crossalpha.core.free_provider import (
+    FREE_CRYPTO_PROXIES,
+    FREE_TRADFI_PROXIES,
+    FRED_CASH_SERIES,
+    FreeCoreRange,
+)
 
 
 def _safe_slug(value: str) -> str:
@@ -100,9 +105,18 @@ def _series_audit(
     }
 
 
-def audit_free_core(data_root: Path, value: FreeCoreRange, *, write_report: bool = True) -> dict[str, Any]:
+def audit_free_core(
+    data_root: Path,
+    value: FreeCoreRange,
+    *,
+    write_report: bool = True,
+) -> dict[str, Any]:
     paths = _paths(data_root, value)
-    missing_files = [str(path) for key, path in paths.items() if key in {"tradfi", "crypto", "cash"} and not path.exists()]
+    missing_files = [
+        str(path)
+        for key, path in paths.items()
+        if key in {"tradfi", "crypto", "cash"} and not path.exists()
+    ]
     if missing_files:
         report = {
             "ok": False,
@@ -114,7 +128,10 @@ def audit_free_core(data_root: Path, value: FreeCoreRange, *, write_report: bool
         }
         if write_report:
             paths["quality"].parent.mkdir(parents=True, exist_ok=True)
-            paths["quality"].write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            paths["quality"].write_text(
+                json.dumps(report, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         return report
 
     tradfi = pd.read_parquet(paths["tradfi"])
@@ -186,18 +203,32 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
 
     tradfi["date"] = pd.to_datetime(tradfi["date"], utc=True)
     tradfi["price"] = pd.to_numeric(tradfi["adj_close"], errors="coerce")
-    tradfi["return"] = tradfi.groupby("economic_asset", sort=False)["price"].pct_change(fill_method=None)
-    tradfi_out = tradfi[["date", "economic_asset", "source", "symbol", "price", "return"]].copy()
+    tradfi["return"] = tradfi.groupby("economic_asset", sort=False)["price"].pct_change(
+        fill_method=None
+    )
+    tradfi_out = tradfi[
+        ["date", "economic_asset", "source", "symbol", "price", "return"]
+    ].copy()
 
     crypto["date"] = pd.to_datetime(crypto["date"], utc=True)
     crypto["price"] = pd.to_numeric(crypto["close"], errors="coerce")
-    crypto["return"] = crypto.groupby("economic_asset", sort=False)["price"].pct_change(fill_method=None)
-    crypto_out = crypto[["date", "economic_asset", "source", "symbol", "price", "return"]].copy()
+    crypto["return"] = crypto.groupby("economic_asset", sort=False)["price"].pct_change(
+        fill_method=None
+    )
+    crypto_out = crypto[
+        ["date", "economic_asset", "source", "symbol", "price", "return"]
+    ].copy()
 
     cash["date"] = pd.to_datetime(cash["date"], utc=True)
     cash["rate_percent"] = pd.to_numeric(cash["rate_percent"], errors="coerce")
-    calendar = pd.DataFrame({"date": pd.date_range(pd.to_datetime(value.start, utc=True).normalize(), pd.to_datetime(value.end, utc=True).normalize(), inclusive="left", freq="D", tz="UTC")})
-    known_rates = cash.loc[cash["rate_percent"].notna(), ["date", "rate_percent"]].sort_values("date")
+    start = pd.to_datetime(value.start, utc=True).normalize()
+    end = pd.to_datetime(value.end, utc=True).normalize()
+    calendar = pd.DataFrame(
+        {"date": pd.date_range(start=start, end=end, inclusive="left", freq="D")}
+    )
+    known_rates = cash.loc[
+        cash["rate_percent"].notna(), ["date", "rate_percent"]
+    ].sort_values("date")
     cash_daily = pd.merge_asof(
         calendar.sort_values("date"),
         known_rates,
@@ -209,8 +240,12 @@ def build_free_core_returns(data_root: Path, value: FreeCoreRange) -> dict[str, 
     cash_daily["source"] = "fred"
     cash_daily["symbol"] = FRED_CASH_SERIES
     cash_daily["price"] = pd.NA
-    cash_daily["return"] = (1.0 + cash_daily["rate_percent"] / 100.0) ** (1.0 / 365.0) - 1.0
-    cash_out = cash_daily[["date", "economic_asset", "source", "symbol", "price", "return"]].copy()
+    cash_daily["return"] = (
+        (1.0 + cash_daily["rate_percent"] / 100.0) ** (1.0 / 365.0) - 1.0
+    )
+    cash_out = cash_daily[
+        ["date", "economic_asset", "source", "symbol", "price", "return"]
+    ].copy()
 
     combined = pd.concat([tradfi_out, crypto_out, cash_out], ignore_index=True)
     combined = combined.sort_values(["date", "economic_asset"]).reset_index(drop=True)
