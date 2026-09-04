@@ -43,6 +43,19 @@ def _latest_stablecoin_day_from_series_state(data_root: Path) -> date:
     return latest_dt.astimezone(timezone.utc).date()
 
 
+def _known_sum(series: pd.Series) -> float | None:
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    return float(values.sum()) if not values.empty else None
+
+
+def _market_value_coverage(part: pd.DataFrame, column: str, total_market_value: float) -> float | None:
+    if total_market_value <= 0:
+        return None
+    known = part[column].notna()
+    covered_value = float(part.loc[known, "market_value_usd"].fillna(0.0).sum())
+    return covered_value / total_market_value
+
+
 def compute_stablecoin_system_state(
     assets: pd.DataFrame,
     chains: pd.DataFrame,
@@ -53,6 +66,7 @@ def compute_stablecoin_system_state(
     `peggedUSD` assets are aggregated into the USD system totals. Chain sums are kept
     separate from asset totals so coverage/residuals remain visible instead of silently
     forcing conservation when the upstream provider's chain coverage may be incomplete.
+    Missing historical deltas remain unknown and are accompanied by coverage ratios.
     """
     asset_required = {
         "observed_at",
@@ -119,6 +133,8 @@ def compute_stablecoin_system_state(
         on=["observed_at", "stablecoin_id"],
         how="left",
     )
+    # No chain rows means zero observed chain coverage, not zero residual.
+    asset_with_chain["chain_sum_native"] = asset_with_chain["chain_sum_native"].fillna(0.0)
     asset_with_chain["chain_residual_native"] = (
         asset_with_chain["chain_sum_native"] - asset_with_chain["circulating_native"]
     )
@@ -132,7 +148,7 @@ def compute_stablecoin_system_state(
         market_values = part["market_value_usd"].fillna(0.0)
         total_market_value = float(market_values.sum())
         total_supply_native = float(part["circulating_native"].fillna(0.0).sum())
-        chain_sum_native = float(part["chain_sum_native"].fillna(0.0).sum())
+        chain_sum_native = float(part["chain_sum_native"].sum())
         residual_native = chain_sum_native - total_supply_native
         abs_residual_native = float(part["chain_residual_native"].abs().fillna(0.0).sum())
 
@@ -148,6 +164,9 @@ def compute_stablecoin_system_state(
         if float(valid_weight.sum()) > 0:
             weighted_abs_peg = float((abs_peg.fillna(0.0) * valid_weight).sum() / valid_weight.sum())
 
+        delta_1d = _known_sum(part["delta_1d_native"])
+        delta_7d = _known_sum(part["delta_7d_native"])
+        delta_30d = _known_sum(part["delta_30d_native"])
         offpeg_50 = part.loc[abs_peg >= 50.0, "market_value_usd"].fillna(0.0)
         known_at = part["known_at"].max()
         system_rows.append(
@@ -157,9 +176,12 @@ def compute_stablecoin_system_state(
                 "usd_stablecoin_count": int(part["stablecoin_id"].nunique()),
                 "usd_supply_native": total_supply_native,
                 "usd_market_value_usd": total_market_value,
-                "usd_delta_1d_native": float(part["delta_1d_native"].fillna(0.0).sum()),
-                "usd_delta_7d_native": float(part["delta_7d_native"].fillna(0.0).sum()),
-                "usd_delta_30d_native": float(part["delta_30d_native"].fillna(0.0).sum()),
+                "usd_delta_1d_native": delta_1d,
+                "usd_delta_7d_native": delta_7d,
+                "usd_delta_30d_native": delta_30d,
+                "delta_1d_market_value_coverage": _market_value_coverage(part, "delta_1d_native", total_market_value),
+                "delta_7d_market_value_coverage": _market_value_coverage(part, "delta_7d_native", total_market_value),
+                "delta_30d_market_value_coverage": _market_value_coverage(part, "delta_30d_native", total_market_value),
                 "usdt_market_value_usd": usdt,
                 "usdc_market_value_usd": usdc,
                 "usdt_share": usdt / total_market_value if usdt is not None and total_market_value > 0 else None,
