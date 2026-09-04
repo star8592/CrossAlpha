@@ -110,7 +110,9 @@ def canonicalize_hyperliquid(data_root: Path) -> dict[str, int]:
         with gzip.open(record.path, "rt", encoding="utf-8") as fh:
             envelope = json.load(fh)
         frame = parse_meta_and_asset_contexts(envelope, record)
-        frame.to_parquet(out_path, index=False)
+        tmp = out_path.with_suffix(".parquet.tmp")
+        frame.to_parquet(tmp, index=False)
+        tmp.replace(out_path)
         written += 1
         rows += len(frame)
 
