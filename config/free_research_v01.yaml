@@ -56,12 +56,9 @@ constraints:
     precious_metals:
       assets: [GOLD, SILVER]
       max: 0.35
-    industrials:
-      assets: [COPPER]
-      max: 0.25
-    energy:
-      assets: [WTI]
-      max: 0.25
+    cyclical_commodities:
+      assets: [COPPER, WTI]
+      max: 0.35
 strategies:
   B0: CASH
   B1: EQUAL_WEIGHT
