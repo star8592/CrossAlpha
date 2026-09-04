@@ -29,6 +29,7 @@ crossalpha-free-returns --start "$START" --end "$END"
 crossalpha-free-baselines --start "$START" --end "$END" --cost-bps 5
 crossalpha-free-robustness --start "$START" --end "$END"
 crossalpha-free-robustness2 --start "$START" --end "$END" --bootstrap "$BOOTSTRAP" --seed 8592
+crossalpha-free-finalize --start "$START" --end "$END"
 
 python - <<'PY'
 import json
@@ -42,10 +43,12 @@ end = os.environ["CROSSALPHA_RESEARCH_END"]
 baseline_path = root / "baselines" / f"start={start}" / f"end={end}" / "summary.json"
 stage1_path = root / "robustness_stage1" / f"start={start}" / f"end={end}" / "summary.json"
 stage2_path = root / "robustness_stage2" / f"start={start}" / f"end={end}" / "summary.json"
+final_path = root / "final_evaluation" / f"start={start}" / f"end={end}" / "final_decision.json"
 
 baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
 stage1 = json.loads(stage1_path.read_text(encoding="utf-8"))
 stage2 = json.loads(stage2_path.read_text(encoding="utf-8"))
+final = json.loads(final_path.read_text(encoding="utf-8"))
 
 print("\n==================================================")
 print("FINAL VALIDATION SCREEN")
@@ -58,6 +61,7 @@ for strategy in (
     b = baseline["strategies"][strategy]
     s1 = stage1["focus_screen"][strategy]
     s2 = stage2["focus_screen"][strategy]
+    decision = final["decisions"][strategy]
     print(f"\n{strategy}")
     print(f"  baseline CAGR              = {b['cagr']:.6f}")
     print(f"  baseline Sharpe            = {b['sharpe_excess_cash']:.6f}")
@@ -71,8 +75,15 @@ for strategy in (
     print(f"  stage2 WF OOS Sharpe       = {s2['walk_forward_selected_oos_sharpe']:.6f}")
     print(f"  stage2 positive WF folds   = {s2['walk_forward_positive_fold_share']:.6f}")
     print(f"  SURVIVES STAGE 2           = {s2['survives_stage2']}")
+    print(f"  LOYO minimum Sharpe        = {decision['loyo_min_sharpe']:.6f}")
+    print(f"  tuning value-add           = {decision['tuning_value_add']:.6f}")
+    print(f"  FINAL HISTORICAL STATE     = {decision['state']}")
 
-print("\nStage 2 is a falsification screen, not final proof of alpha.")
+print("\nFrozen Core candidate       =", final["core_candidate"])
+print("Parameter optimization      =", final["parameter_optimization_allowed"])
+print("B3 stress outperformance    =", f"{final['B3_benchmark_stress_outperformance_count']}/{final['B3_benchmark_stress_episode_count']}")
+print("Average effective assets    =", final["B3_concentration"]["average_effective_asset_count"])
+print("\nPROMISING_BUT_UNPROVEN explicitly reserves SUPPORTED for genuinely prospective frozen observations.")
 PY
 
 echo
