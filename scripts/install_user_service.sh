@@ -15,3 +15,20 @@ systemctl --user enable --now crossalpha-observatory.service
 echo "Installed: $UNIT_DST"
 echo "Status:    systemctl --user status crossalpha-observatory.service"
 echo "Logs:      journalctl --user -u crossalpha-observatory.service -f"
+echo
+printf "Waiting for the first healthy collector cycle"
+for _ in $(seq 1 15); do
+  if "$REPO_DIR/.venv/bin/crossalpha" observatory-health >/dev/null 2>&1; then
+    echo
+    echo "Observatory is healthy."
+    "$REPO_DIR/.venv/bin/crossalpha" observatory-health
+    exit 0
+  fi
+  printf "."
+  sleep 2
+done
+
+echo
+echo "Service is running, but the first healthy cycle has not completed yet."
+echo "Check: $REPO_DIR/.venv/bin/crossalpha observatory-health"
+echo "Logs:  journalctl --user -u crossalpha-observatory.service -n 100 --no-pager"
