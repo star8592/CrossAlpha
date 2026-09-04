@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from crossalpha.core.free_baselines import FreeBaselineConfig, run_free_baselines
 from crossalpha.core.free_dataset import audit_free_core, build_free_core_returns
 from crossalpha.core.free_provider import FreeCoreRange
 from crossalpha.settings import Settings
@@ -37,5 +38,25 @@ def returns_main() -> None:
     report = build_free_core_returns(
         settings.crossalpha_data_dir,
         FreeCoreRange(start=args.start, end=args.end),
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def baselines_main() -> None:
+    parser = _range_parser("crossalpha-free-baselines")
+    parser.add_argument(
+        "--cost-bps",
+        type=float,
+        default=5.0,
+        help="One-way turnover cost in basis points; frozen V0.1 baseline is 5 bps.",
+    )
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = run_free_baselines(
+        settings.crossalpha_data_dir,
+        start=args.start,
+        end=args.end,
+        config=FreeBaselineConfig(cost_bps=args.cost_bps),
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
