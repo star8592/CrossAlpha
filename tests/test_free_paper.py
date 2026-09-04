@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -76,11 +76,11 @@ def _synthetic_wide(start: str, end: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 def _write_long_returns(root: Path, start: str, end: str) -> Path:
     daily, _ = _synthetic_wide(start, end)
     rows: list[dict[str, object]] = []
-    for date, row in daily.iterrows():
+    for timestamp, row in daily.iterrows():
         for asset in frozen_b3_v01.ALL_ASSETS:
             rows.append(
                 {
-                    "date": date,
+                    "date": timestamp,
                     "economic_asset": asset,
                     "source": "synthetic",
                     "symbol": asset,
