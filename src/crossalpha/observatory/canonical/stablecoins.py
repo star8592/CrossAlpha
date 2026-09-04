@@ -54,17 +54,11 @@ def _chain_measure(chain_value: Any, field: str, peg_type: str | None) -> float 
     if not isinstance(chain_value, dict):
         return None
 
-    # DefiLlama calls the per-chain current field `current`, while the asset-level
-    # equivalent is named `circulating`. Keep the canonical name circulating_native.
     upstream_field = "current" if field == "circulating" else field
     if upstream_field in chain_value:
         return _peg_amount(chain_value.get(upstream_field), peg_type)
-
-    # Backward compatibility with older nested wrappers/fixtures.
     if field in chain_value:
         return _peg_amount(chain_value.get(field), peg_type)
-
-    # Legacy flat current shape: {"peggedUSD": 123.0}.
     if field == "circulating":
         return _peg_amount(chain_value, peg_type)
     return None
@@ -199,6 +193,11 @@ def parse_stablecoin_snapshot(
         raise ValueError("stablecoin canonicalization produced zero assets")
     if asset_frame["stablecoin_id"].isna().any() or asset_frame["stablecoin_id"].duplicated().any():
         raise ValueError("stablecoin ids are missing or duplicated")
+    if not chain_frame.empty and chain_frame["circulating_native"].notna().sum() == 0:
+        raise ValueError(
+            "stablecoin chainCirculating rows exist but no current amounts were parsed; "
+            "upstream schema likely changed"
+        )
     return asset_frame, chain_frame
 
 
