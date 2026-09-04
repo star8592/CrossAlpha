@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from crossalpha.domain.models import ObservationEnvelope, RawSnapshotManifest
+from crossalpha.storage.indexes import append_indexes_unlocked, manifest_lock
 
 
 class RawSnapshotStore:
@@ -44,12 +45,14 @@ class RawSnapshotStore:
             source_id=envelope.source_id,
             observation_type=envelope.observation_type,
         )
-        self._append_manifest(manifest)
+        self._append_manifest_and_indexes(manifest)
         return manifest
 
-    def _append_manifest(self, manifest: RawSnapshotManifest) -> None:
+    def _append_manifest_and_indexes(self, manifest: RawSnapshotManifest) -> None:
         manifest_dir = self.root / "manifests"
         manifest_dir.mkdir(parents=True, exist_ok=True)
-        path = manifest_dir / "raw_snapshots.jsonl"
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False) + "\n")
+        audit_path = manifest_dir / "raw_snapshots.jsonl"
+        with manifest_lock(self.root):
+            with audit_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False) + "\n")
+            append_indexes_unlocked(self.root, manifest)
