@@ -96,14 +96,16 @@ def _synthetic_candidate(
     equity_weight: float,
     strategy: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    wave = 0.0002 * np.sin(np.arange(len(dates)) / 17.0)
+    net = label_return + wave
     returns = pd.DataFrame(
         {
             "date": dates,
             "strategy": strategy,
-            "gross_return": label_return,
+            "gross_return": net,
             "turnover": 0.0,
             "cost": 0.0,
-            "net_return": label_return,
+            "net_return": net,
             "cash_return": 0.0,
         }
     )
@@ -118,7 +120,7 @@ def _synthetic_candidate(
 def test_walk_forward_returns_explicitly_include_parameter_switch_costs() -> None:
     dates = pd.date_range("2010-01-01", "2020-12-31", freq="D", tz="UTC")
     daily = pd.DataFrame(0.0, index=dates, columns=ALL_ASSETS)
-    daily["US_EQUITY"] = 0.001
+    daily["US_EQUITY"] = 0.001 + 0.0002 * np.sin(np.arange(len(dates)) / 19.0)
     strategy = "B3_ABSOLUTE_TREND_EQUAL_WEIGHT"
 
     baseline_w, baseline_r = _synthetic_candidate(
