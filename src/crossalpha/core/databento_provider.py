@@ -8,7 +8,7 @@ from pathlib import Path
 class DatabentoRequest:
     symbols: tuple[str, ...]
     start: str
-    end: str | None = None
+    end: str
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1d"
     stype_in: str = "continuous"
@@ -18,7 +18,7 @@ class DatabentoRequest:
 class ParentFuturesRequest:
     roots: tuple[str, ...]
     start: str
-    end: str | None = None
+    end: str
     dataset: str = "GLBX.MDP3"
 
     @property
@@ -27,7 +27,7 @@ class ParentFuturesRequest:
 
 
 class DatabentoCoreProvider:
-    """Historical downloader with cost-first parent-futures staging helpers."""
+    """Historical downloader with explicit ranges and cost-first parent-futures helpers."""
 
     def __init__(self, api_key: str):
         if not api_key:
@@ -42,66 +42,83 @@ class DatabentoCoreProvider:
         return db, db.Historical(self.api_key)
 
     @staticmethod
-    def _with_optional_end(kwargs: dict[str, object], end: str | None) -> dict[str, object]:
-        if end:
-            kwargs["end"] = end
-        return kwargs
-
-    @staticmethod
     def _refuse_existing(path: Path) -> None:
         if path.exists():
             raise FileExistsError(
                 f"refusing duplicate paid download because output already exists: {path}"
             )
 
+    @staticmethod
+    def _validate_range(start: str, end: str) -> None:
+        if not start or not end:
+            raise ValueError("Databento start and end must both be explicit")
+        if start == end:
+            raise ValueError("Databento end must differ from start")
+
+    def estimate_cost(self, request: DatabentoRequest) -> float:
+        self._validate_range(request.start, request.end)
+        _, client = self._client()
+        return float(
+            client.metadata.get_cost(
+                dataset=request.dataset,
+                schema=request.schema,
+                symbols=list(request.symbols),
+                stype_in=request.stype_in,
+                start=request.start,
+                end=request.end,
+            )
+        )
+
     def fetch_continuous_daily(self, request: DatabentoRequest, output_dir: Path) -> Path:
+        self._validate_range(request.start, request.end)
         output_dir.mkdir(parents=True, exist_ok=True)
         out = output_dir / "continuous_daily.parquet"
         self._refuse_existing(out)
 
         _, client = self._client()
-        kwargs: dict[str, object] = {
-            "dataset": request.dataset,
-            "schema": request.schema,
-            "symbols": list(request.symbols),
-            "stype_in": request.stype_in,
-            "start": request.start,
-        }
-        self._with_optional_end(kwargs, request.end)
-        data = client.timeseries.get_range(**kwargs)
+        data = client.timeseries.get_range(
+            dataset=request.dataset,
+            schema=request.schema,
+            symbols=list(request.symbols),
+            stype_in=request.stype_in,
+            start=request.start,
+            end=request.end,
+        )
         df = data.to_df()
         df.to_parquet(out)
         return out
 
     def estimate_parent_cost(self, request: ParentFuturesRequest, *, schema: str) -> float:
         """Estimate Databento billed cost before any parent-futures download."""
+        self._validate_range(request.start, request.end)
         _, client = self._client()
-        kwargs: dict[str, object] = {
-            "dataset": request.dataset,
-            "schema": schema,
-            "symbols": list(request.symbols),
-            "stype_in": "parent",
-            "start": request.start,
-        }
-        self._with_optional_end(kwargs, request.end)
-        return float(client.metadata.get_cost(**kwargs))
+        return float(
+            client.metadata.get_cost(
+                dataset=request.dataset,
+                schema=schema,
+                symbols=list(request.symbols),
+                stype_in="parent",
+                start=request.start,
+                end=request.end,
+            )
+        )
 
     def fetch_parent_definitions(self, request: ParentFuturesRequest, output_dir: Path) -> Path:
         """Fetch point-in-time parent definitions, including outrights and spreads."""
+        self._validate_range(request.start, request.end)
         output_dir.mkdir(parents=True, exist_ok=True)
         out = output_dir / "parent_definitions.parquet"
         self._refuse_existing(out)
 
         _, client = self._client()
-        kwargs: dict[str, object] = {
-            "dataset": request.dataset,
-            "schema": "definition",
-            "symbols": list(request.symbols),
-            "stype_in": "parent",
-            "start": request.start,
-        }
-        self._with_optional_end(kwargs, request.end)
-        data = client.timeseries.get_range(**kwargs)
+        data = client.timeseries.get_range(
+            dataset=request.dataset,
+            schema="definition",
+            symbols=list(request.symbols),
+            stype_in="parent",
+            start=request.start,
+            end=request.end,
+        )
         frame = data.to_df()
         if frame.index.name and frame.index.name not in frame.columns:
             frame = frame.reset_index()
@@ -112,20 +129,20 @@ class DatabentoCoreProvider:
 
     def fetch_parent_daily(self, request: ParentFuturesRequest, output_dir: Path) -> Path:
         """Fetch all parent futures/spread daily bars as immutable staging data."""
+        self._validate_range(request.start, request.end)
         output_dir.mkdir(parents=True, exist_ok=True)
         out = output_dir / "parent_ohlcv_1d.parquet"
         self._refuse_existing(out)
 
         _, client = self._client()
-        kwargs: dict[str, object] = {
-            "dataset": request.dataset,
-            "schema": "ohlcv-1d",
-            "symbols": list(request.symbols),
-            "stype_in": "parent",
-            "start": request.start,
-        }
-        self._with_optional_end(kwargs, request.end)
-        data = client.timeseries.get_range(**kwargs)
+        data = client.timeseries.get_range(
+            dataset=request.dataset,
+            schema="ohlcv-1d",
+            symbols=list(request.symbols),
+            stype_in="parent",
+            start=request.start,
+            end=request.end,
+        )
         frame = data.to_df()
         if frame.index.name and frame.index.name not in frame.columns:
             frame = frame.reset_index()
