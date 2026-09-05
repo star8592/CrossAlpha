@@ -33,7 +33,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$REPO_DIR
-ExecStart=$REPO_DIR/.venv/bin/crossalpha-state-v03-cycle
+ExecStart=$REPO_DIR/.venv/bin/python $REPO_DIR/scripts/run_state_v03_cycle.py
 TimeoutStartSec=12min
 EOF
 
