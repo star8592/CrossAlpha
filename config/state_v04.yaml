@@ -16,6 +16,7 @@ research_policy:
   automatic_actionability_allowed: false
   historical_backfill_is_evidence: false
   required_data_cost_usd: 0
+  fault_isolation_module_sha256: cb8d9c91782c16df0cf914d542119a9c24f6fbb83039f6a70647db7d73bd46d5
 universe:
   assets: [BTC, ETH]
   quote: USDT
