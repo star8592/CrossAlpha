@@ -46,6 +46,12 @@ crossalpha-state-ab-snapshot = "crossalpha.state.commands:ab_snapshot_main"
 crossalpha-state-ab-mark = "crossalpha.state.commands:ab_mark_main"
 crossalpha-state-ab-status = "crossalpha.state.commands:ab_status_main"
 crossalpha-state-ab-integrity = "crossalpha.state.commands:ab_integrity_main"
+crossalpha-state-v02-describe = "crossalpha.state.commands:v02_describe_main"
+crossalpha-state-v02-config-check = "crossalpha.state.commands:v02_config_check_main"
+crossalpha-state-v02-freeze = "crossalpha.state.commands:v02_freeze_main"
+crossalpha-state-v02-cycle = "crossalpha.state.commands:v02_cycle_main"
+crossalpha-state-v02-integrity = "crossalpha.state.commands:v02_integrity_main"
+crossalpha-state-v02-status = "crossalpha.state.commands:v02_status_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
