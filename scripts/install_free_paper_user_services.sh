@@ -9,7 +9,10 @@ if [[ -f .venv/bin/activate ]]; then
   source .venv/bin/activate
 fi
 
-if [[ "${CROSSALPHA_SKIP_EDITABLE_INSTALL:-0}" != "1" ]]; then
+# Standalone installs still self-bootstrap. The milestone finalizer already runs
+# one editable install, so do not repeat it when the new A/B entry point exists.
+if [[ "${CROSSALPHA_SKIP_EDITABLE_INSTALL:-0}" != "1" ]] \
+  && ! command -v crossalpha-state-ab-freeze >/dev/null 2>&1; then
   python -m pip install -e ".[dev]"
 fi
 
