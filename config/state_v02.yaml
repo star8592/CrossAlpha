@@ -1,0 +1,86 @@
+protocol: CROSSALPHA_STATE_V0_2
+mode: PROSPECTIVE_DESCRIPTIVE_SHADOW
+maturity: O0_DATA_TO_O1_DESCRIPTION
+core_reference: CROSSALPHA_FREE_V0_1_PAPER
+state_v01_reference: CROSSALPHA_STATE_SHADOW_V0_1
+state_ab_v01_reference: CROSSALPHA_STATE_AB_V0_1
+research_policy:
+  mutates_frozen_core: false
+  mutates_state_v01: false
+  mutates_state_ab_v01: false
+  parameter_optimization_allowed: false
+  retrospective_prospective_backfill_allowed: false
+  actionability: DESCRIPTIVE_ONLY
+  risk_multiplier: null
+  historical_data_can_promote_to_O2: false
+sources:
+  aave_v3_graphql:
+    endpoint: https://api.v3.aave.com/graphql
+    authentication_required: false
+    chain_id: 1
+    market_address: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+    cadence_seconds: 900
+    required_for_full_confidence: true
+  aave_liquidations_rpc:
+    rpc_env: EVM_RPC_URL
+    chain_id: 1
+    pool_address: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+    optional: true
+    role: O0_EVENT_CONFIRMATION_ONLY
+  defillama_stablecoins:
+    reuse_existing_observatory: true
+    required_for_full_confidence: true
+  hyperliquid:
+    reuse_existing_observatory: true
+    required_for_full_confidence: true
+components:
+  aave_market_stress:
+    valid_reserve_symbols: [WETH, ETH, WBTC, USDC, USDT, GHO, DAI]
+    max_source_age_minutes: 30
+    minimum_reserves: 3
+    borrow_apy_full_stress_pct: 20.0
+    low_available_liquidity_full_stress_usd: 10000000
+    borrow_cap_reached_pressure: 1.0
+    frozen_or_paused_pressure: 1.0
+  borrower_health_factor_distribution:
+    status: REQUIRES_AUDITABLE_BORROWER_UNIVERSE
+    no_market_level_substitution_allowed: true
+    liquidation_threshold_health_factor: 1.0
+    warning_health_factor: 1.2
+  stablecoin_flow_decomposition:
+    lookback_hours: 168
+    lag_tolerance_hours: 24
+    minimum_chain_coverage: 0.98
+    maximum_chain_abs_residual_ratio: 0.02
+    interpretation:
+      net_system_change: issuance_or_redemption
+      offsetting_chain_change: migration_proxy
+  basis_dispersion:
+    assets: [BTC, ETH]
+    full_stress_z_dispersion: 3.0
+    scope: CROSS_ASSET_HYPERLIQUID_ONLY
+    multi_venue_claim_allowed: false
+  contagion_graph:
+    minimum_stablecoin_market_value_usd: 10000000
+    minimum_chain_market_value_usd: 50000000
+    edge_weight: stablecoin_market_value_usd
+    metric: weighted_chain_composition_cosine_overlap
+aggregation:
+  component_weights:
+    aave_market_stress: 0.30
+    stablecoin_flow_stress: 0.30
+    basis_dispersion_stress: 0.20
+    contagion_connectivity_stress: 0.20
+  missing_component_policy: renormalize_available_weights
+  minimum_valid_components: 2
+  full_confidence_components: 4
+prospective_gate:
+  minimum_calendar_days_before_O2_candidate: 180
+  minimum_observations: 500
+  minimum_distinct_stress_episodes: 5
+  requires_outcome_linkage_test: true
+  requires_predeclared_O2_rule: true
+  note: >-
+    V0.2 cannot become an actionable risk modifier merely because its descriptive
+    stress score looks plausible. A separate O2 protocol must be frozen before any
+    prospective performance comparison.
