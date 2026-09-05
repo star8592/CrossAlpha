@@ -27,6 +27,14 @@ from crossalpha.state.v02_integrity import (
     strict_state_v02_status,
 )
 from crossalpha.state.v02_prospective import freeze_state_v02
+from crossalpha.state.v03_config import strict_v03_config_report
+from crossalpha.state.v03_cycle import FINALITY_LAG_BLOCKS, run_state_v03_cycle
+from crossalpha.state.v03_integrity import (
+    strict_state_v03_integrity_report,
+    strict_state_v03_status,
+)
+from crossalpha.state.v03_prospective import freeze_state_v03
+from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_CORE_POOL, AaveBorrowerRpc, RpcPolicy
 
 
 def shadow_main() -> None:
@@ -185,6 +193,107 @@ def v02_status_main() -> None:
     print(
         json.dumps(
             strict_state_v02_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+def v03_config_check_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-config-check")
+    parser.parse_args()
+    report = strict_v03_config_report(Path("config/state_v03.yaml"))
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    if not report.get("ok"):
+        raise SystemExit("STATE V0.3 STRICT CONFIG CONSISTENCY FAILED")
+
+
+async def _v03_preflight(settings: Settings) -> dict[str, object]:
+    if not settings.evm_rpc_url:
+        raise SystemExit("STATE V0.3 requires EVM_RPC_URL in .env")
+    rpc = AaveBorrowerRpc(
+        settings.evm_rpc_url,
+        policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
+    )
+    latest = await rpc.latest_block()
+    finalized = max(latest - FINALITY_LAG_BLOCKS, 0)
+    from_block = max(finalized - 127, 0)
+    recent_logs = await rpc.borrow_logs(from_block, finalized)
+    probe = await rpc.account_data([AAVE_V3_ETHEREUM_CORE_POOL], block_number=finalized)
+    if probe.empty or not bool(probe.iloc[0]["success"]):
+        raise RuntimeError("getUserAccountData fixed-block probe failed")
+    return {
+        "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
+        "data_cost_usd": 0,
+        "latest_block": latest,
+        "finalized_block": finalized,
+        "finality_lag_blocks": FINALITY_LAG_BLOCKS,
+        "recent_borrow_scan_from_block": from_block,
+        "recent_borrow_scan_to_block": finalized,
+        "recent_borrow_log_count": len(recent_logs),
+        "fixed_block_account_call_ok": True,
+        "actionability": "DESCRIPTIVE_ONLY",
+        "risk_multiplier": None,
+    }
+
+
+def v03_preflight_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-preflight")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = asyncio.run(_v03_preflight(settings))
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v03_freeze_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-freeze")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    config = strict_v03_config_report(Path("config/state_v03.yaml"))
+    if not config.get("ok"):
+        raise SystemExit("STATE V0.3 FREEZE REFUSED: strict config consistency failed")
+    v02 = strict_state_v02_integrity_report(settings.crossalpha_data_dir)
+    if not v02.get("frozen") or not v02.get("ok"):
+        raise SystemExit("STATE V0.3 FREEZE REFUSED: State V0.2 must be frozen and healthy")
+    preflight = asyncio.run(_v03_preflight(settings))
+    report = freeze_state_v03(
+        settings.crossalpha_data_dir,
+        minimum_eligible_block=int(preflight["finalized_block"]),
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v03_cycle_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-cycle")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = asyncio.run(run_state_v03_cycle(settings))
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v03_integrity_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-integrity")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = strict_state_v03_integrity_report(settings.crossalpha_data_dir)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    if not report.get("ok"):
+        raise SystemExit("STATE V0.3 PROSPECTIVE INTEGRITY FAILED")
+
+
+def v03_status_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v03-status")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    print(
+        json.dumps(
+            strict_state_v03_status(settings.crossalpha_data_dir),
             ensure_ascii=False,
             indent=2,
             default=str,
