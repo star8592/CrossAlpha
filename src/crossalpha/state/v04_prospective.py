@@ -162,6 +162,7 @@ def freeze_state_v04(data_root: Path, *, now: Any | None = None) -> dict[str, An
         "maturity": "O0_DATA_TO_O1_DESCRIPTION",
         "actionability": v04.ACTIONABILITY,
         "risk_multiplier": None,
+        "funding_semantics": v04.FUNDING_SEMANTICS,
         "frozen_at": frozen_at.isoformat(),
         "first_eligible_generated_at": frozen_at.isoformat(),
         "retrospective_backfill_allowed": False,
@@ -234,6 +235,8 @@ def write_live_observation(
         raise ValueError("mechanics artifact is not State V0.4")
     if mechanics.get("actionability") != v04.ACTIONABILITY or mechanics.get("risk_multiplier") is not None:
         raise ValueError("State V0.4 prospective ledger is descriptive only")
+    if mechanics.get("funding_semantics") != v04.FUNDING_SEMANTICS:
+        raise ValueError("State V0.4 mechanics funding semantics mismatch")
     if mechanics.get("no_composite_stress_score") is not True:
         raise ValueError("State V0.4 composite stress score is forbidden")
     if Path(str(mechanics.get("venue_snapshot_path", ""))) != venue_path:
@@ -246,6 +249,10 @@ def write_live_observation(
         raise ValueError("State V0.4 prospective venue snapshot has incomplete venue universe")
     if venues.duplicated(["asset", "venue"]).any():
         raise ValueError("State V0.4 venue snapshot contains duplicate asset/venue rows")
+    if "funding_semantics" not in venues.columns or not venues["funding_semantics"].astype(str).eq(
+        v04.FUNDING_SEMANTICS
+    ).all():
+        raise ValueError("State V0.4 venue snapshot funding semantics mismatch")
 
     generated = _utc(mechanics["generated_at"])
     current = _utc(now or datetime.now(timezone.utc))
@@ -301,6 +308,7 @@ def write_live_observation(
         "raw_links": raw_links,
         "actionability": v04.ACTIONABILITY,
         "risk_multiplier": None,
+        "funding_semantics": v04.FUNDING_SEMANTICS,
         "no_composite_stress_score": True,
         "data_confidence": mechanics.get("data_confidence"),
         "assets": mechanics.get("assets"),
