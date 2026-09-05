@@ -31,15 +31,16 @@ def test_rpc_resolution_prefers_env_and_has_zero_cost_fallback() -> None:
     assert resolve_rpc_url("http://localhost:8545") == ("http://localhost:8545", "EVM_RPC_URL")
     assert resolve_rpc_url(None) == (
         DEFAULT_PUBLIC_ETHEREUM_RPC,
-        "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK",
+        "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK",
     )
-    assert DEFAULT_PUBLIC_ETHEREUM_RPC == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
+    assert DEFAULT_PUBLIC_ETHEREUM_RPC == "https://eth.blockscout.com/api/eth-rpc"
 
 
 def test_rpc_candidate_pool_is_ordered_and_never_duplicates_configured_url() -> None:
     public = list(ZERO_COST_PUBLIC_RPC_CANDIDATES)
     assert [source for _url, source in public] == [
-        "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK",
+        "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK",
+        "BLOCKREQ_ZERO_COST_FALLBACK",
         "PUBLICNODE_ZERO_COST_FALLBACK",
         "LLAMARPC_ZERO_COST_FALLBACK",
     ]
