@@ -91,6 +91,7 @@ def test_freeze_is_immutable_and_has_block_floor(tmp_path: Path) -> None:
     assert first["minimum_eligible_block"] == MIN_BLOCK
     assert first["historical_bootstrap_is_evidence"] is False
     assert first["retrospective_backfill_allowed"] is False
+    assert "state_v03_preflight" in first["implementation_file_sha256"]
 
 
 def test_writer_rejects_old_block_even_if_written_after_freeze(tmp_path: Path) -> None:
