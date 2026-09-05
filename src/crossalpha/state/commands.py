@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
+
 from crossalpha.catalog import build_catalog
 from crossalpha.core.free_paper import paper_status
 from crossalpha.settings import Settings
