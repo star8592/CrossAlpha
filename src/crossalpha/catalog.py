@@ -135,7 +135,7 @@ def build_catalog(data_root: Path) -> dict[str, object]:
         if _has_json(state_ab_marks_root):
             con.execute(
                 "CREATE VIEW state_engine.shadow_ab_marks AS "
-                f"SELECT * FROM read_json_auto({_sql_string(state_ab_marks_glob)}, union_by_name=true)"
+                f"SELECT * FROM read_json_auto({_sql_string(state_ab_marks_glob)})"
             )
             created_views.append("state_engine.shadow_ab_marks")
 
@@ -150,7 +150,7 @@ def build_catalog(data_root: Path) -> dict[str, object]:
         if _has_json(core_paper_marks_root):
             con.execute(
                 "CREATE VIEW core.frozen_b3_paper_marks AS "
-                f"SELECT * FROM read_json_auto({_sql_string(core_paper_marks_glob)}, union_by_name=true)"
+                f"SELECT * FROM read_json_auto({_sql_string(core_paper_marks_glob)})"
             )
             created_views.append("core.frozen_b3_paper_marks")
     finally:
