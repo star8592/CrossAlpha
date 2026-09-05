@@ -46,6 +46,16 @@ def _unit_state(unit: str) -> str:
     return result.stdout.strip() or result.stderr.strip() or f"rc={result.returncode}"
 
 
+def _unit_failed(unit: str) -> bool:
+    result = subprocess.run(
+        ["systemctl", "--user", "is-failed", unit],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() == "failed"
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -117,6 +127,13 @@ def main() -> None:
         "crossalpha-outcome-linkage.timer",
     )
     systemd = {unit: _unit_state(unit) for unit in units}
+    scheduled_oneshots = (
+        "crossalpha-state-v02.service",
+        "crossalpha-state-v03.service",
+        "crossalpha-state-v04.service",
+        "crossalpha-outcome-linkage.service",
+    )
+    oneshot_failed = {unit: _unit_failed(unit) for unit in scheduled_oneshots}
 
     v04_health = _load_json(root / "manifests" / "state_v04_cycle_health.json")
     outcome_health = _load_json(root / "manifests" / "outcome_linkage_cycle_health.json")
@@ -158,6 +175,8 @@ def main() -> None:
     }
     for unit, state in systemd.items():
         checks[f"systemd_{unit}_active"] = state == "active"
+    for unit, failed in oneshot_failed.items():
+        checks[f"systemd_{unit}_not_failed"] = not failed
 
     errors = [name for name, ok in checks.items() if not ok]
     payload = {
@@ -180,6 +199,7 @@ def main() -> None:
         "catalog_views": sorted(views),
         "missing_views": missing_views,
         "systemd": systemd,
+        "scheduled_oneshot_failed": oneshot_failed,
         "checks": checks,
         "ok": all(checks.values()),
         "errors": errors,
