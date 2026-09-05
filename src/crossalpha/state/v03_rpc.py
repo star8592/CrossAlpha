@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -126,6 +127,20 @@ class AaveBorrowerRpc:
         async with httpx.AsyncClient(timeout=self.policy.timeout_seconds) as client:
             raw = await self._single(client, "eth_blockNumber", [])
         return int(str(raw), 16)
+
+    async def block_timestamp(self, block_number: int) -> str:
+        if int(block_number) < 0:
+            raise ValueError("block_number must be non-negative")
+        async with httpx.AsyncClient(timeout=self.policy.timeout_seconds) as client:
+            block = await self._single(
+                client,
+                "eth_getBlockByNumber",
+                [hex(int(block_number)), False],
+            )
+        if not isinstance(block, dict) or not isinstance(block.get("timestamp"), str):
+            raise ValueError("eth_getBlockByNumber returned no timestamp")
+        timestamp = int(block["timestamp"], 16)
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
     async def borrow_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         if from_block < 0 or to_block < from_block:
