@@ -1,8 +1,12 @@
-use anyhow::{bail, Context, Result};
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::bail;
 use chrono::Utc;
 use crossalpha_storage::ObservationEnvelope;
 use reqwest::Client;
-use serde_json::{json, Map, Value};
+use serde_json::Map;
+use serde_json::Value;
+use serde_json::json;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -38,7 +42,7 @@ impl ProviderSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProviderClient {
     client: Client,
 }
