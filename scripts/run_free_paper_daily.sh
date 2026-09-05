@@ -25,8 +25,13 @@ retry_refresh() {
   return 1
 }
 
+# A is always sealed first. B then references the exact immutable A mark and
+# reuses A's asset_returns; B never performs an independent vendor refresh.
 retry_refresh
 python scripts/check_free_paper_integrity.py
 crossalpha-free-paper-mark --end "$TODAY_UTC"
 python scripts/check_free_paper_integrity.py
+crossalpha-state-ab-mark --end "$TODAY_UTC"
+crossalpha-state-ab-integrity
 crossalpha-free-paper-status
+crossalpha-state-ab-status
