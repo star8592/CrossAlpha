@@ -114,13 +114,13 @@ def test_cycle_uses_indexed_logs_and_zero_cost_state_rpc(monkeypatch, tmp_path: 
     assert report["split_data_plane"] is True
     assert report["archive_rpc_required"] is False
     assert report["borrow_log_source"] == BLOCKSCOUT_LOG_SOURCE
-    assert report["state_rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
+    assert report["state_rpc_source"] == "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"
     assert report["data_cost_usd"] == 0
     assert report["risk_multiplier"] is None
     assert report["mutates_v01_or_v02"] is False
     assert report["finalized_block_time"] == BLOCK_TIME
     assert report["census"]["block_time"] == BLOCK_TIME
-    assert _FakeRpc.last_url == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
+    assert _FakeRpc.last_url == "https://eth.blockscout.com/api/eth-rpc"
 
 
 def test_cycle_falls_back_when_configured_state_rpc_fails_before_any_write(
@@ -133,7 +133,7 @@ def test_cycle_falls_back_when_configured_state_rpc_fails_before_any_write(
     )
     report = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
     assert report["status"] == "FULL_CENSUS_RECORDED"
-    assert report["state_rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
+    assert report["state_rpc_source"] == "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"
     assert report["state_rpc_candidate_failures_before_selection"] == {
         "EVM_RPC_URL": "RuntimeError"
     }
