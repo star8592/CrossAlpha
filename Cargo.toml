@@ -3,6 +3,7 @@ members = [
   "crates/crossalpha-domain",
   "crates/crossalpha-config",
   "crates/crossalpha-storage",
+  "crates/crossalpha-observatory",
   "crates/crossalpha-cli",
 ]
 resolver = "2"
