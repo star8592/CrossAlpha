@@ -26,6 +26,16 @@ enum Command {
     ManifestRebuild { data_root: PathBuf },
     /// Compare Python and Rust rebuilds from the same immutable audit ledger.
     ManifestParity { data_root: PathBuf },
+    /// Run Rust Observatory health checks and write observatory_health.json.
+    ObservatoryHealth {
+        data_root: PathBuf,
+        #[arg(long, default_value_t = 300)]
+        expected_interval: u64,
+        #[arg(long, default_value_t = 900)]
+        stale_after: u64,
+        #[arg(long)]
+        no_verify_latest: bool,
+    },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -87,9 +97,29 @@ async fn main() -> Result<()> {
                 );
             }
         }
+        Command::ObservatoryHealth {
+            data_root,
+            expected_interval,
+            stale_after,
+            no_verify_latest,
+        } => {
+            let report = crossalpha_observatory::observatory_health(
+                &data_root,
+                expected_interval,
+                stale_after,
+                !no_verify_latest,
+                None,
+            )?;
+            let report_path = crossalpha_observatory::write_health_report(&data_root, &report)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            eprintln!("report={}", report_path.display());
+            if !report.ok {
+                anyhow::bail!("OBSERVATORY HEALTH FAILED");
+            }
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R1 storage=implemented manifest_read=true manifest_rebuild=true parity_gate=required python_compat=true"
+                "phase=R2.1 storage=production-compatible parity_gate=passed observatory_health=implemented health_parity_gate=required python_compat=true"
             );
         }
     }
