@@ -21,11 +21,11 @@ from crossalpha.state.ab_paper import (
 from crossalpha.state.shadow import build_latest_shadow_state
 from crossalpha.state.v02 import build_latest_state_v02, config_consistency_report
 from crossalpha.state.v02_cycle import run_state_v02_cycle, write_cycle_health
-from crossalpha.state.v02_prospective import (
-    freeze_state_v02,
-    state_v02_integrity_report,
-    state_v02_status,
+from crossalpha.state.v02_integrity import (
+    strict_state_v02_integrity_report,
+    strict_state_v02_status,
 )
+from crossalpha.state.v02_prospective import freeze_state_v02
 
 
 def shadow_main() -> None:
@@ -167,7 +167,7 @@ def v02_integrity_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    report = state_v02_integrity_report(settings.crossalpha_data_dir)
+    report = strict_state_v02_integrity_report(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if not report.get("ok"):
         raise SystemExit("STATE V0.2 PROSPECTIVE INTEGRITY FAILED")
@@ -178,4 +178,11 @@ def v02_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(json.dumps(state_v02_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            strict_state_v02_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
