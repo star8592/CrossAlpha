@@ -1,0 +1,224 @@
+use anyhow::{bail, Context, Result};
+use chrono::Utc;
+use crossalpha_storage::ObservationEnvelope;
+use reqwest::Client;
+use serde_json::{json, Map, Value};
+use std::time::Duration;
+use tokio::time::sleep;
+
+pub const HYPERLIQUID_URL: &str = "https://api.hyperliquid.xyz/info";
+pub const DEFILLAMA_STABLECOINS_URL: &str =
+    "https://stablecoins.llama.fi/stablecoins?includePrices=true";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderSource {
+    Hyperliquid,
+    DefiLlama,
+}
+
+impl ProviderSource {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "hyperliquid" => Ok(Self::Hyperliquid),
+            "defillama" => Ok(Self::DefiLlama),
+            other => bail!("unsupported Observatory source: {other}"),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hyperliquid => "hyperliquid",
+            Self::DefiLlama => "defillama",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderClient {
+    client: Client,
+}
+
+impl ProviderClient {
+    pub fn new(timeout: Duration) -> Result<Self> {
+        if timeout.is_zero() {
+            bail!("HTTP timeout must be greater than zero");
+        }
+        let client = Client::builder()
+            .timeout(timeout)
+            .user_agent("crossalpha-rs/0.1")
+            .build()
+            .context("build Observatory HTTP client")?;
+        Ok(Self { client })
+    }
+
+    pub async fn collect(&self, source: ProviderSource) -> Result<Vec<ObservationEnvelope>> {
+        match source {
+            ProviderSource::Hyperliquid => self.collect_hyperliquid().await,
+            ProviderSource::DefiLlama => self.collect_defillama().await,
+        }
+    }
+
+    pub async fn collect_many(
+        &self,
+        sources: &[ProviderSource],
+    ) -> Result<Vec<ObservationEnvelope>> {
+        let mut output = Vec::new();
+        for source in sources {
+            output.extend(self.collect(*source).await?);
+        }
+        Ok(output)
+    }
+
+    async fn collect_hyperliquid(&self) -> Result<Vec<ObservationEnvelope>> {
+        // Match the Python provider contract: both Hyperliquid observations from one
+        // collection round share the same observed_at/known_at timestamp.
+        let now = Utc::now();
+        let requests = [
+            ("metaAndAssetCtxs", json!({"type": "metaAndAssetCtxs"})),
+            ("allMids", json!({"type": "allMids"})),
+        ];
+        let mut output = Vec::with_capacity(requests.len());
+
+        for (observation_type, request) in requests {
+            let payload = self.post_json_with_retry(HYPERLIQUID_URL, &request).await?;
+            let mut metadata = Map::new();
+            metadata.insert("request".to_owned(), request);
+            metadata.insert("endpoint".to_owned(), Value::String(HYPERLIQUID_URL.to_owned()));
+            output.push(ObservationEnvelope {
+                schema_version: 1,
+                event_time: None,
+                observed_at: now,
+                known_at: now,
+                source_type: "EXCHANGE".to_owned(),
+                source_id: "hyperliquid".to_owned(),
+                observation_type: observation_type.to_owned(),
+                payload,
+                metadata,
+            });
+        }
+        Ok(output)
+    }
+
+    async fn collect_defillama(&self) -> Result<Vec<ObservationEnvelope>> {
+        let payload = self.get_json_with_retry(DEFILLAMA_STABLECOINS_URL).await?;
+        // Match Python: DefiLlama timestamps are captured after the request succeeds.
+        let now = Utc::now();
+        let mut metadata = Map::new();
+        metadata.insert(
+            "endpoint".to_owned(),
+            Value::String(DEFILLAMA_STABLECOINS_URL.to_owned()),
+        );
+        Ok(vec![ObservationEnvelope {
+            schema_version: 1,
+            event_time: None,
+            observed_at: now,
+            known_at: now,
+            source_type: "AGGREGATOR".to_owned(),
+            source_id: "defillama".to_owned(),
+            observation_type: "stablecoins_snapshot".to_owned(),
+            payload,
+            metadata,
+        }])
+    }
+
+    async fn post_json_with_retry(&self, url: &str, body: &Value) -> Result<Value> {
+        let mut last_error = None;
+        for attempt in 0..3u32 {
+            let result = async {
+                let response = self
+                    .client
+                    .post(url)
+                    .json(body)
+                    .send()
+                    .await
+                    .with_context(|| format!("POST {url}"))?
+                    .error_for_status()
+                    .with_context(|| format!("POST {url} returned error status"))?;
+                response
+                    .json::<Value>()
+                    .await
+                    .with_context(|| format!("decode JSON from POST {url}"))
+            }
+            .await;
+
+            match result {
+                Ok(payload) => return Ok(payload),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < 2 {
+                        sleep(Duration::from_secs(1u64 << attempt)).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("three attempts always produce an error when all fail"))
+    }
+
+    async fn get_json_with_retry(&self, url: &str) -> Result<Value> {
+        let mut last_error = None;
+        for attempt in 0..3u32 {
+            let result = async {
+                let response = self
+                    .client
+                    .get(url)
+                    .send()
+                    .await
+                    .with_context(|| format!("GET {url}"))?
+                    .error_for_status()
+                    .with_context(|| format!("GET {url} returned error status"))?;
+                response
+                    .json::<Value>()
+                    .await
+                    .with_context(|| format!("decode JSON from GET {url}"))
+            }
+            .await;
+
+            match result {
+                Ok(payload) => return Ok(payload),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < 2 {
+                        sleep(Duration::from_secs(1u64 << attempt)).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("three attempts always produce an error when all fail"))
+    }
+}
+
+pub fn parse_sources(values: &[String]) -> Result<Vec<ProviderSource>> {
+    if values.is_empty() {
+        return Ok(vec![
+            ProviderSource::Hyperliquid,
+            ProviderSource::DefiLlama,
+        ]);
+    }
+    values.iter().map(|value| ProviderSource::parse(value)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_parser_matches_python_cli_names() {
+        assert_eq!(
+            ProviderSource::parse("hyperliquid").unwrap(),
+            ProviderSource::Hyperliquid
+        );
+        assert_eq!(
+            ProviderSource::parse("defillama").unwrap(),
+            ProviderSource::DefiLlama
+        );
+        assert!(ProviderSource::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn empty_sources_default_to_both_python_sources() {
+        assert_eq!(
+            parse_sources(&[]).unwrap(),
+            vec![ProviderSource::Hyperliquid, ProviderSource::DefiLlama]
+        );
+    }
+}
