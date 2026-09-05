@@ -1,0 +1,69 @@
+protocol: CROSSALPHA_STATE_V0_3
+mode: PROSPECTIVE_BORROWER_RISK_SHADOW
+maturity: O0_DATA_TO_O1_DESCRIPTION
+actionability: DESCRIPTIVE_ONLY
+risk_multiplier: null
+references:
+  frozen_core: CROSSALPHA_FREE_V0_1_PAPER
+  state_v01: CROSSALPHA_STATE_SHADOW_V0_1
+  state_ab_v01: CROSSALPHA_STATE_AB_V0_1
+  state_v02: CROSSALPHA_STATE_V0_2_PROSPECTIVE
+research_policy:
+  mutates_frozen_core: false
+  mutates_state_v01: false
+  mutates_state_ab_v01: false
+  mutates_state_v02: false
+  parameter_optimization_allowed: false
+  retrospective_prospective_backfill_allowed: false
+  automatic_actionability_allowed: false
+  historical_bootstrap_is_evidence: false
+source:
+  chain: ethereum
+  chain_id: 1
+  rpc_env: EVM_RPC_URL
+  rpc_policy: USER_SUPPLIED_ZERO_COST_OR_LOCAL_ONLY
+  required_data_cost_usd: 0
+  aave_v3_core_pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+  deployment_block: 16291127
+  borrow_event_topic0: "0xb3d084820fb1a9decffb176436bd02558d15fac9b0ddfed8c465bc7359d7dce0"
+  get_user_account_data_selector: "0xbf92857c"
+  ethereum_core_base_currency_decimals: 8
+borrower_universe:
+  identity: Borrow.onBehalfOf
+  bootstrap_start_block: 16291127
+  bootstrap_chunk_blocks: 25000
+  live_overlap_blocks: 128
+  finality_lag_blocks: 64
+  bootstrap_required_before_full_census_claim: true
+  never_delete_historical_candidate_addresses: true
+  current_active_definition: total_debt_base_gt_0
+census:
+  rpc_batch_size: 100
+  maximum_failed_call_ratio_for_valid_census: 0.01
+  full_census_cadence_minutes: 360
+  watchlist_cadence_minutes: 15
+  watchlist_health_factor_max: 1.50
+  watchlist_debt_usd_min: 1000000
+  health_factor_scale_decimals: 18
+  thresholds: [1.00, 1.02, 1.05, 1.10, 1.20, 1.50]
+  debt_weighted_metrics: true
+liquidation_cliff:
+  semantics: CURRENT_POSITION_HEALTH_DISTRIBUTION_NOT_PRICE_SHOCK_SIMULATION
+  hf_bands:
+    - [0.00, 1.00]
+    - [1.00, 1.02]
+    - [1.02, 1.05]
+    - [1.05, 1.10]
+    - [1.10, 1.20]
+    - [1.20, 1.50]
+    - [1.50, null]
+  no_single_asset_liquidation_price_claim: true
+  e_mode_and_cross_collateral_preserved_via_pool_account_data: true
+prospective_gate:
+  minimum_calendar_days_before_O2_candidate: 180
+  minimum_valid_full_censuses: 120
+  minimum_distinct_cliff_stress_episodes: 5
+  requires_complete_borrower_bootstrap: true
+  requires_outcome_linkage_test: true
+  requires_predeclared_O2_rule: true
+  automatic_promotion_to_actionable_modifier_allowed: false
