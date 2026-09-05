@@ -109,13 +109,20 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     return sealed
 
 
-def freeze_state_v03(data_root: Path, *, now: Any | None = None) -> dict[str, Any]:
+def freeze_state_v03(
+    data_root: Path,
+    *,
+    minimum_eligible_block: int,
+    now: Any | None = None,
+) -> dict[str, Any]:
     path = freeze_path(data_root)
     if path.exists():
         existing = json.loads(path.read_text(encoding="utf-8"))
         if not verify_seal(existing):
             raise ValueError("existing State V0.3 freeze failed seal verification")
         return {**existing, "status": "already_frozen"}
+    if int(minimum_eligible_block) < 0:
+        raise ValueError("minimum_eligible_block must be non-negative")
 
     references: dict[str, dict[str, str]] = {}
     for name, reference in _reference_paths(data_root).items():
@@ -139,6 +146,7 @@ def freeze_state_v03(data_root: Path, *, now: Any | None = None) -> dict[str, An
         "actionability": v03.ACTIONABILITY,
         "risk_multiplier": None,
         "frozen_at": frozen_at.isoformat(),
+        "minimum_eligible_block": int(minimum_eligible_block),
         "historical_bootstrap_is_evidence": False,
         "retrospective_backfill_allowed": False,
         "parameter_optimization_allowed": False,
@@ -224,6 +232,12 @@ def write_full_census_observation(
         raise ValueError("prospective census known_at cannot predate State V0.3 freeze")
 
     block_number = int(summary["block_number"])
+    minimum_block = int(freeze["minimum_eligible_block"])
+    if block_number < minimum_block:
+        raise ValueError(
+            "prospective census block predates the frozen minimum eligible block; backfill refused"
+        )
+
     payload = {
         "schema_version": FREEZE_SCHEMA_VERSION,
         "protocol": PROSPECTIVE_PROTOCOL,
@@ -232,6 +246,7 @@ def write_full_census_observation(
         "known_at": current.isoformat(),
         "captured_at": summary["captured_at"],
         "block_number": block_number,
+        "minimum_eligible_block": minimum_block,
         "summary_path": str(summary_path),
         "summary_sha256": sha256_file(summary_path),
         "detail_path": str(detail_path),
@@ -252,4 +267,8 @@ def write_full_census_observation(
     }
     path = _record_path(data_root, block_number)
     written = _write_immutable(path, payload)
-    return {**written, "status": "written" if written.get("known_at") == payload["known_at"] else "already_exists", "output": str(path)}
+    return {
+        **written,
+        "status": "written" if written.get("known_at") == payload["known_at"] else "already_exists",
+        "output": str(path),
+    }
