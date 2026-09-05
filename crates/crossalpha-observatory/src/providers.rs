@@ -3,6 +3,7 @@ use chrono::Utc;
 use crossalpha_storage::ObservationEnvelope;
 use reqwest::Client;
 use serde_json::{json, Map, Value};
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -16,15 +17,19 @@ pub enum ProviderSource {
     DefiLlama,
 }
 
-impl ProviderSource {
-    pub fn parse(value: &str) -> Result<Self> {
+impl FromStr for ProviderSource {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
         match value {
             "hyperliquid" => Ok(Self::Hyperliquid),
             "defillama" => Ok(Self::DefiLlama),
             other => bail!("unsupported Observatory source: {other}"),
         }
     }
+}
 
+impl ProviderSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hyperliquid => "hyperliquid",
@@ -80,10 +85,15 @@ impl ProviderClient {
         let mut output = Vec::with_capacity(requests.len());
 
         for (observation_type, request) in requests {
-            let payload = self.post_json_with_retry(HYPERLIQUID_URL, &request).await?;
+            let payload = self
+                .post_json_with_retry(HYPERLIQUID_URL, &request)
+                .await?;
             let mut metadata = Map::new();
             metadata.insert("request".to_owned(), request);
-            metadata.insert("endpoint".to_owned(), Value::String(HYPERLIQUID_URL.to_owned()));
+            metadata.insert(
+                "endpoint".to_owned(),
+                Value::String(HYPERLIQUID_URL.to_owned()),
+            );
             output.push(ObservationEnvelope {
                 schema_version: 1,
                 event_time: None,
@@ -151,7 +161,7 @@ impl ProviderClient {
                 }
             }
         }
-        Err(last_error.expect("three attempts always produce an error when all fail"))
+        last_error.context("Hyperliquid request exhausted retries")
     }
 
     async fn get_json_with_retry(&self, url: &str) -> Result<Value> {
@@ -183,7 +193,7 @@ impl ProviderClient {
                 }
             }
         }
-        Err(last_error.expect("three attempts always produce an error when all fail"))
+        last_error.context("DefiLlama request exhausted retries")
     }
 }
 
@@ -194,7 +204,7 @@ pub fn parse_sources(values: &[String]) -> Result<Vec<ProviderSource>> {
             ProviderSource::DefiLlama,
         ]);
     }
-    values.iter().map(|value| ProviderSource::parse(value)).collect()
+    values.iter().map(|value| value.parse()).collect()
 }
 
 #[cfg(test)]
@@ -204,14 +214,14 @@ mod tests {
     #[test]
     fn source_parser_matches_python_cli_names() {
         assert_eq!(
-            ProviderSource::parse("hyperliquid").unwrap(),
+            "hyperliquid".parse::<ProviderSource>().unwrap(),
             ProviderSource::Hyperliquid
         );
         assert_eq!(
-            ProviderSource::parse("defillama").unwrap(),
+            "defillama".parse::<ProviderSource>().unwrap(),
             ProviderSource::DefiLlama
         );
-        assert!(ProviderSource::parse("unknown").is_err());
+        assert!("unknown".parse::<ProviderSource>().is_err());
     }
 
     #[test]
