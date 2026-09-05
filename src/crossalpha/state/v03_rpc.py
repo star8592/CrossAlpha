@@ -11,6 +11,7 @@ AAVE_V3_ETHEREUM_CORE_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
 AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK = 16_291_127
 BORROW_EVENT_TOPIC0 = "0xb3d084820fb1a9decffb176436bd02558d15fac9b0ddfed8c465bc7359d7dce0"
 GET_USER_ACCOUNT_DATA_SELECTOR = "0xbf92857c"
+DEFAULT_PUBLIC_ETHEREUM_RPC = "https://ethereum-rpc.publicnode.com"
 BASE_CURRENCY_SCALE = 100_000_000.0
 HEALTH_FACTOR_SCALE = 1_000_000_000_000_000_000.0
 UINT256_MAX = 2**256 - 1
@@ -20,6 +21,12 @@ UINT256_MAX = 2**256 - 1
 class RpcPolicy:
     batch_size: int = 100
     timeout_seconds: float = 30.0
+
+
+def resolve_rpc_url(configured: str | None) -> tuple[str, str]:
+    if configured:
+        return configured, "EVM_RPC_URL"
+    return DEFAULT_PUBLIC_ETHEREUM_RPC, "PUBLICNODE_ZERO_COST_FALLBACK"
 
 
 def _normalize_address(value: str) -> str:
@@ -193,7 +200,7 @@ class AaveBorrowerRpc:
             try:
                 decoded = decode_get_user_account_data(item.get("result"))
                 result[address] = {"address": address, "success": True, "error": None, **decoded}
-            except Exception as exc:  # malformed endpoint result remains visible as a failed call
+            except Exception as exc:
                 result[address] = {
                     "address": address,
                     "success": False,
@@ -272,7 +279,6 @@ class AaveBorrowerRpc:
                         block_number,
                         id_offset=chunk_index * batch_size + 1,
                     )
-                    # Missing ids in a nominally successful batch are failed calls, not invisible rows.
                     for address in chunk:
                         if address not in chunk_rows:
                             chunk_rows[address] = {
