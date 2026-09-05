@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+
 import pytest
 
 from crossalpha.state.v03_rpc import (
+    AaveBorrowerRpc,
     BORROW_EVENT_TOPIC0,
     DEFAULT_PUBLIC_ETHEREUM_RPC,
     UINT256_MAX,
@@ -79,3 +83,18 @@ def test_zero_debt_uintmax_health_factor_is_unknown_not_infinite_float() -> None
 def test_invalid_account_data_length_fails_closed() -> None:
     with pytest.raises(ValueError, match="unexpected byte length"):
         decode_get_user_account_data("0x1234")
+
+
+def test_block_timestamp_is_read_from_exact_requested_block(monkeypatch) -> None:
+    rpc = AaveBorrowerRpc("http://example.invalid")
+    expected = datetime(2026, 9, 5, 1, 2, 3, tzinfo=timezone.utc)
+
+    async def fake_single(_client, method, params, *, request_id=1):
+        assert method == "eth_getBlockByNumber"
+        assert params == [hex(23_000_123), False]
+        assert request_id == 1
+        return {"timestamp": hex(int(expected.timestamp()))}
+
+    monkeypatch.setattr(rpc, "_single", fake_single)
+    result = asyncio.run(rpc.block_timestamp(23_000_123))
+    assert result == expected.isoformat()
