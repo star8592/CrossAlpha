@@ -1,3 +1,7 @@
+mod parity;
+
+pub use parity::{ManifestParityReport, verify_manifest_parity};
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
 use flate2::{Compression, write::GzEncoder};
@@ -221,8 +225,7 @@ pub fn update_series_state_unlocked(
     };
 
     let previous = state.latest_observed_at;
-    let interval =
-        previous.map(|prev| (record.observed_at - prev).num_milliseconds() as f64 / 1000.0);
+    let interval = previous.map(|prev| duration_seconds(record.observed_at - prev));
     state.count += 1;
     if state.first_observed_at.is_none() {
         state.first_observed_at = Some(record.observed_at);
@@ -315,6 +318,14 @@ fn atomic_write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
+fn duration_seconds(duration: chrono::Duration) -> f64 {
+    if let Some(microseconds) = duration.num_microseconds() {
+        microseconds as f64 / 1_000_000.0
+    } else {
+        duration.num_milliseconds() as f64 / 1_000.0
+    }
+}
+
 fn safe_component(value: &str) -> String {
     value.replace('/', "_").replace("..", "_")
 }
@@ -347,5 +358,12 @@ mod tests {
         let encoded = serde_json::to_string(&record).unwrap();
         let decoded: RawSnapshotManifest = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn interval_seconds_preserves_microseconds() {
+        let first: DateTime<Utc> = "2026-09-05T12:34:56.000001Z".parse().unwrap();
+        let second: DateTime<Utc> = "2026-09-05T12:34:57.123457Z".parse().unwrap();
+        assert_eq!(duration_seconds(second - first), 1.123456);
     }
 }
