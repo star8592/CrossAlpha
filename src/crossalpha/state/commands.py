@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 
 from crossalpha.catalog import build_catalog
+from crossalpha.core.free_paper import paper_status
 from crossalpha.settings import Settings
 from crossalpha.state.ab_integrity import (
     strict_state_ab_integrity_report,
@@ -42,6 +44,22 @@ def ab_freeze_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
+
+    current_ab = strict_state_ab_status(settings.crossalpha_data_dir)
+    if not current_ab.get("frozen"):
+        core = paper_status(settings.crossalpha_data_dir)
+        first = core.get("first_eligible_effective_date")
+        if not first:
+            raise SystemExit("Frozen B3 paper protocol must exist before State A/B freeze")
+        today = datetime.now(timezone.utc).date()
+        first_date = datetime.fromisoformat(str(first)).date()
+        if today >= first_date:
+            raise SystemExit(
+                "STATE A/B FREEZE TOO LATE: a new prospective V0.1 experiment must be "
+                f"frozen before {first_date.isoformat()}, not on/after it. "
+                "Create a new protocol version instead."
+            )
+
     report = freeze_state_ab_protocol(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
