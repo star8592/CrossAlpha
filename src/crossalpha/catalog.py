@@ -39,8 +39,16 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     stablecoin_system_glob = stablecoin_system_root / "**" / "*.parquet"
     stablecoin_chain_state_root = data_root / "derived" / "stablecoins" / "chain_state"
     stablecoin_chain_state_glob = stablecoin_chain_state_root / "**" / "*.parquet"
+    aave_markets_root = data_root / "canonical" / "aave" / "markets"
+    aave_markets_glob = aave_markets_root / "**" / "*.parquet"
+    aave_liquidations_root = data_root / "canonical" / "aave" / "liquidations"
+    aave_liquidations_glob = aave_liquidations_root / "**" / "*.parquet"
     state_shadow_root = data_root / "derived" / "state" / "shadow_v01"
     state_shadow_glob = state_shadow_root / "**" / "*.parquet"
+    state_v02_root = data_root / "derived" / "state" / "v02"
+    state_v02_glob = state_v02_root / "**" / "*.parquet"
+    state_v02_prospective_root = data_root / "research" / "state_v02" / "prospective"
+    state_v02_prospective_glob = state_v02_prospective_root / "**" / "state_at=*.json"
     free_core_returns_root = data_root / "derived" / "core" / "free_v01"
     free_core_returns_glob = free_core_returns_root / "**" / "asset_returns.parquet"
     core_paper_marks_root = data_root / "research" / "free_v01" / "paper" / "marks"
@@ -62,8 +70,12 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.stablecoin_chain_supply",
             "observatory.stablecoin_system_state",
             "observatory.stablecoin_chain_state",
+            "observatory.aave_markets",
+            "observatory.aave_liquidations",
             "state_engine.shadow_v01",
             "state_engine.shadow_ab_marks",
+            "state_engine.v02",
+            "state_engine.v02_prospective",
             "core.free_asset_returns",
             "core.frozen_b3_paper_marks",
         ):
@@ -124,6 +136,22 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             )
             created_views.append("observatory.stablecoin_chain_state")
 
+        if _has_parquet(aave_markets_root):
+            con.execute(
+                "CREATE VIEW observatory.aave_markets AS "
+                f"SELECT * FROM read_parquet({_sql_string(aave_markets_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.aave_markets")
+
+        if _has_parquet(aave_liquidations_root):
+            con.execute(
+                "CREATE VIEW observatory.aave_liquidations AS "
+                f"SELECT * FROM read_parquet({_sql_string(aave_liquidations_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("observatory.aave_liquidations")
+
         if _has_parquet(state_shadow_root):
             con.execute(
                 "CREATE VIEW state_engine.shadow_v01 AS "
@@ -138,6 +166,21 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 f"SELECT * FROM read_json_auto({_sql_string(state_ab_marks_glob)})"
             )
             created_views.append("state_engine.shadow_ab_marks")
+
+        if _has_parquet(state_v02_root):
+            con.execute(
+                "CREATE VIEW state_engine.v02 AS "
+                f"SELECT * FROM read_parquet({_sql_string(state_v02_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("state_engine.v02")
+
+        if _has_json(state_v02_prospective_root):
+            con.execute(
+                "CREATE VIEW state_engine.v02_prospective AS "
+                f"SELECT * FROM read_json_auto({_sql_string(state_v02_prospective_glob)})"
+            )
+            created_views.append("state_engine.v02_prospective")
 
         if _has_parquet(free_core_returns_root):
             con.execute(
