@@ -140,7 +140,8 @@ if phase_ok; then
 fi
 V03_HASH_EXPECTED="$(sha_or_missing "$V03_FREEZE")"
 
-# E. State V0.4 multi-venue mechanics. Always run a live preflight before a new freeze.
+# E. State V0.4 multi-venue mechanics. Run exactly one live data cycle after freeze;
+# that same cycle persists health, so no duplicate exchange requests are made.
 if phase_ok; then
   run_critical "E1. State V0.4 config + fault-isolation hash" crossalpha-state-v04-config-check
 fi
@@ -149,14 +150,14 @@ if phase_ok && [[ ! -f "$V04_FREEZE" ]]; then
   run_critical "E3. freeze State V0.4" crossalpha-state-v04-freeze
 fi
 if phase_ok; then
-  run_critical "E4. first/current frozen State V0.4 live observation" crossalpha-state-v04-cycle
+  run_critical "E4. single frozen State V0.4 live cycle + health" python scripts/run_state_v04_cycle.py
   run_critical "E5. State V0.4 strict raw-to-vector integrity" crossalpha-state-v04-integrity
   run_critical "E6. State V0.4 status" crossalpha-state-v04-status
-  run_critical "E7. persist State V0.4 cycle health" python scripts/run_state_v04_cycle.py
 fi
 V04_HASH_EXPECTED="$(sha_or_missing "$V04_FREEZE")"
 
-# F. Outcome Linkage is frozen only after all source ledgers are healthy.
+# F. Outcome Linkage is frozen only after all source ledgers are healthy. The cycle script
+# performs exactly one deterministic materialization and persists health/catalog.
 if phase_ok; then
   run_critical "F1. Outcome Linkage config consistency" crossalpha-outcome-config-check
 fi
@@ -164,10 +165,9 @@ if phase_ok && [[ ! -f "$OUTCOME_FREEZE" ]]; then
   run_critical "F2. freeze Outcome Linkage V0.1" crossalpha-outcome-freeze
 fi
 if phase_ok; then
-  run_critical "F3. deterministic matured-outcome materialization" crossalpha-outcome-materialize
+  run_critical "F3. single deterministic outcome materialization + health/catalog" python scripts/run_outcome_linkage_cycle.py
   run_critical "F4. Outcome Linkage strict integrity" crossalpha-outcome-integrity
   run_critical "F5. Outcome Linkage status" crossalpha-outcome-status
-  run_critical "F6. persist Outcome Linkage cycle health/catalog" python scripts/run_outcome_linkage_cycle.py
 fi
 OUTCOME_HASH_EXPECTED="$(sha_or_missing "$OUTCOME_FREEZE")"
 
