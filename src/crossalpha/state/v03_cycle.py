@@ -11,6 +11,7 @@ import pandas as pd
 from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v03 import CensusPolicy, compute_borrower_census
+from crossalpha.state.v03_prospective import freeze_path, write_full_census_observation
 from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
     AAVE_V3_ETHEREUM_CORE_POOL,
@@ -166,14 +167,10 @@ def _write_census_artifacts(
 
 
 async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
-    """Advance the borrower universe and, when possible, record HF observations.
-
-    Bootstrap scans are operational history reconstruction and never count as
-    prospective evidence. Full-census and watchlist outputs are descriptive only.
-    """
+    """Advance the borrower universe and record point-in-time borrower risk facts."""
     settings.ensure_dirs()
     data_root = settings.crossalpha_data_dir
-    now = pd.Timestamp(datetime.now(timezone.utc))
+    scan_started_at = pd.Timestamp(datetime.now(timezone.utc))
     if not settings.evm_rpc_url:
         return {
             "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
@@ -195,7 +192,10 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     borrowers = _load_addresses(universe_path)
     store = RawSnapshotStore(data_root)
 
-    next_block = max(int(state.get("next_block", AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)), AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    next_block = max(
+        int(state.get("next_block", AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)),
+        AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
+    )
     scanned_ranges: list[dict[str, Any]] = []
     for _ in range(MAX_BOOTSTRAP_CHUNKS_PER_CYCLE):
         if next_block > finalized_block:
@@ -204,9 +204,10 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         logs = await _adaptive_borrow_logs(rpc, next_block, end)
         debtors = {address for row in logs if (address := borrow_log_debtor(row)) is not None}
         borrowers.update(debtors)
+        observed = pd.Timestamp(datetime.now(timezone.utc))
         envelope = ObservationEnvelope(
-            observed_at=now.to_pydatetime(),
-            known_at=now.to_pydatetime(),
+            observed_at=observed.to_pydatetime(),
+            known_at=observed.to_pydatetime(),
             source_type=SourceType.CHAIN,
             source_id="aave:v3:ethereum:borrowers",
             observation_type="borrow_logs_chunk",
@@ -260,41 +261,60 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             "mutates_v01_or_v02": False,
         }
 
-    if _full_census_due(state, now):
+    decision_now = pd.Timestamp(datetime.now(timezone.utc))
+    if _full_census_due(state, decision_now):
         accounts = await rpc.account_data(sorted(borrowers), block_number=finalized_block)
+        census_captured = pd.Timestamp(datetime.now(timezone.utc))
         summary = compute_borrower_census(
             accounts,
             total_candidate_addresses=len(borrowers),
             bootstrap_complete=True,
             block_number=finalized_block,
-            captured_at=now,
+            captured_at=census_captured,
             policy=CensusPolicy(),
         )
         artifacts = _write_census_artifacts(
             data_root,
             accounts,
             summary,
-            captured=now,
+            captured=census_captured,
             scope="full_census",
         )
+        prospective: dict[str, Any] = {
+            "status": "not_frozen_no_prospective_write"
+        }
         if summary.get("valid_full_census"):
             watchlist = set(str(value).lower() for value in summary.get("watchlist_addresses", []))
             _write_addresses(_watchlist_path(data_root), watchlist)
-            state["last_valid_full_census_at"] = now.isoformat()
+            if freeze_path(data_root).exists():
+                prospective = write_full_census_observation(
+                    data_root,
+                    summary,
+                    summary_path=Path(artifacts["summary"]),
+                    detail_path=Path(artifacts["detail"]),
+                    known_at=pd.Timestamp(datetime.now(timezone.utc)),
+                )
+            state["last_valid_full_census_at"] = census_captured.isoformat()
             state["last_valid_full_census_block"] = finalized_block
             state["last_valid_full_census_summary"] = artifacts["summary"]
             state["last_valid_full_census_summary_sha256"] = artifacts["summary_sha256"]
             _write_state(data_root, state)
         return {
             "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
-            "status": "FULL_CENSUS_RECORDED" if summary.get("valid_full_census") else "FULL_CENSUS_PARTIAL_RETRY_REQUIRED",
+            "status": (
+                "FULL_CENSUS_RECORDED"
+                if summary.get("valid_full_census")
+                else "FULL_CENSUS_PARTIAL_RETRY_REQUIRED"
+            ),
             "data_cost_usd": 0,
+            "scan_started_at": scan_started_at.isoformat(),
             "latest_block": latest_block,
             "finalized_block": finalized_block,
             "candidate_address_count": len(borrowers),
             "scanned_ranges": scanned_ranges,
             "census": summary,
             "artifacts": artifacts,
+            "prospective": prospective,
             "mutates_v01_or_v02": False,
         }
 
@@ -308,17 +328,18 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             "mutates_v01_or_v02": False,
         }
     accounts = await rpc.account_data(sorted(watchlist), block_number=finalized_block)
+    watch_captured = pd.Timestamp(datetime.now(timezone.utc))
     watch = compute_watchlist_snapshot(
         accounts,
         expected_addresses=len(watchlist),
         block_number=finalized_block,
-        captured_at=now,
+        captured_at=watch_captured,
     )
     artifacts = _write_census_artifacts(
         data_root,
         accounts,
         watch,
-        captured=now,
+        captured=watch_captured,
         scope="watchlist",
     )
     return {
