@@ -16,6 +16,7 @@ VENUES = ("binance", "okx", "bybit")
 MINIMUM_VALID_VENUES = 2
 FULL_CONFIDENCE_VENUES = 3
 MAXIMUM_SNAPSHOT_AGE_SECONDS = 90
+FUNDING_SEMANTICS = "LATEST_SETTLED_NORMALIZED_TO_8H"
 
 
 def _utc(value: Any) -> pd.Timestamp:
@@ -83,6 +84,10 @@ def compute_market_mechanics(
         "spot_mid",
         "perp_mid",
         "basis_bps",
+        "funding_semantics",
+        "funding_rate_settled_raw",
+        "funding_settlement_time",
+        "funding_interval_hours",
         "funding_rate_8h",
         "perp_spread_bps",
         "open_interest_usd",
@@ -110,11 +115,12 @@ def compute_market_mechanics(
             "generated_at": generated.isoformat(),
             "data_confidence": "INSUFFICIENT",
             "assets": {},
+            "funding_semantics": FUNDING_SEMANTICS,
             "no_composite_stress_score": True,
         }
 
     latest_rows: list[pd.Series] = []
-    for (asset, venue), part in data.groupby(["asset", "venue"], sort=True):
+    for (_asset, _venue), part in data.groupby(["asset", "venue"], sort=True):
         part = part.sort_values(["observed_at", "known_at"])
         latest = part.iloc[-1]
         age = generated - latest["observed_at"]
@@ -141,9 +147,15 @@ def compute_market_mechanics(
         else:
             confidence = "INSUFFICIENT"
 
+        funding_semantic_mask = complete["funding_semantics"].astype(str).eq(FUNDING_SEMANTICS)
+        funding_interval = pd.to_numeric(complete["funding_interval_hours"], errors="coerce")
+        funding_rate = pd.to_numeric(complete["funding_rate_8h"], errors="coerce")
+        comparable_funding = complete.loc[
+            funding_semantic_mask & funding_interval.gt(0) & funding_rate.notna()
+        ].copy()
         oi = pd.to_numeric(complete["open_interest_usd"], errors="coerce")
         total_oi = float(oi.dropna().sum()) if oi.notna().any() else None
-        funding_count = int(pd.to_numeric(complete["funding_rate_8h"], errors="coerce").notna().sum())
+        funding_count = int(len(comparable_funding))
         asset_reports[asset] = {
             "data_confidence": confidence,
             "valid_venue_count": valid_count,
@@ -153,8 +165,8 @@ def compute_market_mechanics(
             "basis_median_bps": _median(complete["basis_bps"]),
             "basis_range_bps": _range(complete["basis_bps"]),
             "basis_std_bps": _std(complete["basis_bps"]),
-            "funding_8h_median": _median(complete["funding_rate_8h"]),
-            "funding_8h_range": _range(complete["funding_rate_8h"]),
+            "funding_8h_median": _median(comparable_funding["funding_rate_8h"]),
+            "funding_8h_range": _range(comparable_funding["funding_rate_8h"]),
             "perp_spread_median_bps": _median(complete["perp_spread_bps"]),
             "perp_spread_max_bps": (
                 float(pd.to_numeric(complete["perp_spread_bps"], errors="coerce").max())
@@ -169,6 +181,14 @@ def compute_market_mechanics(
                     "spot_mid": _number(row.spot_mid),
                     "perp_mid": _number(row.perp_mid),
                     "basis_bps": _number(row.basis_bps),
+                    "funding_semantics": str(row.funding_semantics),
+                    "funding_rate_settled_raw": _number(row.funding_rate_settled_raw),
+                    "funding_settlement_time": (
+                        None
+                        if pd.isna(row.funding_settlement_time)
+                        else str(row.funding_settlement_time)
+                    ),
+                    "funding_interval_hours": _number(row.funding_interval_hours),
                     "funding_rate_8h": _number(row.funding_rate_8h),
                     "perp_spread_bps": _number(row.perp_spread_bps),
                     "open_interest_usd": _number(row.open_interest_usd),
@@ -197,9 +217,11 @@ def compute_market_mechanics(
         "generated_at": generated.isoformat(),
         "data_confidence": confidence,
         "assets": asset_reports,
+        "funding_semantics": FUNDING_SEMANTICS,
         "no_composite_stress_score": True,
         "interpretation": (
-            "Descriptive cross-venue market-mechanics vector only. Basis, funding, spread, "
-            "spot dislocation and OI concentration are not trading signals in V0.4."
+            "Descriptive cross-venue market-mechanics vector only. Funding uses the most "
+            "recent settled rate normalized by the observed settlement interval. Basis, funding, "
+            "spread, spot dislocation and OI concentration are not trading signals in V0.4."
         ),
     }
