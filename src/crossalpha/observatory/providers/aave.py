@@ -99,6 +99,8 @@ class AaveV3LiquidationRpcProvider:
     The provider scans only a bounded recent block window on every run. Canonical
     materialization deduplicates by transaction hash + log index, so no mutable
     cursor is required and overlapping scans are reorg-friendlier than a cursor.
+    Block timestamps are attached to each returned log so event_time remains
+    distinct from collector observed_at/known_at.
     """
 
     def __init__(
@@ -144,6 +146,26 @@ class AaveV3LiquidationRpcProvider:
         )
         if not isinstance(logs, list):
             raise ValueError("Aave liquidation eth_getLogs did not return a list")
+
+        block_cache: dict[str, str | None] = {}
+        enriched: list[dict[str, Any]] = []
+        for item in logs:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            block_number = row.get("blockNumber")
+            if isinstance(block_number, str):
+                if block_number not in block_cache:
+                    block = await self._rpc("eth_getBlockByNumber", [block_number, False])
+                    timestamp = block.get("timestamp") if isinstance(block, dict) else None
+                    block_cache[block_number] = timestamp if isinstance(timestamp, str) else None
+                raw_timestamp = block_cache[block_number]
+                if raw_timestamp is not None:
+                    row["blockTimestamp"] = datetime.fromtimestamp(
+                        int(raw_timestamp, 16), tz=timezone.utc
+                    ).isoformat()
+            enriched.append(row)
+
         now = datetime.now(timezone.utc)
         return [
             ObservationEnvelope(
@@ -152,7 +174,7 @@ class AaveV3LiquidationRpcProvider:
                 source_type=SourceType.CHAIN,
                 source_id="aave:v3:ethereum",
                 observation_type="liquidation_logs",
-                payload=logs,
+                payload=enriched,
                 metadata={
                     "pool_address": self.pool_address,
                     "chain_id": AAVE_V3_ETHEREUM_CHAIN_ID,
