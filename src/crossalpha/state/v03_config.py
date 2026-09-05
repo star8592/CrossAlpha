@@ -45,8 +45,9 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "no_auto_actionability": raw.get("research_policy", {}).get("automatic_actionability_allowed") is False,
         "historical_bootstrap_not_evidence": raw.get("research_policy", {}).get("historical_bootstrap_is_evidence") is False,
         "rpc_env": source.get("rpc_env") == "EVM_RPC_URL",
+        "rpc_fallback": source.get("fallback_rpc_url") == v03_rpc.DEFAULT_PUBLIC_ETHEREUM_RPC,
         "zero_cost": source.get("required_data_cost_usd") == 0,
-        "rpc_policy": source.get("rpc_policy") == "USER_SUPPLIED_ZERO_COST_OR_LOCAL_ONLY",
+        "rpc_policy": source.get("rpc_policy") == "EVM_RPC_URL_PREFERRED_ZERO_COST_PUBLIC_FALLBACK",
         "pool_address": str(source.get("aave_v3_core_pool", "")).lower()
         == v03_rpc.AAVE_V3_ETHEREUM_CORE_POOL.lower(),
         "deployment_block": source.get("deployment_block") == v03_rpc.AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
