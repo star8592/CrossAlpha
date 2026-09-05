@@ -32,9 +32,19 @@ retry_refresh() {
   return 1
 }
 
+# Freeze/order discipline:
+#   1) refresh point-in-time Core data
+#   2) seal A snapshot
+#   3) seal contemporaneous State decision + B snapshot referencing A hash
+#   4) seal the preceding day's A mark
+#   5) seal the same preceding day's B mark referencing that A mark
 retry_refresh
 python scripts/check_free_paper_integrity.py
 crossalpha-free-paper-snapshot --effective-date "$TODAY_UTC"
+crossalpha-state-ab-snapshot --effective-date "$TODAY_UTC"
 crossalpha-free-paper-mark --end "$TODAY_UTC"
 python scripts/check_free_paper_integrity.py
+crossalpha-state-ab-mark --end "$TODAY_UTC"
+crossalpha-state-ab-integrity
 crossalpha-free-paper-status
+crossalpha-state-ab-status
