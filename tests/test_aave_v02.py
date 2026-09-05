@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 import pytest
 
 from crossalpha.domain.models import RawSnapshotManifest
-from crossalpha.observatory.canonical.aave import LIQUIDATION_COLUMNS, parse_aave_liquidations, parse_aave_markets
+from crossalpha.observatory.canonical.aave import (
+    LIQUIDATION_COLUMNS,
+    parse_aave_liquidations,
+    parse_aave_markets,
+)
 from crossalpha.observatory.providers import aave
 
 
@@ -28,7 +32,10 @@ def _market(address: str, name: str, symbol: str = "USDC") -> dict:
                 "supplyInfo": {"apy": {"formatted": "3.25"}},
                 "borrowInfo": {
                     "apy": {"formatted": "4.50"},
-                    "availableLiquidity": {"amount": {"value": "123.5"}, "usd": "123500000"},
+                    "availableLiquidity": {
+                        "amount": {"value": "123.5"},
+                        "usd": "123500000",
+                    },
                     "borrowCapReached": False,
                 },
                 "isFrozen": False,
@@ -105,7 +112,7 @@ def test_parse_aave_market_fields_are_percent_and_usd_values() -> None:
         "observed_at": "2026-09-05T00:00:00Z",
         "known_at": "2026-09-05T00:00:01Z",
         "metadata": {"chain_id": 1},
-        "payload": {"data": {"markets": [_market(CORE, "Core")] }},
+        "payload": {"data": {"markets": [_market(CORE, "Core")]}},
     }
     frame = parse_aave_markets(envelope, _manifest("markets_snapshot"))
     row = frame.iloc[0]
@@ -156,8 +163,19 @@ def test_liquidation_event_parser_preserves_event_time_and_identity() -> None:
                 "logIndex": "0x3",
                 "blockHash": "0xdef",
                 "removed": False,
-                "topics": [aave.LIQUIDATION_CALL_TOPIC, _topic(collateral), _topic(debt), _topic(user)],
-                "data": "0x" + _word_int(123) + _word_int(456) + _word_address(liquidator) + _word_int(1),
+                "topics": [
+                    aave.LIQUIDATION_CALL_TOPIC,
+                    _topic(collateral),
+                    _topic(debt),
+                    _topic(user),
+                ],
+                "data": (
+                    "0x"
+                    + _word_int(123)
+                    + _word_int(456)
+                    + _word_address(liquidator)
+                    + _word_int(1)
+                ),
             }
         ],
     }
@@ -172,4 +190,4 @@ def test_liquidation_event_parser_preserves_event_time_and_identity() -> None:
     assert row["debt_to_cover_raw"] == 123
     assert row["liquidated_collateral_amount_raw"] == 456
     assert row["liquidator"] == liquidator
-    assert row["receive_atoken"] is True
+    assert bool(row["receive_atoken"]) is True
