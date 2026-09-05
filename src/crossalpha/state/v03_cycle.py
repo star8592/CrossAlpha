@@ -18,6 +18,7 @@ from crossalpha.state.v03_rpc import (
     AaveBorrowerRpc,
     RpcPolicy,
     borrow_log_debtor,
+    resolve_rpc_url,
 )
 from crossalpha.state.v03_watchlist import compute_watchlist_snapshot
 from crossalpha.storage.raw import RawSnapshotStore
@@ -172,18 +173,9 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     settings.ensure_dirs()
     data_root = settings.crossalpha_data_dir
     scan_started_at = pd.Timestamp(datetime.now(timezone.utc))
-    if not settings.evm_rpc_url:
-        return {
-            "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
-            "status": "BLOCKED_NO_EVM_RPC_URL",
-            "actionability": "DESCRIPTIVE_ONLY",
-            "risk_multiplier": None,
-            "data_cost_usd": 0,
-            "mutates_v01_or_v02": False,
-        }
-
+    rpc_url, rpc_source = resolve_rpc_url(settings.evm_rpc_url)
     rpc = AaveBorrowerRpc(
-        settings.evm_rpc_url,
+        rpc_url,
         policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
     )
     latest_block = await rpc.latest_block()
@@ -220,6 +212,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "log_count": len(logs),
                 "new_candidate_count_in_chunk": len(debtors),
                 "historical_bootstrap_is_evidence": False,
+                "rpc_source": rpc_source,
                 "data_cost_usd": 0,
             },
         )
@@ -244,22 +237,28 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["candidate_address_count"] = len(borrowers)
     state["latest_seen_block"] = latest_block
     state["latest_finalized_block"] = finalized_block
+    state["rpc_source"] = rpc_source
     _write_state(data_root, state)
+
+    common = {
+        "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
+        "actionability": "DESCRIPTIVE_ONLY",
+        "risk_multiplier": None,
+        "data_cost_usd": 0,
+        "rpc_source": rpc_source,
+        "latest_block": latest_block,
+        "finalized_block": finalized_block,
+        "candidate_address_count": len(borrowers),
+        "mutates_v01_or_v02": False,
+    }
 
     if not caught_up:
         return {
-            "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
+            **common,
             "status": "BORROWER_UNIVERSE_BOOTSTRAPPING",
-            "actionability": "DESCRIPTIVE_ONLY",
-            "risk_multiplier": None,
-            "data_cost_usd": 0,
-            "latest_block": latest_block,
-            "finalized_block": finalized_block,
             "next_block": next_block,
-            "candidate_address_count": len(borrowers),
             "scanned_ranges": scanned_ranges,
             "historical_bootstrap_is_evidence": False,
-            "mutates_v01_or_v02": False,
         }
 
     decision_now = pd.Timestamp(datetime.now(timezone.utc))
@@ -298,33 +297,22 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             state["last_valid_full_census_summary_sha256"] = artifacts["summary_sha256"]
             _write_state(data_root, state)
         return {
-            "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
+            **common,
             "status": (
                 "FULL_CENSUS_RECORDED"
                 if summary.get("valid_full_census")
                 else "FULL_CENSUS_PARTIAL_RETRY_REQUIRED"
             ),
-            "data_cost_usd": 0,
             "scan_started_at": scan_started_at.isoformat(),
-            "latest_block": latest_block,
-            "finalized_block": finalized_block,
-            "candidate_address_count": len(borrowers),
             "scanned_ranges": scanned_ranges,
             "census": summary,
             "artifacts": artifacts,
             "prospective": prospective,
-            "mutates_v01_or_v02": False,
         }
 
     watchlist = _load_addresses(_watchlist_path(data_root))
     if not watchlist:
-        return {
-            "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
-            "status": "CAUGHT_UP_AWAITING_NEXT_FULL_CENSUS",
-            "data_cost_usd": 0,
-            "candidate_address_count": len(borrowers),
-            "mutates_v01_or_v02": False,
-        }
+        return {**common, "status": "CAUGHT_UP_AWAITING_NEXT_FULL_CENSUS"}
     accounts = await rpc.account_data(sorted(watchlist), block_number=finalized_block)
     watch_captured = pd.Timestamp(datetime.now(timezone.utc))
     watch = compute_watchlist_snapshot(
@@ -341,13 +329,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         scope="watchlist",
     )
     return {
-        "protocol": "CROSSALPHA_STATE_V0_3_CYCLE",
+        **common,
         "status": "WATCHLIST_RECORDED",
-        "data_cost_usd": 0,
-        "latest_block": latest_block,
-        "finalized_block": finalized_block,
-        "candidate_address_count": len(borrowers),
         "watchlist": watch,
         "artifacts": artifacts,
-        "mutates_v01_or_v02": False,
     }
