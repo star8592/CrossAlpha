@@ -22,7 +22,20 @@ source:
   chain_id: 1
   rpc_env: EVM_RPC_URL
   fallback_rpc_url: https://ethereum-rpc.blockreq.com/v1/rpc/public
-  rpc_policy: EVM_RPC_URL_PREFERRED_ZERO_COST_ARCHIVE_PUBLIC_FALLBACK
+  fallback_rpc_candidates:
+    - https://ethereum-rpc.blockreq.com/v1/rpc/public
+    - https://ethereum-rpc.publicnode.com
+    - https://eth.llamarpc.com
+  rpc_policy: EVM_RPC_URL_PREFERRED_CAPABILITY_PROBED_ZERO_COST_FALLBACK_POOL
+  required_capabilities:
+    - eth_blockNumber
+    - eth_getBlockByNumber
+    - recent_eth_getLogs
+    - historical_eth_getLogs
+    - fixed_block_eth_call
+  single_cycle_rpc_selection: true
+  configured_rpc_failure_may_fallback: true
+  rpc_failure_diagnostics_must_not_expose_url_or_token: true
   required_data_cost_usd: 0
   aave_v3_core_pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
   deployment_block: 16291127
