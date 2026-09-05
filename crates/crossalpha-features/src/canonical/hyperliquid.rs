@@ -77,12 +77,8 @@ pub fn parse_meta_and_asset_contexts(
         }
 
         let impact = ctx.get("impactPxs").and_then(Value::as_array);
-        let impact_bid = impact
-            .and_then(|items| items.first())
-            .and_then(to_float);
-        let impact_ask = impact
-            .and_then(|items| items.get(1))
-            .and_then(to_float);
+        let impact_bid = impact.and_then(|items| items.first()).and_then(to_float);
+        let impact_ask = impact.and_then(|items| items.get(1)).and_then(to_float);
 
         rows.push(HyperliquidAssetContextRow {
             observed_at: envelope.observed_at,
