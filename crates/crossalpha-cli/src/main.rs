@@ -95,6 +95,16 @@ enum Command {
         #[arg(long)]
         source: String,
     },
+    /// Write one isolated Rust canonical Parquet preview to an explicit output directory.
+    CanonicalParquetPreview {
+        data_root: PathBuf,
+        /// Explicit non-production output directory used by the R3.2 parity gate.
+        #[arg(long)]
+        output_dir: PathBuf,
+        /// Canonical source: hyperliquid or stablecoins.
+        #[arg(long)]
+        source: String,
+    },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -256,18 +266,13 @@ async fn main() -> Result<()> {
             crossalpha_observatory::run_supervisor_until_shutdown(config).await?;
         }
         Command::CanonicalPreview { data_root, source } => {
-            let source = match source.as_str() {
-                "hyperliquid" => crossalpha_features::CanonicalSource::Hyperliquid,
-                "stablecoins" | "defillama" => crossalpha_features::CanonicalSource::Stablecoins,
-                other => anyhow::bail!(
-                    "unsupported canonical source: {other}; expected hyperliquid or stablecoins"
-                ),
-            };
+            let source = parse_canonical_source(&source)?;
             let record = crossalpha_features::latest_record_for_source(&data_root, source)?;
             let envelope = crossalpha_features::load_envelope(&record)?;
             let output = match source {
                 crossalpha_features::CanonicalSource::Hyperliquid => {
-                    let rows = crossalpha_features::parse_meta_and_asset_contexts(&envelope, &record)?;
+                    let rows =
+                        crossalpha_features::parse_meta_and_asset_contexts(&envelope, &record)?;
                     serde_json::json!({
                         "source": "hyperliquid",
                         "raw_sha256": record.sha256,
@@ -275,7 +280,8 @@ async fn main() -> Result<()> {
                     })
                 }
                 crossalpha_features::CanonicalSource::Stablecoins => {
-                    let parsed = crossalpha_features::parse_stablecoin_snapshot(&envelope, &record)?;
+                    let parsed =
+                        crossalpha_features::parse_stablecoin_snapshot(&envelope, &record)?;
                     serde_json::json!({
                         "source": "stablecoins",
                         "raw_sha256": record.sha256,
@@ -287,13 +293,66 @@ async fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        Command::CanonicalParquetPreview {
+            data_root,
+            output_dir,
+            source,
+        } => {
+            let source = parse_canonical_source(&source)?;
+            let record = crossalpha_features::latest_record_for_source(&data_root, source)?;
+            let envelope = crossalpha_features::load_envelope(&record)?;
+            let output = match source {
+                crossalpha_features::CanonicalSource::Hyperliquid => {
+                    let rows =
+                        crossalpha_features::parse_meta_and_asset_contexts(&envelope, &record)?;
+                    let path = output_dir.join("hyperliquid.parquet");
+                    crossalpha_features::write_hyperliquid_parquet(&rows, &path)?;
+                    serde_json::json!({
+                        "source": "hyperliquid",
+                        "raw_sha256": record.sha256,
+                        "rows": rows.len(),
+                        "path": path,
+                    })
+                }
+                crossalpha_features::CanonicalSource::Stablecoins => {
+                    let parsed =
+                        crossalpha_features::parse_stablecoin_snapshot(&envelope, &record)?;
+                    let asset_path = output_dir.join("stablecoin_assets.parquet");
+                    let chain_path = output_dir.join("stablecoin_chain_supply.parquet");
+                    crossalpha_features::write_stablecoin_parquet(
+                        &parsed,
+                        &asset_path,
+                        &chain_path,
+                    )?;
+                    serde_json::json!({
+                        "source": "stablecoins",
+                        "raw_sha256": record.sha256,
+                        "asset_rows": parsed.assets.len(),
+                        "chain_rows": parsed.chains.len(),
+                        "asset_path": asset_path,
+                        "chain_path": chain_path,
+                    })
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R3.1 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=implemented canonical_parity_gate=required parquet_writer_gate=not-started python_compat=true"
+                "phase=R3.2 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=production-compatible canonical_parity_gate=passed parquet_writer=implemented parquet_writer_gate=required production_canonical_write=false python_compat=true"
             );
         }
     }
     Ok(())
+}
+
+fn parse_canonical_source(raw: &str) -> Result<crossalpha_features::CanonicalSource> {
+    match raw {
+        "hyperliquid" => Ok(crossalpha_features::CanonicalSource::Hyperliquid),
+        "stablecoins" | "defillama" => Ok(crossalpha_features::CanonicalSource::Stablecoins),
+        other => anyhow::bail!(
+            "unsupported canonical source: {other}; expected hyperliquid or stablecoins"
+        ),
+    }
 }
 
 fn positive_duration(seconds: f64, flag: &str) -> Result<Duration> {
