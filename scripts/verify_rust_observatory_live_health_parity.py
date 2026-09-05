@@ -17,6 +17,26 @@ from crossalpha.observatory.live_health import observatory_live_health  # noqa: 
 from crossalpha.storage.indexes import manifest_lock  # noqa: E402
 
 
+def _require_subcommand(binary: Path, subcommand: str) -> str | None:
+    if not binary.exists():
+        return f"Rust binary missing: {binary}; run cargo build -p crossalpha-cli"
+    completed = subprocess.run(
+        [str(binary), "--help"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return f"Rust binary --help failed: {completed.stderr.strip()}"
+    if subcommand not in completed.stdout:
+        return (
+            f"Rust binary is stale and does not expose {subcommand!r}; "
+            "fix cargo build errors and rebuild crossalpha-cli"
+        )
+    return None
+
+
 def _copy_tree(source: Path, destination: Path) -> None:
     if source.exists():
         shutil.copytree(source, destination, dirs_exist_ok=True)
@@ -90,6 +110,12 @@ def main() -> int:
     parser.add_argument("--stale-after", type=int, default=900)
     parser.add_argument("--no-verify-latest", action="store_true")
     args = parser.parse_args()
+
+    binary_error = _require_subcommand(args.rust_binary, "observatory-live-health")
+    if binary_error:
+        print("ok=false mismatches=1")
+        print(f"mismatch={binary_error}")
+        return 1
 
     now = datetime.now(timezone.utc)
     verify_latest = not args.no_verify_latest
