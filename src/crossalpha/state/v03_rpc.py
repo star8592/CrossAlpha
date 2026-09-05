@@ -12,9 +12,10 @@ AAVE_V3_ETHEREUM_CORE_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
 AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK = 16_291_127
 BORROW_EVENT_TOPIC0 = "0xb3d084820fb1a9decffb176436bd02558d15fac9b0ddfed8c465bc7359d7dce0"
 GET_USER_ACCOUNT_DATA_SELECTOR = "0xbf92857c"
-DEFAULT_PUBLIC_ETHEREUM_RPC = "https://ethereum-rpc.blockreq.com/v1/rpc/public"
+DEFAULT_PUBLIC_ETHEREUM_RPC = "https://eth.blockscout.com/api/eth-rpc"
 ZERO_COST_PUBLIC_RPC_CANDIDATES: tuple[tuple[str, str], ...] = (
-    (DEFAULT_PUBLIC_ETHEREUM_RPC, "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"),
+    (DEFAULT_PUBLIC_ETHEREUM_RPC, "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"),
+    ("https://ethereum-rpc.blockreq.com/v1/rpc/public", "BLOCKREQ_ZERO_COST_FALLBACK"),
     ("https://ethereum-rpc.publicnode.com", "PUBLICNODE_ZERO_COST_FALLBACK"),
     ("https://eth.llamarpc.com", "LLAMARPC_ZERO_COST_FALLBACK"),
 )
@@ -30,7 +31,7 @@ class RpcPolicy:
 
 
 def resolve_rpc_candidates(configured: str | None) -> list[tuple[str, str]]:
-    """Return ordered RPC candidates without exposing configured endpoint details in labels."""
+    """Return ordered state RPC candidates without exposing configured endpoint details."""
     candidates: list[tuple[str, str]] = []
     seen: set[str] = set()
     if configured:
@@ -111,7 +112,7 @@ def decode_get_user_account_data(result: str) -> dict[str, float | None]:
 
 
 class AaveBorrowerRpc:
-    """Minimal JSON-RPC reader; no web3 dependency and no paid vendor dependency."""
+    """Minimal finalized-state JSON-RPC reader; no web3 or paid-vendor dependency."""
 
     def __init__(self, rpc_url: str, *, policy: RpcPolicy | None = None) -> None:
         if not rpc_url:
@@ -160,6 +161,7 @@ class AaveBorrowerRpc:
         return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
     async def borrow_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
+        """Compatibility reader only; V0.3 borrower bootstrap uses indexed Blockscout logs."""
         if from_block < 0 or to_block < from_block:
             raise ValueError("invalid block range")
         params = [
