@@ -1,7 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use serde_json::Value;
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -80,7 +79,10 @@ async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
         {
             Ok(Ok(manifests)) => {
                 consecutive_failures = 0;
-                info!(written = manifests.len(), "Observatory collection succeeded");
+                info!(
+                    written = manifests.len(),
+                    "Observatory collection succeeded"
+                );
                 0u32
             }
             Ok(Err(error)) => {
@@ -106,15 +108,11 @@ async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
         let stale_after_seconds = config
             .stale_after_seconds
             .max(config.interval.as_secs().saturating_mul(2));
-        let mut health = observatory_live_health(
-            &config.data_root,
-            stale_after_seconds,
-            true,
-            None,
-        )?;
+        let mut health =
+            observatory_live_health(&config.data_root, stale_after_seconds, true, None)?;
         let health_ok = health
             .get("ok")
-            .and_then(Value::as_bool)
+            .and_then(|value| value.as_bool())
             .unwrap_or(false);
         if health_ok {
             consecutive_health_failures = 0;
@@ -141,23 +139,20 @@ async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
             "consecutive_health_failures".to_owned(),
             json!(consecutive_health_failures),
         );
-        let health_path = write_json_report(
-            &config.data_root,
-            "observatory_health.json",
-            &health,
-        )?;
+        let health_path = write_json_report(&config.data_root, "observatory_health.json", &health)?;
         info!(
             health_ok,
-            health_mode = health.get("mode").and_then(Value::as_str).unwrap_or("unknown"),
+            health_mode = health
+                .get("mode")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown"),
             health_path = %health_path.display(),
             consecutive_failures,
             consecutive_health_failures,
             "Observatory cycle health"
         );
 
-        if consecutive_failures >= failure_limit
-            || consecutive_health_failures >= failure_limit
-        {
+        if consecutive_failures >= failure_limit || consecutive_health_failures >= failure_limit {
             bail!(
                 "collector is repeatedly failing or stale; exiting for systemd restart: collector_failures={} health_failures={} limit={}",
                 consecutive_failures,
@@ -192,9 +187,7 @@ async fn shutdown_signal() -> Result<()> {
 
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c()
-            .await
-            .context("listen for Ctrl-C")?;
+        tokio::signal::ctrl_c().await.context("listen for Ctrl-C")?;
     }
 
     Ok(())
