@@ -12,7 +12,7 @@ AAVE_V3_ETHEREUM_CORE_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
 AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK = 16_291_127
 BORROW_EVENT_TOPIC0 = "0xb3d084820fb1a9decffb176436bd02558d15fac9b0ddfed8c465bc7359d7dce0"
 GET_USER_ACCOUNT_DATA_SELECTOR = "0xbf92857c"
-DEFAULT_PUBLIC_ETHEREUM_RPC = "https://ethereum-rpc.publicnode.com"
+DEFAULT_PUBLIC_ETHEREUM_RPC = "https://ethereum-rpc.blockreq.com/v1/rpc/public"
 BASE_CURRENCY_SCALE = 100_000_000.0
 HEALTH_FACTOR_SCALE = 1_000_000_000_000_000_000.0
 UINT256_MAX = 2**256 - 1
@@ -27,7 +27,7 @@ class RpcPolicy:
 def resolve_rpc_url(configured: str | None) -> tuple[str, str]:
     if configured:
         return configured, "EVM_RPC_URL"
-    return DEFAULT_PUBLIC_ETHEREUM_RPC, "PUBLICNODE_ZERO_COST_FALLBACK"
+    return DEFAULT_PUBLIC_ETHEREUM_RPC, "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
 
 
 def _normalize_address(value: str) -> str:
