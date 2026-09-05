@@ -1,0 +1,57 @@
+protocol: CROSSALPHA_OUTCOME_LINKAGE_V0_1
+mode: PROSPECTIVE_STATE_TO_REALIZED_OUTCOME_LINKAGE
+maturity: DATA_LINKAGE_ONLY
+actionability: NONE
+risk_multiplier: null
+references:
+  frozen_core: CROSSALPHA_FREE_V0_1_PAPER
+  state_ab_v01: CROSSALPHA_STATE_AB_V0_1
+  state_v02: CROSSALPHA_STATE_V0_2_PROSPECTIVE
+  state_v03: CROSSALPHA_STATE_V0_3_PROSPECTIVE
+  state_v04: CROSSALPHA_STATE_V0_4_PROSPECTIVE
+research_policy:
+  mutates_any_predecessor: false
+  parameter_optimization_allowed: false
+  selective_linking_allowed: false
+  deterministic_late_materialization_allowed: true
+  source_observations_must_already_be_prospective: true
+  outcome_marks_must_already_be_immutable: true
+  same_day_outcome_allowed: false
+  automatic_actionability_allowed: false
+anchors:
+  timezone: UTC
+  granularity: one_per_source_per_utc_day
+  selection: latest_known_at_within_source_utc_day
+  source_layers:
+    - STATE_V02
+    - STATE_V03
+    - STATE_V04
+  outcome_start: next_full_utc_day_after_anchor_known_at_date
+horizons_days: [1, 3, 7, 14, 28]
+outcomes:
+  required_ledgers: [A_FROZEN_B3, B_STATE_SHADOW]
+  metrics:
+    - A_cumulative_net_return
+    - B_cumulative_net_return
+    - B_minus_A_cumulative_return
+    - cash_cumulative_return
+    - A_max_drawdown
+    - B_max_drawdown
+    - A_worst_daily_return
+    - B_worst_daily_return
+    - A_negative_day_count
+    - B_negative_day_count
+    - intervention_day_count
+    - average_B_multiplier
+completeness:
+  require_every_daily_A_mark: true
+  require_every_daily_B_mark: true
+  require_A_B_same_date: true
+  require_B_mark_links_to_same_date_A_mark: true
+  incomplete_horizon_policy: do_not_materialize_yet
+inference_guardrails:
+  high_frequency_rows_are_not_independent_samples: true
+  daily_anchor_is_primary_sampling_unit: true
+  overlapping_horizons_require_dependence_aware_inference: true
+  no_p_value_claim_from_naive_overlapping_rows: true
+  linkage_engine_does_not_test_alpha: true
