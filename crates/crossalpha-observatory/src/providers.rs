@@ -161,7 +161,11 @@ impl ProviderClient {
                 }
             }
         }
-        last_error.context("Hyperliquid request exhausted retries")
+
+        match last_error {
+            Some(error) => Err(error.context("Hyperliquid request exhausted retries")),
+            None => bail!("Hyperliquid request exhausted retries without an error"),
+        }
     }
 
     async fn get_json_with_retry(&self, url: &str) -> Result<Value> {
@@ -193,7 +197,11 @@ impl ProviderClient {
                 }
             }
         }
-        last_error.context("DefiLlama request exhausted retries")
+
+        match last_error {
+            Some(error) => Err(error.context("DefiLlama request exhausted retries")),
+            None => bail!("DefiLlama request exhausted retries without an error"),
+        }
     }
 }
 
