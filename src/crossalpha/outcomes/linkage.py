@@ -307,19 +307,23 @@ def materialize_outcome_links(
             if any(day not in a_marks or day not in b_marks for day in dates):
                 pending += 1
                 continue
-            metrics = _outcome_metrics(dates, a_marks, b_marks)
-            latest_mark_known = max(
-                _utc(a_marks[day]["known_at"]) for day in dates
-            )
+            mark_known_times = [
+                _utc(mark["known_at"])
+                for day in dates
+                for mark in (a_marks[day], b_marks[day])
+            ]
+            latest_mark_known = max(mark_known_times)
             if latest_mark_known > current:
                 pending += 1
                 continue
+            metrics = _outcome_metrics(dates, a_marks, b_marks)
             payload = {
                 "schema_version": prospective.SCHEMA_VERSION,
                 "protocol": prospective.PROTOCOL,
                 "mode": prospective.MODE,
                 "freeze_record_sha256": freeze["record_sha256"],
                 "materialized_at": current.isoformat(),
+                "latest_outcome_mark_known_at": latest_mark_known.isoformat(),
                 "source_layer": source_layer,
                 "source_record_path": str(source_path),
                 "source_record_file_sha256": prospective.sha256_file(source_path),
