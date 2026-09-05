@@ -11,6 +11,7 @@ from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, BORROW_E
 
 
 DEBTOR = "0x2222222222222222222222222222222222222222"
+DEBTOR2 = "0x3333333333333333333333333333333333333333"
 
 
 def _topic(address: str) -> str:
@@ -59,6 +60,37 @@ class _FakeRpc:
         )
 
 
+class _AdvancingRpc(_FakeRpc):
+    latest_calls = 0
+
+    def __init__(self, rpc_url: str, *_args, **_kwargs):
+        super().__init__(rpc_url)
+
+    async def latest_block(self) -> int:
+        type(self).latest_calls += 1
+        advance = 100 if type(self).latest_calls == 1 else 200
+        return AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK + v03_cycle.FINALITY_LAG_BLOCKS + advance
+
+    async def borrow_logs(self, from_block: int, to_block: int):
+        assert from_block <= to_block
+        debtor = (
+            DEBTOR
+            if from_block <= AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK + 100
+            else DEBTOR2
+        )
+        return [
+            {
+                "removed": False,
+                "topics": [
+                    BORROW_EVENT_TOPIC0,
+                    _topic("0x1111111111111111111111111111111111111111"),
+                    _topic(debtor),
+                    "0x" + "0" * 64,
+                ],
+            }
+        ]
+
+
 def test_cycle_without_configured_rpc_uses_zero_cost_fallback(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(v03_cycle, "AaveBorrowerRpc", _FakeRpc)
     settings = Settings(crossalpha_data_dir=tmp_path, evm_rpc_url=None)
@@ -96,3 +128,26 @@ def test_followup_cycle_uses_watchlist_until_next_full_census(monkeypatch, tmp_p
     assert second["status"] == "WATCHLIST_RECORDED"
     assert second["watchlist"]["scope"] == "WATCHLIST_ONLY"
     assert second["watchlist"]["full_market_census_claim_allowed"] is False
+
+
+def test_new_borrower_between_full_censuses_is_added_to_temporary_watchlist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _AdvancingRpc.latest_calls = 0
+    monkeypatch.setattr(v03_cycle, "AaveBorrowerRpc", _AdvancingRpc)
+    settings = Settings(crossalpha_data_dir=tmp_path, evm_rpc_url="http://example.invalid")
+
+    first = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
+    assert first["status"] == "FULL_CENSUS_RECORDED"
+    assert first["candidate_address_count"] == 1
+
+    second = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
+    assert second["status"] == "WATCHLIST_RECORDED"
+    assert second["candidate_address_count"] == 2
+    assert second["pending_new_borrower_count"] == 1
+    assert second["watchlist"]["includes_pending_new_borrowers"] is True
+    assert second["watchlist"]["pending_new_borrower_count"] == 1
+    assert second["watchlist"]["expected_address_count"] == 2
+
+    state = v03_cycle._load_state(tmp_path)
+    assert state["pending_new_borrowers_since_full"] == [DEBTOR2]
