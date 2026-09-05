@@ -13,7 +13,10 @@ from crossalpha.catalog import build_catalog
 from crossalpha.core.free_paper import paper_status
 from crossalpha.state.ab_integrity import strict_state_ab_status
 from crossalpha.state.shadow import build_latest_shadow_state
-from crossalpha.state.v02_prospective import state_v02_integrity_report, state_v02_status
+from crossalpha.state.v02_integrity import (
+    strict_state_v02_integrity_report,
+    strict_state_v02_status,
+)
 
 
 def _sha256(path: Path) -> str | None:
@@ -53,8 +56,8 @@ def main() -> None:
     errors: list[str] = []
     a = paper_status(root)
     ab = strict_state_ab_status(root)
-    v02_integrity = state_v02_integrity_report(root)
-    v02 = state_v02_status(root)
+    v02_integrity = strict_state_v02_integrity_report(root)
+    v02 = strict_state_v02_status(root)
     v01_shadow = build_latest_shadow_state(root, write=False)
     catalog = build_catalog(root)
     views = set(catalog.get("views", []))
@@ -79,6 +82,7 @@ def main() -> None:
         "State_V01_shadow_only": v01_shadow.get("shadow_only") is True,
         "State_V01_core_unmutated": v01_shadow.get("core_protocol_mutated") is False,
         "State_V02_integrity_ok": bool(v02_integrity.get("ok")),
+        "State_V02_strict_audit": v02_integrity.get("audit_level") == "STRICT_NON_MUTATING_HASH_GRAPH",
         "State_V02_descriptive_only": v02.get("actionability") == "DESCRIPTIVE_ONLY",
         "State_V02_has_no_risk_multiplier": v02.get("risk_multiplier") is None,
         "State_V02_backfill_disabled": v02.get("retrospective_backfill_allowed") is False,
