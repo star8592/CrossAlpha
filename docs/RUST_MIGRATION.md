@@ -6,6 +6,13 @@ Move CrossAlpha from a Python-first research/runtime stack to a Rust-first produ
 
 The migration is intentionally incremental. Python remains the reference implementation until parity tests prove a Rust component equivalent.
 
+## Current status
+
+- R0 Foundation: **complete**.
+- R1 Storage/manifests: **production-compatible**; real-data Python/Rust rebuild parity passed.
+- R2 Observatory: **production-native Rust**; systemd cut over from Python to `crossalpha-rs observatory-run`, with real live-health and snapshot integrity passing after cutover.
+- R3 Canonicalization/features: **started**; Rust Hyperliquid and stablecoin canonical parsers plus row-level Python/Rust parity harness are implemented, Parquet writer parity still gated.
+
 ## Non-negotiable invariants
 
 1. Point-in-time correctness must not change.
@@ -38,7 +45,7 @@ crates/
 
 ### R0 - Foundation
 
-Status: started on `feat/rust-core-v01`.
+Status: complete on `feat/rust-core-v01`.
 
 - Cargo workspace.
 - Shared domain types.
@@ -58,52 +65,62 @@ cargo run -p crossalpha-cli -- config-check config/state_v03.yaml
 
 ### R1 - Storage and manifests
 
-Rust becomes owner of:
+Status: complete and production-compatible.
+
+Rust owns:
 
 - atomic writes/rename/fsync policy;
 - content hashing;
 - immutable JSONL append;
 - daily/series manifest indexes;
-- Parquet schema contracts;
 - local data-path resolution.
 
-Why first: every later subsystem depends on deterministic storage and this removes Python I/O overhead while preserving research semantics.
-
-Parity gate: generate indexes from the same immutable manifest and byte/schema-compare canonical outputs where deterministic.
+Real-data Python/Rust manifest rebuild parity passed before the production Observatory cutover.
 
 ### R2 - Observatory collectors
 
-Port public/free collectors to Tokio + reqwest:
+Status: complete and production-native Rust.
 
-- Binance public market data;
+Implemented and validated:
+
 - Hyperliquid snapshots;
 - DefiLlama stablecoins;
-- FRED/Tiingo free research adapters;
-- generic EVM RPC collector scaffold.
+- reqwest/rustls HTTP client with retry/backoff;
+- per-source immediate persistence;
+- full and O(1)-per-series live health parity;
+- gzip/SHA256/raw-byte/compressed-byte integrity;
+- Tokio supervisor with timeout/failure thresholds;
+- SIGTERM/Ctrl-C graceful shutdown;
+- systemd runtime using the release Rust binary;
+- guarded production cutover with Python rollback path.
 
-Required runtime primitives:
-
-- bounded concurrency;
-- per-source rate limiter;
-- exponential retry with jitter;
-- request timeout and cancellation;
-- structured tracing;
-- deterministic source timestamps and ingest timestamps.
-
-Python collectors remain callable until source-by-source parity is accepted.
+Python collector code remains in the repository as a reference/rollback implementation during the broader migration.
 
 ### R3 - Canonicalization and causal features
 
-Move dataframe-heavy transforms to Polars Rust / Arrow kernels where appropriate.
+Status: in progress.
+
+Move dataframe-heavy transforms to Rust / Arrow / Parquet kernels where appropriate.
 
 Critical rule: rolling features are causal and must preserve null/min-observation behavior exactly. No future leakage can be introduced during vectorization.
 
-First candidates:
+Current R3.1 gate:
 
-- Hyperliquid basis/spread/OI transforms;
-- 24h causal rolling z-scores;
-- stablecoin stock/chain accounting;
-- canonical daily price tables.
+- Rust Hyperliquid `metaAndAssetCtxs` canonical parser;
+- Rust DefiLlama stablecoin asset + chain-supply canonical parser (schema v3);
+- read-only `canonical-preview` CLI;
+- frozen-real-snapshot Python/Rust row-level semantic parity harness;
+- no canonical Parquet writes until parser parity passes.
+
+Next R3 gates:
+
+1. canonical parser parity (`mismatches=0`);
+2. Parquet schema/content parity in isolated output roots;
+3. bounded recent-day canonical materialization;
+4. Hyperliquid basis/spread/OI transforms;
+5. 24h causal rolling z-scores;
+6. stablecoin stock/chain accounting features;
+7. incremental materialization parity.
 
 ### R4 - State engine
 
@@ -139,7 +156,7 @@ Python notebooks may call Rust through PyO3, but production/reproducible runs us
 
 ### R6 - Unified daemon and operations
 
-Replace Python/systemd entrypoints with one binary supporting subcommands and daemon modes:
+Replace remaining Python/systemd entrypoints with one binary supporting subcommands and daemon modes:
 
 ```text
 crossalpha observatory run
@@ -192,13 +209,14 @@ Keep only notebook/report glue that demonstrably benefits from Python.
 
 ## Immediate implementation order
 
-1. `crossalpha-storage` + manifest compatibility fixtures.
-2. Observatory health/index rebuild in Rust.
-3. Hyperliquid collector + canonicalizer.
-4. V03 capability-probed preflight/freeze, because it is currently an operational pain point.
-5. V04 state engine and shared state trait.
-6. Free Core data adapters and canonical price pipeline.
-7. Research kernels and PyO3 only where notebook interoperability is valuable.
+1. R3 canonical parser parity on frozen real snapshots.
+2. R3 isolated Parquet writer parity.
+3. Hyperliquid causal market-state features.
+4. Stablecoin state features.
+5. V03 capability-probed preflight/freeze.
+6. V04 state engine and shared state trait.
+7. Free Core data adapters and canonical price pipeline.
+8. Research kernels and PyO3 only where notebook interoperability is valuable.
 
 ## Definition of done
 
