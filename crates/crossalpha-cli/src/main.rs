@@ -153,13 +153,14 @@ async fn main() -> Result<()> {
                 anyhow::bail!("--timeout must be a finite positive number");
             }
             let sources = crossalpha_observatory::parse_sources(&sources)?;
-            let client = crossalpha_observatory::ProviderClient::new(Duration::from_secs_f64(timeout))?;
+            let timeout = Duration::from_secs_f64(timeout);
+            let client = crossalpha_observatory::ProviderClient::new(timeout)?;
             let envelopes = client.collect_many(&sources).await?;
 
             if dry_run {
                 println!("{}", serde_json::to_string_pretty(&envelopes)?);
             } else {
-                let store = crossalpha_storage::RawSnapshotStore::new(&data_root);
+                let store = crossalpha_storage::RawSnapshotStore::new(data_root.clone());
                 for envelope in &envelopes {
                     let manifest = store.write(envelope)?;
                     println!("{}", serde_json::to_string(&manifest)?);
