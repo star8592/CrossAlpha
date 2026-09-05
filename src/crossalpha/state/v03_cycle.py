@@ -18,7 +18,7 @@ from crossalpha.state.v03_rpc import (
     AaveBorrowerRpc,
     RpcPolicy,
     borrow_log_debtor,
-    resolve_rpc_url,
+    resolve_rpc_candidates,
 )
 from crossalpha.state.v03_watchlist import compute_watchlist_snapshot
 from crossalpha.storage.raw import RawSnapshotStore
@@ -181,26 +181,67 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     settings.ensure_dirs()
     data_root = settings.crossalpha_data_dir
     scan_started_at = pd.Timestamp(datetime.now(timezone.utc))
-    rpc_url, rpc_source = resolve_rpc_url(settings.evm_rpc_url)
-    rpc = AaveBorrowerRpc(
-        rpc_url,
-        policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
-    )
-    latest_block = await rpc.latest_block()
-    finalized_block = max(latest_block - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
-    finalized_block_time = await rpc.block_timestamp(finalized_block)
     state = _load_state(data_root)
     universe_path = _universe_path(data_root)
     borrowers = _load_addresses(universe_path)
     pending_new_borrowers = set(
         str(value).lower() for value in state.get("pending_new_borrowers_since_full", [])
     )
-    store = RawSnapshotStore(data_root)
-
     next_block = max(
         int(state.get("next_block", AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)),
         AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
     )
+
+    rpc: AaveBorrowerRpc | None = None
+    rpc_source: str | None = None
+    latest_block: int | None = None
+    finalized_block: int | None = None
+    finalized_block_time: str | None = None
+    rpc_attempts: dict[str, str] = {}
+    for rpc_url, candidate_source in resolve_rpc_candidates(settings.evm_rpc_url):
+        candidate = AaveBorrowerRpc(
+            rpc_url,
+            policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
+        )
+        try:
+            candidate_latest = await candidate.latest_block()
+            candidate_finalized = max(
+                candidate_latest - FINALITY_LAG_BLOCKS,
+                AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
+            )
+            candidate_block_time = await candidate.block_timestamp(candidate_finalized)
+            if next_block <= candidate_finalized:
+                probe_from = next_block
+            else:
+                probe_from = max(
+                    candidate_finalized - 127,
+                    AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
+                )
+            probe_to = min(probe_from + 255, candidate_finalized)
+            await candidate.borrow_logs(probe_from, probe_to)
+            account_probe = await candidate.account_data(
+                [AAVE_V3_ETHEREUM_CORE_POOL],
+                block_number=candidate_finalized,
+            )
+            if account_probe.empty or not bool(account_probe.iloc[0]["success"]):
+                raise RuntimeError("getUserAccountData fixed-block probe failed")
+            rpc = candidate
+            rpc_source = candidate_source
+            latest_block = candidate_latest
+            finalized_block = candidate_finalized
+            finalized_block_time = candidate_block_time
+            break
+        except Exception as exc:
+            rpc_attempts[candidate_source] = type(exc).__name__
+    if rpc is None or rpc_source is None or latest_block is None or finalized_block is None:
+        raise RuntimeError(
+            "No State V0.3-capable Ethereum RPC passed cycle probes; "
+            f"attempts={rpc_attempts}"
+        )
+    if finalized_block_time is None:
+        raise RuntimeError("selected State V0.3 RPC returned no finalized block time")
+
+    store = RawSnapshotStore(data_root)
     scanned_ranges: list[dict[str, Any]] = []
     for _ in range(MAX_BOOTSTRAP_CHUNKS_PER_CYCLE):
         if next_block > finalized_block:
@@ -229,6 +270,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "new_candidate_count_in_chunk": len(new_debtors),
                 "historical_bootstrap_is_evidence": False,
                 "rpc_source": rpc_source,
+                "rpc_candidate_failures_before_selection": rpc_attempts,
                 "data_cost_usd": 0,
             },
         )
@@ -257,6 +299,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["latest_finalized_block"] = finalized_block
     state["latest_finalized_block_time"] = finalized_block_time
     state["rpc_source"] = rpc_source
+    state["rpc_candidate_failures_before_selection"] = rpc_attempts
     state["pending_new_borrowers_since_full"] = sorted(pending_new_borrowers)
     _write_state(data_root, state)
 
@@ -266,6 +309,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         "risk_multiplier": None,
         "data_cost_usd": 0,
         "rpc_source": rpc_source,
+        "rpc_candidate_failures_before_selection": rpc_attempts,
         "latest_block": latest_block,
         "finalized_block": finalized_block,
         "finalized_block_time": finalized_block_time,
