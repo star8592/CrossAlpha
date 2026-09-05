@@ -143,7 +143,8 @@ pub fn parse_stablecoin_snapshot(
             let chain_current = chain_measure(&chain_value, "circulating", peg_type_str);
             let chain_prev_day = chain_measure(&chain_value, "circulatingPrevDay", peg_type_str);
             let chain_prev_week = chain_measure(&chain_value, "circulatingPrevWeek", peg_type_str);
-            let chain_prev_month = chain_measure(&chain_value, "circulatingPrevMonth", peg_type_str);
+            let chain_prev_month =
+                chain_measure(&chain_value, "circulatingPrevMonth", peg_type_str);
             chain_rows.push(StablecoinChainSupplyRow {
                 canonical_schema_version: CANONICAL_STABLECOIN_SCHEMA_VERSION,
                 observed_at: envelope.observed_at,
@@ -171,7 +172,11 @@ pub fn parse_stablecoin_snapshot(
     if asset_rows.is_empty() {
         bail!("stablecoin canonicalization produced zero assets");
     }
-    if !chain_rows.is_empty() && chain_rows.iter().all(|row| row.circulating_native.is_none()) {
+    if !chain_rows.is_empty()
+        && chain_rows
+            .iter()
+            .all(|row| row.circulating_native.is_none())
+    {
         bail!(
             "stablecoin chainCirculating rows exist but no current amounts were parsed; upstream schema likely changed"
         );
@@ -305,9 +310,6 @@ mod tests {
             peg_amount(Some(&json!({"other": "12"})), Some("peggedUSD")),
             Some(12.0)
         );
-        assert_eq!(
-            peg_amount(Some(&json!({"a": "1", "b": "2"})), None),
-            None
-        );
+        assert_eq!(peg_amount(Some(&json!({"a": "1", "b": "2"})), None), None);
     }
 }
