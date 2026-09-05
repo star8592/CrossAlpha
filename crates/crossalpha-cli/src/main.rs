@@ -110,7 +110,9 @@ async fn main() -> Result<()> {
         }
         Command::ManifestCheck { data_root } => {
             let records = crossalpha_storage::read_audit_manifest(&data_root)?;
-            let first = records.first().map(|record| record.observed_at.to_rfc3339());
+            let first = records
+                .first()
+                .map(|record| record.observed_at.to_rfc3339());
             let latest = records.last().map(|record| record.observed_at.to_rfc3339());
             println!(
                 "ok=true records={} first={} latest={} data_root={}",
@@ -199,7 +201,7 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report
                 .get("ok")
-                .and_then(serde_json::Value::as_bool)
+                .and_then(|value| value.as_bool())
                 .unwrap_or(false)
             {
                 anyhow::bail!("OBSERVATORY LIVE HEALTH FAILED");
