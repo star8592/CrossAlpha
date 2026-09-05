@@ -17,4 +17,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 crossalpha-config = { path = "../crossalpha-config" }
 crossalpha-domain = { path = "../crossalpha-domain" }
+crossalpha-observatory = { path = "../crossalpha-observatory" }
 crossalpha-storage = { path = "../crossalpha-storage" }
