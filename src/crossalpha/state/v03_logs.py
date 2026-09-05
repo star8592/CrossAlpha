@@ -77,9 +77,7 @@ class BlockscoutBorrowLogProvider:
         self.api_url = api_url.rstrip("?")
         self.policy = policy or BorrowLogPolicy()
 
-    async def borrow_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
-        if int(from_block) < 0 or int(to_block) < int(from_block):
-            raise ValueError("invalid block range")
+    async def _query_once(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         params = {
             "module": "logs",
             "action": "getLogs",
@@ -93,3 +91,20 @@ class BlockscoutBorrowLogProvider:
             response.raise_for_status()
             body = response.json()
         return parse_blockscout_logs(body, max_results=self.policy.max_results)
+
+    async def borrow_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
+        """Return a complete range or fail closed; provider result caps split to one block."""
+        if int(from_block) < 0 or int(to_block) < int(from_block):
+            raise ValueError("invalid block range")
+        try:
+            return await self._query_once(int(from_block), int(to_block))
+        except BorrowLogResultLimit:
+            if int(from_block) == int(to_block):
+                raise RuntimeError(
+                    "Blockscout single-block Borrow log count reached the provider result limit; "
+                    "completeness cannot be proven"
+                )
+            midpoint = (int(from_block) + int(to_block)) // 2
+            left = await self.borrow_logs(int(from_block), midpoint)
+            right = await self.borrow_logs(midpoint + 1, int(to_block))
+            return left + right
