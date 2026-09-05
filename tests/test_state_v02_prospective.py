@@ -7,6 +7,10 @@ import pandas as pd
 import pytest
 
 from crossalpha.state import v02_prospective as prospective
+from crossalpha.state.v02_integrity import (
+    strict_state_v02_integrity_report,
+    strict_state_v02_status,
+)
 
 
 FREEZE_TIME = pd.Timestamp("2026-09-05T01:00:00Z")
@@ -122,10 +126,11 @@ def test_live_observation_is_sealed_linked_and_idempotent(tmp_path: Path) -> Non
     )
     assert first["record_sha256"] == second["record_sha256"]
     assert first["freeze_record_sha256"] == freeze["record_sha256"]
-    report = prospective.state_v02_integrity_report(tmp_path)
+    report = strict_state_v02_integrity_report(tmp_path)
     assert report["ok"] is True
+    assert report["audit_level"] == "STRICT_NON_MUTATING_HASH_GRAPH"
     assert report["observation_count"] == 1
-    status = prospective.state_v02_status(tmp_path)
+    status = strict_state_v02_status(tmp_path)
     assert status["state"] == "O1_PROSPECTIVE_EVIDENCE_ACCUMULATING"
     assert status["automatic_promotion_to_actionable_modifier_allowed"] is False
 
@@ -154,7 +159,7 @@ def test_derived_state_tamper_is_detected(tmp_path: Path) -> None:
         tmp_path, snap, now=generated + pd.Timedelta(minutes=1)
     )
     Path(snap["output"]).write_bytes(b"tampered")
-    report = prospective.state_v02_integrity_report(tmp_path)
+    report = strict_state_v02_integrity_report(tmp_path)
     assert report["ok"] is False
     assert report["checks"]["derived_state_hash_links"] is False
 
@@ -169,7 +174,7 @@ def test_missing_15m_cycles_are_reported_but_never_backfilled(tmp_path: Path) ->
             _snapshot(tmp_path, generated),
             now=generated + pd.Timedelta(minutes=1),
         )
-    report = prospective.state_v02_integrity_report(tmp_path)
+    report = strict_state_v02_integrity_report(tmp_path)
     assert report["ok"] is True
     assert report["gap_count"] == 1
     assert report["gaps_are_visible_not_backfilled"] is True
