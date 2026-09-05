@@ -79,8 +79,11 @@ def _load_state(data_root: Path) -> dict[str, Any]:
             "bootstrap_complete": False,
             "last_valid_full_census_at": None,
             "last_valid_full_census_block": None,
+            "pending_new_borrowers_since_full": [],
         }
-    return json.loads(path.read_text(encoding="utf-8"))
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state.setdefault("pending_new_borrowers_since_full", [])
+    return state
 
 
 def _write_state(data_root: Path, state: dict[str, Any]) -> None:
@@ -183,6 +186,9 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state = _load_state(data_root)
     universe_path = _universe_path(data_root)
     borrowers = _load_addresses(universe_path)
+    pending_new_borrowers = set(
+        str(value).lower() for value in state.get("pending_new_borrowers_since_full", [])
+    )
     store = RawSnapshotStore(data_root)
 
     next_block = max(
@@ -196,7 +202,11 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         end = min(next_block + BOOTSTRAP_CHUNK_BLOCKS - 1, finalized_block)
         logs = await _adaptive_borrow_logs(rpc, next_block, end)
         debtors = {address for row in logs if (address := borrow_log_debtor(row)) is not None}
+        previously_known = set(borrowers)
+        new_debtors = debtors - previously_known
         borrowers.update(debtors)
+        if bool(state.get("bootstrap_complete")):
+            pending_new_borrowers.update(new_debtors)
         observed = pd.Timestamp(datetime.now(timezone.utc))
         envelope = ObservationEnvelope(
             observed_at=observed.to_pydatetime(),
@@ -210,7 +220,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "from_block": next_block,
                 "to_block": end,
                 "log_count": len(logs),
-                "new_candidate_count_in_chunk": len(debtors),
+                "new_candidate_count_in_chunk": len(new_debtors),
                 "historical_bootstrap_is_evidence": False,
                 "rpc_source": rpc_source,
                 "data_cost_usd": 0,
@@ -223,12 +233,14 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "from_block": next_block,
                 "to_block": end,
                 "log_count": len(logs),
+                "new_candidate_count": len(new_debtors),
                 "candidate_count": len(borrowers),
                 "raw_sha256": manifest.sha256,
             }
         )
         state["last_scanned_block"] = end
         state["next_block"] = end + 1
+        state["pending_new_borrowers_since_full"] = sorted(pending_new_borrowers)
         next_block = end + 1
         _write_state(data_root, state)
 
@@ -238,6 +250,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["latest_seen_block"] = latest_block
     state["latest_finalized_block"] = finalized_block
     state["rpc_source"] = rpc_source
+    state["pending_new_borrowers_since_full"] = sorted(pending_new_borrowers)
     _write_state(data_root, state)
 
     common = {
@@ -249,6 +262,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         "latest_block": latest_block,
         "finalized_block": finalized_block,
         "candidate_address_count": len(borrowers),
+        "pending_new_borrower_count": len(pending_new_borrowers),
         "mutates_v01_or_v02": False,
     }
 
@@ -295,6 +309,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             state["last_valid_full_census_block"] = finalized_block
             state["last_valid_full_census_summary"] = artifacts["summary"]
             state["last_valid_full_census_summary_sha256"] = artifacts["summary_sha256"]
+            state["pending_new_borrowers_since_full"] = []
+            pending_new_borrowers.clear()
             _write_state(data_root, state)
         return {
             **common,
@@ -310,7 +326,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             "prospective": prospective,
         }
 
-    watchlist = _load_addresses(_watchlist_path(data_root))
+    watchlist = _load_addresses(_watchlist_path(data_root)) | pending_new_borrowers
     if not watchlist:
         return {**common, "status": "CAUGHT_UP_AWAITING_NEXT_FULL_CENSUS"}
     accounts = await rpc.account_data(sorted(watchlist), block_number=finalized_block)
@@ -321,6 +337,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         block_number=finalized_block,
         captured_at=watch_captured,
     )
+    watch["includes_pending_new_borrowers"] = bool(pending_new_borrowers)
+    watch["pending_new_borrower_count"] = len(pending_new_borrowers)
     artifacts = _write_census_artifacts(
         data_root,
         accounts,
