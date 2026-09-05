@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::info;
 
 #[derive(Debug, Parser)]
@@ -42,6 +43,19 @@ enum Command {
         /// Do not update manifests/observatory_health.json.
         #[arg(long)]
         no_write_report: bool,
+    },
+    /// Collect one Rust Observatory round from Hyperliquid/DefiLlama.
+    ObservatoryCollect {
+        data_root: PathBuf,
+        /// Source to collect. Repeat for multiple sources. Defaults to both.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        /// HTTP timeout in seconds.
+        #[arg(long, default_value_t = 30.0)]
+        timeout: f64,
+        /// Fetch and validate envelopes but do not write raw snapshots or manifests.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
@@ -129,9 +143,32 @@ async fn main() -> Result<()> {
                 anyhow::bail!("OBSERVATORY HEALTH FAILED");
             }
         }
+        Command::ObservatoryCollect {
+            data_root,
+            sources,
+            timeout,
+            dry_run,
+        } => {
+            if !timeout.is_finite() || timeout <= 0.0 {
+                anyhow::bail!("--timeout must be a finite positive number");
+            }
+            let sources = crossalpha_observatory::parse_sources(&sources)?;
+            let client = crossalpha_observatory::ProviderClient::new(Duration::from_secs_f64(timeout))?;
+            let envelopes = client.collect_many(&sources).await?;
+
+            if dry_run {
+                println!("{}", serde_json::to_string_pretty(&envelopes)?);
+            } else {
+                let store = crossalpha_storage::RawSnapshotStore::new(&data_root);
+                for envelope in &envelopes {
+                    let manifest = store.write(envelope)?;
+                    println!("{}", serde_json::to_string(&manifest)?);
+                }
+            }
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R2.1 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed python_compat=true"
+                "phase=R2.3 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented collector_write_gate=dry-run-required python_compat=true"
             );
         }
     }
