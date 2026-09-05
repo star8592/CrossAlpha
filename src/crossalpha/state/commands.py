@@ -34,7 +34,13 @@ from crossalpha.state.v03_integrity import (
     strict_state_v03_status,
 )
 from crossalpha.state.v03_prospective import freeze_state_v03
-from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_CORE_POOL, AaveBorrowerRpc, RpcPolicy
+from crossalpha.state.v03_rpc import (
+    AAVE_V3_ETHEREUM_CORE_POOL,
+    AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
+    AaveBorrowerRpc,
+    RpcPolicy,
+    resolve_rpc_url,
+)
 
 
 def shadow_main() -> None:
@@ -45,13 +51,9 @@ def shadow_main() -> None:
         help="Compute the latest shadow state without materializing parquet.",
     )
     args = parser.parse_args()
-
     settings = Settings()
     settings.ensure_dirs()
-    report = build_latest_shadow_state(
-        settings.crossalpha_data_dir,
-        write=not args.no_write,
-    )
+    report = build_latest_shadow_state(settings.crossalpha_data_dir, write=not args.no_write)
     if not args.no_write:
         report = {**report, "catalog": build_catalog(settings.crossalpha_data_dir)}
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
@@ -62,7 +64,6 @@ def ab_freeze_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-
     current_ab = strict_state_ab_status(settings.crossalpha_data_dir)
     if not current_ab.get("frozen"):
         core = paper_status(settings.crossalpha_data_dir)
@@ -77,7 +78,6 @@ def ab_freeze_main() -> None:
                 f"frozen before {first_date.isoformat()}, not on/after it. "
                 "Create a new protocol version instead."
             )
-
     report = freeze_state_ab_protocol(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
@@ -111,14 +111,7 @@ def ab_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(
-        json.dumps(
-            strict_state_ab_status(settings.crossalpha_data_dir),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-    )
+    print(json.dumps(strict_state_ab_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
 
 
 def ab_integrity_main() -> None:
@@ -170,8 +163,7 @@ def v02_cycle_main() -> None:
     settings.ensure_dirs()
     report = asyncio.run(run_state_v02_cycle(settings))
     health = write_cycle_health(settings.crossalpha_data_dir, report)
-    report = {**report, "cycle_health_file": str(health)}
-    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    print(json.dumps({**report, "cycle_health_file": str(health)}, ensure_ascii=False, indent=2, default=str))
 
 
 def v02_integrity_main() -> None:
@@ -190,14 +182,7 @@ def v02_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(
-        json.dumps(
-            strict_state_v02_status(settings.crossalpha_data_dir),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-    )
+    print(json.dumps(strict_state_v02_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
 
 
 def v03_config_check_main() -> None:
@@ -210,28 +195,35 @@ def v03_config_check_main() -> None:
 
 
 async def _v03_preflight(settings: Settings) -> dict[str, object]:
-    if not settings.evm_rpc_url:
-        raise SystemExit("STATE V0.3 requires EVM_RPC_URL in .env")
+    rpc_url, rpc_source = resolve_rpc_url(settings.evm_rpc_url)
     rpc = AaveBorrowerRpc(
-        settings.evm_rpc_url,
+        rpc_url,
         policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
     )
     latest = await rpc.latest_block()
-    finalized = max(latest - FINALITY_LAG_BLOCKS, 0)
-    from_block = max(finalized - 127, 0)
-    recent_logs = await rpc.borrow_logs(from_block, finalized)
+    finalized = max(latest - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    recent_logs = await rpc.borrow_logs(recent_from, finalized)
+    historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
+    historical_to = historical_from + 255
+    historical_logs = await rpc.borrow_logs(historical_from, historical_to)
     probe = await rpc.account_data([AAVE_V3_ETHEREUM_CORE_POOL], block_number=finalized)
     if probe.empty or not bool(probe.iloc[0]["success"]):
         raise RuntimeError("getUserAccountData fixed-block probe failed")
     return {
         "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
         "data_cost_usd": 0,
+        "rpc_source": rpc_source,
         "latest_block": latest,
         "finalized_block": finalized,
         "finality_lag_blocks": FINALITY_LAG_BLOCKS,
-        "recent_borrow_scan_from_block": from_block,
+        "recent_borrow_scan_from_block": recent_from,
         "recent_borrow_scan_to_block": finalized,
         "recent_borrow_log_count": len(recent_logs),
+        "historical_log_scan_from_block": historical_from,
+        "historical_log_scan_to_block": historical_to,
+        "historical_log_scan_ok": True,
+        "historical_borrow_log_count": len(historical_logs),
         "fixed_block_account_call_ok": True,
         "actionability": "DESCRIPTIVE_ONLY",
         "risk_multiplier": None,
@@ -291,11 +283,4 @@ def v03_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(
-        json.dumps(
-            strict_state_v03_status(settings.crossalpha_data_dir),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-    )
+    print(json.dumps(strict_state_v03_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
