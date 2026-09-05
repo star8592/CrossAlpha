@@ -79,6 +79,7 @@ def _implementation_files() -> dict[str, Path]:
         "state_v03_cycle": root / "src" / "crossalpha" / "state" / "v03_cycle.py",
         "state_v03_watchlist": root / "src" / "crossalpha" / "state" / "v03_watchlist.py",
         "state_v03_prospective": root / "src" / "crossalpha" / "state" / "v03_prospective.py",
+        "state_v03_config": root / "src" / "crossalpha" / "state" / "v03_config.py",
         "config": root / "config" / "state_v03.yaml",
     }
 
@@ -280,9 +281,19 @@ def write_full_census_observation(
         "watchlist_count": summary.get("watchlist_count"),
     }
     path = _record_path(data_root, block_number)
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if not verify_seal(existing):
+            raise ValueError(f"existing block record failed seal verification: {path}")
+        if (
+            existing.get("summary_sha256") != payload["summary_sha256"]
+            or existing.get("detail_sha256") != payload["detail_sha256"]
+            or existing.get("freeze_record_sha256") != payload["freeze_record_sha256"]
+        ):
+            raise RuntimeError(
+                "STATE_V03_BLOCK_COLLISION: same finalized block cannot be relabeled with different census artifacts"
+            )
+        return {**existing, "status": "already_exists", "output": str(path)}
+
     written = _write_immutable(path, payload)
-    return {
-        **written,
-        "status": "written" if written.get("known_at") == payload["known_at"] else "already_exists",
-        "output": str(path),
-    }
+    return {**written, "status": "written", "output": str(path)}
