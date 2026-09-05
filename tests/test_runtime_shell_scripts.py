@@ -11,6 +11,8 @@ RUNTIME_SCRIPTS = (
     "scripts/install_free_paper_user_services.sh",
     "scripts/install_state_v02_user_service.sh",
     "scripts/install_state_v03_user_service.sh",
+    "scripts/install_state_v04_user_service.sh",
+    "scripts/install_outcome_linkage_user_service.sh",
     "scripts/run_free_paper_daily.sh",
     "scripts/run_free_paper_weekly.sh",
     "scripts/materialize_observatory_and_state.py",  # skipped by bash check below
@@ -18,6 +20,7 @@ RUNTIME_SCRIPTS = (
     "scripts/finalize_state_ab_milestone_once.sh",
     "scripts/finalize_state_v02_milestone_once.sh",
     "scripts/finalize_state_v03_milestone_once.sh",
+    "scripts/finalize_crossalpha_research_stack_once.sh",
 )
 
 
