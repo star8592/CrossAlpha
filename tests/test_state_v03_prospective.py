@@ -194,28 +194,38 @@ def test_artifact_tamper_is_detected(tmp_path: Path) -> None:
     assert integrity["checks"]["artifact_hash_links"] is False
 
 
-def test_summary_metric_tamper_with_resealed_artifact_is_detected_by_detail_recompute(
+def test_coordinated_summary_and_ledger_tamper_still_fails_detail_recompute(
     tmp_path: Path,
 ) -> None:
     _references(tmp_path)
     prospective.freeze_state_v03(tmp_path, minimum_eligible_block=MIN_BLOCK, now=FREEZE_TIME)
     captured = FREEZE_TIME + pd.Timedelta(minutes=5)
     summary, detail = _artifacts(tmp_path, block=MIN_BLOCK + 10, captured=captured)
-    prospective.write_full_census_observation(
+    record = prospective.write_full_census_observation(
         tmp_path,
         summary_path=summary,
         detail_path=detail,
         known_at=captured + pd.Timedelta(minutes=1),
     )
-    # Simulate a coordinated summary/ledger-link change by first changing the source summary.
-    # The immutable ledger hash link will already detect it; the independent recompute check
-    # is separately exercised by rebuilding the record fixture below.
-    payload = json.loads(summary.read_text(encoding="utf-8"))
-    payload["critical_hf_le_1_05_debt_share"] = 0.0
-    summary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    summary_payload = json.loads(summary.read_text(encoding="utf-8"))
+    summary_payload["critical_hf_le_1_05_debt_share"] = 0.0
+    summary.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
+
+    record_path = Path(record["output"])
+    record_payload = json.loads(record_path.read_text(encoding="utf-8"))
+    record_payload["summary_sha256"] = prospective.sha256_file(summary)
+    record_payload["critical_hf_le_1_05_debt_share"] = 0.0
+    record_payload.pop("record_sha256", None)
+    record_payload = prospective._seal(record_payload)
+    record_path.write_text(json.dumps(record_payload, indent=2), encoding="utf-8")
+
     integrity = strict_state_v03_integrity_report(tmp_path)
+    assert integrity["checks"]["record_seals"] is True
+    assert integrity["checks"]["artifact_hash_links"] is True
+    assert integrity["checks"]["summary_metric_links"] is True
+    assert integrity["checks"]["detail_cliff_metrics_recomputed"] is False
     assert integrity["ok"] is False
-    assert integrity["checks"]["artifact_hash_links"] is False
 
 
 def test_same_block_cannot_be_relabelled_with_new_artifacts(tmp_path: Path) -> None:
