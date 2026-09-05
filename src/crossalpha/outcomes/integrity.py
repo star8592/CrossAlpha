@@ -68,7 +68,9 @@ def strict_outcome_linkage_integrity_report(data_root: Path) -> dict[str, Any]:
         "A_mark_hash_links": True,
         "B_mark_hash_links": True,
         "B_links_same_date_A": True,
+        "materialized_after_source_and_all_marks_known": True,
         "outcomes_recomputed": True,
+        "descriptive_linkage_only": True,
         "link_keys_unique": True,
         "all_matured_links_materialized": True,
         "no_unregistered_horizon": True,
@@ -100,6 +102,12 @@ def strict_outcome_linkage_integrity_report(data_root: Path) -> dict[str, Any]:
             checks["link_seals"] = False
         if row.get("freeze_record_sha256") != freeze.get("record_sha256"):
             checks["freeze_links"] = False
+        if (
+            row.get("actionability") != "NONE"
+            or row.get("risk_multiplier") is not None
+            or row.get("selective_linking_allowed") is not False
+        ):
+            checks["descriptive_linkage_only"] = False
         source_layer = str(row.get("source_layer"))
         try:
             anchor_day = date.fromisoformat(str(row.get("anchor_date")))
@@ -143,6 +151,25 @@ def strict_outcome_linkage_integrity_report(data_root: Path) -> dict[str, Any]:
             checks["exact_horizon_dates"] = False
             continue
 
+        mark_known_times = [
+            linkage._utc(mark["known_at"])
+            for day in expected_dates
+            for mark in (a_marks[day], b_marks[day])
+        ]
+        latest_mark_known = max(mark_known_times)
+        try:
+            materialized = linkage._utc(row["materialized_at"])
+            stored_latest = linkage._utc(row["latest_outcome_mark_known_at"])
+        except Exception:
+            checks["materialized_after_source_and_all_marks_known"] = False
+        else:
+            if (
+                materialized < known
+                or materialized < latest_mark_known
+                or stored_latest != latest_mark_known
+            ):
+                checks["materialized_after_source_and_all_marks_known"] = False
+
         for link_row, expected_marks, verify_func, check_name in (
             (row.get("A_mark_links"), a_marks, verify_core_seal, "A_mark_hash_links"),
             (row.get("B_mark_links"), b_marks, verify_ab_seal, "B_mark_hash_links"),
@@ -176,8 +203,6 @@ def strict_outcome_linkage_integrity_report(data_root: Path) -> dict[str, Any]:
         if expected_path != path:
             checks["link_keys_unique"] = False
 
-    # Selective linking is forbidden: once every exact A/B mark required by a horizon exists,
-    # the deterministic link must exist. Delayed materialization is allowed only until maturity.
     matured_count = 0
     for anchor in anchors:
         source_layer = str(anchor["source_layer"])
@@ -192,7 +217,7 @@ def strict_outcome_linkage_integrity_report(data_root: Path) -> dict[str, Any]:
 
     return {
         "protocol": prospective.PROTOCOL,
-        "audit_level": "STRICT_SOURCE_ANCHOR_AND_A_B_OUTCOME_RECOMPUTE",
+        "audit_level": "STRICT_SOURCE_ANCHOR_KNOWN_AT_AND_A_B_OUTCOME_RECOMPUTE",
         "frozen": True,
         "ok": all(checks.values()),
         "source_record_count": sum(len(values) for values in sources.values()),
