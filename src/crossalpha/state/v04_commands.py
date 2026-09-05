@@ -17,7 +17,8 @@ from crossalpha.state.v04_integrity import (
     strict_state_v04_status,
 )
 from crossalpha.state.v04_prospective import freeze_state_v04
-from crossalpha.state.v04_provider import MultiVenueCollector, parse_venue_snapshot
+from crossalpha.state.v04_provider import parse_venue_snapshot
+from crossalpha.state.v04_safe_provider import FaultIsolatedMultiVenueCollector
 
 
 def config_check_main() -> None:
@@ -30,14 +31,13 @@ def config_check_main() -> None:
 
 
 async def _preflight(settings: Settings) -> dict[str, object]:
-    collector = MultiVenueCollector(timeout=settings.crossalpha_http_timeout)
+    collector = FaultIsolatedMultiVenueCollector(timeout=settings.crossalpha_http_timeout)
     payloads = await collector.collect()
     if len(payloads) != 6:
-        raise RuntimeError(f"State V0.4 preflight expected 6 payloads, got {len(payloads)}")
+        raise RuntimeError(f"State V0.4 preflight expected 6 slots, got {len(payloads)}")
     known = pd.Timestamp.now(tz="UTC")
-    rows = pd.DataFrame(
-        [parse_venue_snapshot(payload, known_at=known) for payload in payloads]
-    )
+    rows = pd.DataFrame([parse_venue_snapshot(payload, known_at=known) for payload in payloads])
+    rows["collection_error"] = [payload.get("collection_error") for payload in payloads]
     report = v04.compute_market_mechanics(rows, generated_at=known)
     if report.get("data_confidence") == "INSUFFICIENT":
         raise RuntimeError(f"State V0.4 live preflight insufficient: {report}")
@@ -55,6 +55,7 @@ async def _preflight(settings: Settings) -> dict[str, object]:
         "authentication_required": False,
         "payload_count": len(payloads),
         "venue_row_count": len(rows),
+        "collection_error_count": int(rows["collection_error"].notna().sum()),
         "data_confidence": report.get("data_confidence"),
         "funding_semantics": v04.FUNDING_SEMANTICS,
         "funding_comparable_row_count": int(comparable.sum()),
