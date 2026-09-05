@@ -9,11 +9,13 @@ RUNTIME_SCRIPTS = (
     "scripts/install_materializer_timer.sh",
     "scripts/install_all_user_services.sh",
     "scripts/install_free_paper_user_services.sh",
+    "scripts/install_state_v02_user_service.sh",
     "scripts/run_free_paper_daily.sh",
     "scripts/run_free_paper_weekly.sh",
     "scripts/materialize_observatory_and_state.py",  # skipped by bash check below
     "scripts/finalize_current_milestone_once.sh",
     "scripts/finalize_state_ab_milestone_once.sh",
+    "scripts/finalize_state_v02_milestone_once.sh",
 )
 
 
