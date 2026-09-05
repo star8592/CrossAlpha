@@ -1,0 +1,47 @@
+protocol: CROSSALPHA_STATE_AB_V0_1
+mode: PROSPECTIVE_SHADOW_AB
+core_reference: CROSSALPHA_FREE_V0_1_PAPER
+state_reference: CROSSALPHA_STATE_SHADOW_V0_1
+purpose: >-
+  Prospectively compare immutable Frozen B3 (A) against the exact same Frozen B3
+  allocation uniformly de-risked by the contemporaneously observed State Shadow
+  multiplier (B), using identical sealed daily asset returns.
+research_policy:
+  parameter_optimization_allowed: false
+  retrospective_backfill_allowed: false
+  historical_data_can_promote_state: false
+  B_can_increase_risk_above_A: false
+  B_can_change_relative_core_risk_weights: false
+return_comparison:
+  A_source: immutable Frozen B3 paper mark
+  B_asset_returns_source: exact immutable A mark asset_returns
+  B_turnover_cost_bps_one_way: 5.0
+  B_has_independent_vendor_refresh: false
+weekly_decision:
+  weekday: monday_utc
+  requires_same_date_A_snapshot: true
+  requires_immutable_state_decision: true
+  state_unknown_policy: multiplier_1_no_modifier
+  allowed_multipliers: [1.0, 0.75, 0.50]
+immutable_links:
+  B_snapshot_to_A_snapshot_sha256: required
+  B_snapshot_to_state_decision_sha256: required
+  B_mark_to_A_mark_sha256: required
+  B_mark_to_B_snapshot_sha256: required
+  protocol_freeze_sha256: required
+failure_policy:
+  missed_daily_mark: preserve_gap_and_lock_v01
+  missed_weekly_B_snapshot_when_A_changes: preserve_gap_and_lock_v01
+  state_implementation_mutation: require_new_protocol_version
+  state_config_mutation: require_new_protocol_version
+  AB_implementation_mutation: require_new_protocol_version
+promotion_gate:
+  minimum_comparable_days: 365
+  minimum_intervention_days: 20
+  max_cumulative_return_sacrifice: 0.05
+  max_drawdown_must_not_be_worse: true
+  downside_volatility_must_not_be_worse: true
+  ledger_integrity_required: true
+maturity:
+  initial: O1_DESCRIPTION_TO_O2_SHADOW
+  passing_state: O2_PROSPECTIVE_RISK_MODIFIER_SUPPORTED
