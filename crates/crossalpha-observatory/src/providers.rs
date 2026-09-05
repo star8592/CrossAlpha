@@ -119,9 +119,7 @@ impl ProviderClient {
         let mut output = Vec::with_capacity(requests.len());
 
         for (observation_type, request) in requests {
-            let payload = self
-                .post_json_with_retry(HYPERLIQUID_URL, &request)
-                .await?;
+            let payload = self.post_json_with_retry(HYPERLIQUID_URL, &request).await?;
             let mut metadata = Map::new();
             metadata.insert("request".to_owned(), request);
             metadata.insert(
@@ -241,10 +239,7 @@ impl ProviderClient {
 
 pub fn parse_sources(values: &[String]) -> Result<Vec<ProviderSource>> {
     if values.is_empty() {
-        return Ok(vec![
-            ProviderSource::Hyperliquid,
-            ProviderSource::DefiLlama,
-        ]);
+        return Ok(vec![ProviderSource::Hyperliquid, ProviderSource::DefiLlama]);
     }
     values.iter().map(|value| value.parse()).collect()
 }
