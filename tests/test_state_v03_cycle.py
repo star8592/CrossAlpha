@@ -23,6 +23,7 @@ class _FakeRpc:
     last_url: str | None = None
 
     def __init__(self, rpc_url: str, *_args, **_kwargs):
+        self.rpc_url = rpc_url
         type(self).last_url = rpc_url
 
     async def latest_block(self) -> int:
@@ -63,6 +64,13 @@ class _FakeRpc:
                 for address in addresses
             ]
         )
+
+
+class _FailingConfiguredRpc(_FakeRpc):
+    async def latest_block(self) -> int:
+        if self.rpc_url == "http://configured-but-pruned.invalid":
+            raise RuntimeError("pruned history unavailable")
+        return await super().latest_block()
 
 
 class _AdvancingRpc(_FakeRpc):
@@ -108,6 +116,23 @@ def test_cycle_without_configured_rpc_uses_zero_cost_fallback(monkeypatch, tmp_p
     assert report["finalized_block_time"] == BLOCK_TIME
     assert report["census"]["block_time"] == BLOCK_TIME
     assert _FakeRpc.last_url == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
+
+
+def test_cycle_falls_back_when_configured_rpc_fails_before_any_write(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(v03_cycle, "AaveBorrowerRpc", _FailingConfiguredRpc)
+    settings = Settings(
+        crossalpha_data_dir=tmp_path,
+        evm_rpc_url="http://configured-but-pruned.invalid",
+    )
+    report = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
+    assert report["status"] == "FULL_CENSUS_RECORDED"
+    assert report["rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
+    assert report["rpc_candidate_failures_before_selection"] == {
+        "EVM_RPC_URL": "RuntimeError"
+    }
+    assert (tmp_path / "derived" / "state" / "v03" / "borrower_universe.parquet").exists()
 
 
 def test_cycle_bootstrap_can_catch_up_and_record_nonprospective_full_census(
