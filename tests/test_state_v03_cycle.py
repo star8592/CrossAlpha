@@ -147,7 +147,7 @@ def test_new_borrower_between_full_censuses_is_added_to_temporary_watchlist(
     assert second["pending_new_borrower_count"] == 1
     assert second["watchlist"]["includes_pending_new_borrowers"] is True
     assert second["watchlist"]["pending_new_borrower_count"] == 1
-    assert second["watchlist"]["expected_address_count"] == 2
+    assert second["watchlist"]["expected_watchlist_addresses"] == 2
 
     state = v03_cycle._load_state(tmp_path)
     assert state["pending_new_borrowers_since_full"] == [DEBTOR2]
