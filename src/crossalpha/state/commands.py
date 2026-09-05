@@ -41,7 +41,7 @@ from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
     AaveBorrowerRpc,
     RpcPolicy,
-    resolve_rpc_url,
+    resolve_rpc_candidates,
 )
 
 
@@ -218,49 +218,61 @@ def v03_config_check_main() -> None:
 
 
 async def _v03_preflight(settings: Settings) -> dict[str, object]:
-    rpc_url, rpc_source = resolve_rpc_url(settings.evm_rpc_url)
-    rpc = AaveBorrowerRpc(
-        rpc_url,
-        policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
+    attempts: dict[str, str] = {}
+    for rpc_url, rpc_source in resolve_rpc_candidates(settings.evm_rpc_url):
+        rpc = AaveBorrowerRpc(
+            rpc_url,
+            policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
+        )
+        try:
+            latest = await rpc.latest_block()
+            finalized = max(latest - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+            finalized_block_time = await rpc.block_timestamp(finalized)
+            block_time = pd.Timestamp(finalized_block_time)
+            block_time = (
+                block_time.tz_localize("UTC")
+                if block_time.tzinfo is None
+                else block_time.tz_convert("UTC")
+            )
+            now = pd.Timestamp(datetime.now(timezone.utc))
+            if block_time > now:
+                raise RuntimeError("finalized block timestamp is in the future")
+            recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+            recent_logs = await rpc.borrow_logs(recent_from, finalized)
+            historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
+            historical_to = historical_from + 255
+            historical_logs = await rpc.borrow_logs(historical_from, historical_to)
+            probe = await rpc.account_data([AAVE_V3_ETHEREUM_CORE_POOL], block_number=finalized)
+            if probe.empty or not bool(probe.iloc[0]["success"]):
+                raise RuntimeError("getUserAccountData fixed-block probe failed")
+            return {
+                "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
+                "data_cost_usd": 0,
+                "rpc_source": rpc_source,
+                "rpc_candidate_failures_before_selection": attempts,
+                "latest_block": latest,
+                "finalized_block": finalized,
+                "finalized_block_time": block_time.isoformat(),
+                "block_time_source": "eth_getBlockByNumber(finalized_block)",
+                "finality_lag_blocks": FINALITY_LAG_BLOCKS,
+                "recent_borrow_scan_from_block": recent_from,
+                "recent_borrow_scan_to_block": finalized,
+                "recent_borrow_log_count": len(recent_logs),
+                "historical_log_scan_from_block": historical_from,
+                "historical_log_scan_to_block": historical_to,
+                "historical_log_scan_ok": True,
+                "historical_borrow_log_count": len(historical_logs),
+                "fixed_block_account_call_ok": True,
+                "actionability": "DESCRIPTIVE_ONLY",
+                "risk_multiplier": None,
+            }
+        except Exception as exc:
+            # Never echo the configured URL/token. Source labels are safe and sufficient.
+            attempts[rpc_source] = type(exc).__name__
+    raise RuntimeError(
+        "No State V0.3-capable Ethereum RPC passed archive/log/fixed-block probes; "
+        f"attempts={attempts}"
     )
-    latest = await rpc.latest_block()
-    finalized = max(latest - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
-    finalized_block_time = await rpc.block_timestamp(finalized)
-    block_time = pd.Timestamp(finalized_block_time)
-    block_time = (
-        block_time.tz_localize("UTC") if block_time.tzinfo is None else block_time.tz_convert("UTC")
-    )
-    now = pd.Timestamp(datetime.now(timezone.utc))
-    if block_time > now:
-        raise RuntimeError("finalized block timestamp is in the future")
-    recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
-    recent_logs = await rpc.borrow_logs(recent_from, finalized)
-    historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
-    historical_to = historical_from + 255
-    historical_logs = await rpc.borrow_logs(historical_from, historical_to)
-    probe = await rpc.account_data([AAVE_V3_ETHEREUM_CORE_POOL], block_number=finalized)
-    if probe.empty or not bool(probe.iloc[0]["success"]):
-        raise RuntimeError("getUserAccountData fixed-block probe failed")
-    return {
-        "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
-        "data_cost_usd": 0,
-        "rpc_source": rpc_source,
-        "latest_block": latest,
-        "finalized_block": finalized,
-        "finalized_block_time": block_time.isoformat(),
-        "block_time_source": "eth_getBlockByNumber(finalized_block)",
-        "finality_lag_blocks": FINALITY_LAG_BLOCKS,
-        "recent_borrow_scan_from_block": recent_from,
-        "recent_borrow_scan_to_block": finalized,
-        "recent_borrow_log_count": len(recent_logs),
-        "historical_log_scan_from_block": historical_from,
-        "historical_log_scan_to_block": historical_to,
-        "historical_log_scan_ok": True,
-        "historical_borrow_log_count": len(historical_logs),
-        "fixed_block_account_call_ok": True,
-        "actionability": "DESCRIPTIVE_ONLY",
-        "risk_multiplier": None,
-    }
 
 
 def v03_preflight_main() -> None:
