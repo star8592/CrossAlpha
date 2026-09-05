@@ -107,7 +107,9 @@ if phase_ok; then
   run_critical "B2. State A/B V0.1 strict integrity" python scripts/check_state_ab_integrity.py
 fi
 
-# C. State V0.2. If already frozen, never re-freeze; only prove it remains compatible.
+# C. State V0.2. A pre-freeze cycle is required because its freeze command itself
+# does not perform the external-data preflight. A second post-freeze cycle creates
+# the first admissible prospective observation.
 if phase_ok; then
   run_critical "C1. State V0.2 config consistency" crossalpha-state-v02-config-check
 fi
@@ -125,34 +127,33 @@ if phase_ok; then
 fi
 V02_HASH_EXPECTED="$(sha_or_missing "$V02_FREEZE")"
 
-# D. State V0.3 borrower-health layer. Bootstrap may remain incomplete; that is healthy.
+# D. State V0.3 freeze already performs its own live RPC preflight. Do not call
+# the preflight separately; after freeze run only one bounded bootstrap/live cycle.
 if phase_ok; then
   run_critical "D1. State V0.3 config consistency" crossalpha-state-v03-config-check
 fi
 if phase_ok && [[ ! -f "$V03_FREEZE" ]]; then
-  run_critical "D2. State V0.3 live RPC preflight" crossalpha-state-v03-preflight
-  run_critical "D3. freeze State V0.3" crossalpha-state-v03-freeze
+  run_critical "D2. preflight + freeze State V0.3" crossalpha-state-v03-freeze
 fi
 if phase_ok; then
-  run_critical "D4. one bounded State V0.3 bootstrap/live cycle" crossalpha-state-v03-cycle
-  run_critical "D5. State V0.3 strict integrity" crossalpha-state-v03-integrity
-  run_critical "D6. State V0.3 status" crossalpha-state-v03-status
+  run_critical "D3. one bounded State V0.3 bootstrap/live cycle" crossalpha-state-v03-cycle
+  run_critical "D4. State V0.3 strict integrity" crossalpha-state-v03-integrity
+  run_critical "D5. State V0.3 status" crossalpha-state-v03-status
 fi
 V03_HASH_EXPECTED="$(sha_or_missing "$V03_FREEZE")"
 
-# E. State V0.4 multi-venue mechanics. Run exactly one live data cycle after freeze;
-# that same cycle persists health, so no duplicate exchange requests are made.
+# E. State V0.4 freeze already performs one live multi-venue preflight. After
+# freeze, run exactly one formal data cycle; that cycle also persists health.
 if phase_ok; then
   run_critical "E1. State V0.4 config + fault-isolation hash" crossalpha-state-v04-config-check
 fi
 if phase_ok && [[ ! -f "$V04_FREEZE" ]]; then
-  run_critical "E2. State V0.4 live multi-venue preflight" crossalpha-state-v04-preflight
-  run_critical "E3. freeze State V0.4" crossalpha-state-v04-freeze
+  run_critical "E2. preflight + freeze State V0.4" crossalpha-state-v04-freeze
 fi
 if phase_ok; then
-  run_critical "E4. single frozen State V0.4 live cycle + health" python scripts/run_state_v04_cycle.py
-  run_critical "E5. State V0.4 strict raw-to-vector integrity" crossalpha-state-v04-integrity
-  run_critical "E6. State V0.4 status" crossalpha-state-v04-status
+  run_critical "E3. single frozen State V0.4 live cycle + health" python scripts/run_state_v04_cycle.py
+  run_critical "E4. State V0.4 strict raw-to-vector integrity" crossalpha-state-v04-integrity
+  run_critical "E5. State V0.4 status" crossalpha-state-v04-status
 fi
 V04_HASH_EXPECTED="$(sha_or_missing "$V04_FREEZE")"
 
