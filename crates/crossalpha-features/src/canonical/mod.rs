@@ -62,7 +62,9 @@ pub fn load_envelope(record: &RawSnapshotManifest) -> Result<ObservationEnvelope
     let envelope: ObservationEnvelope = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse raw snapshot {}", path.display()))?;
 
-    if envelope.source_id != record.source_id || envelope.observation_type != record.observation_type {
+    if envelope.source_id != record.source_id
+        || envelope.observation_type != record.observation_type
+    {
         bail!(
             "raw envelope identity mismatch: envelope={}/{} manifest={}/{}",
             envelope.source_id,
