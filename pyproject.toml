@@ -52,6 +52,12 @@ crossalpha-state-v02-freeze = "crossalpha.state.commands:v02_freeze_main"
 crossalpha-state-v02-cycle = "crossalpha.state.commands:v02_cycle_main"
 crossalpha-state-v02-integrity = "crossalpha.state.commands:v02_integrity_main"
 crossalpha-state-v02-status = "crossalpha.state.commands:v02_status_main"
+crossalpha-state-v03-config-check = "crossalpha.state.commands:v03_config_check_main"
+crossalpha-state-v03-preflight = "crossalpha.state.commands:v03_preflight_main"
+crossalpha-state-v03-freeze = "crossalpha.state.commands:v03_freeze_main"
+crossalpha-state-v03-cycle = "crossalpha.state.commands:v03_cycle_main"
+crossalpha-state-v03-integrity = "crossalpha.state.commands:v03_integrity_main"
+crossalpha-state-v03-status = "crossalpha.state.commands:v03_status_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
