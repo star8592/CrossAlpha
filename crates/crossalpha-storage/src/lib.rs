@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -71,6 +71,7 @@ impl ManifestLock {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(path)?;
         file.lock_exclusive()?;
         Ok(Self { file })
@@ -145,7 +146,10 @@ impl RawSnapshotStore {
     }
 }
 
-pub fn append_audit_manifest_unlocked(data_root: &Path, record: &RawSnapshotManifest) -> Result<PathBuf> {
+pub fn append_audit_manifest_unlocked(
+    data_root: &Path,
+    record: &RawSnapshotManifest,
+) -> Result<PathBuf> {
     let dir = data_root.join("manifests");
     fs::create_dir_all(&dir)?;
     let path = dir.join("raw_snapshots.jsonl");
@@ -156,7 +160,10 @@ pub fn append_audit_manifest_unlocked(data_root: &Path, record: &RawSnapshotMani
     Ok(path)
 }
 
-pub fn append_daily_manifest_unlocked(data_root: &Path, record: &RawSnapshotManifest) -> Result<PathBuf> {
+pub fn append_daily_manifest_unlocked(
+    data_root: &Path,
+    record: &RawSnapshotManifest,
+) -> Result<PathBuf> {
     let observed = record.observed_at;
     let path = data_root
         .join("manifests")
@@ -175,7 +182,10 @@ pub fn append_daily_manifest_unlocked(data_root: &Path, record: &RawSnapshotMani
     Ok(path)
 }
 
-pub fn update_series_state_unlocked(data_root: &Path, record: &RawSnapshotManifest) -> Result<PathBuf> {
+pub fn update_series_state_unlocked(
+    data_root: &Path,
+    record: &RawSnapshotManifest,
+) -> Result<PathBuf> {
     let source = safe_component(&record.source_id);
     let observation = safe_component(&record.observation_type);
     let path = data_root
@@ -211,7 +221,8 @@ pub fn update_series_state_unlocked(data_root: &Path, record: &RawSnapshotManife
     };
 
     let previous = state.latest_observed_at;
-    let interval = previous.map(|prev| (record.observed_at - prev).num_milliseconds() as f64 / 1000.0);
+    let interval =
+        previous.map(|prev| (record.observed_at - prev).num_milliseconds() as f64 / 1000.0);
     state.count += 1;
     if state.first_observed_at.is_none() {
         state.first_observed_at = Some(record.observed_at);
@@ -296,10 +307,10 @@ fn atomic_write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         file.sync_all()?;
     }
     fs::rename(&tmp, path)?;
-    if let Some(parent) = path.parent() {
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
     }
     Ok(())
 }
