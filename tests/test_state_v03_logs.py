@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from crossalpha.state import v03_prospective
@@ -7,6 +9,7 @@ from crossalpha.state.v03_logs import (
     BLOCKSCOUT_ETHEREUM_RPC_URL,
     BLOCKSCOUT_MAX_LOG_RESULTS,
     BLOCKSCOUT_STATE_RPC_SOURCE,
+    BlockscoutBorrowLogProvider,
     BorrowLogResultLimit,
     parse_blockscout_logs,
     resolve_state_rpc_candidates,
@@ -28,6 +31,33 @@ def test_blockscout_log_parser_rejects_possible_hard_limit_truncation() -> None:
     rows = [{"logIndex": hex(index)} for index in range(BLOCKSCOUT_MAX_LOG_RESULTS)]
     with pytest.raises(BorrowLogResultLimit, match="hard result limit"):
         parse_blockscout_logs({"status": "1", "result": rows})
+
+
+def test_blockscout_provider_splits_result_limit_to_single_blocks(monkeypatch) -> None:
+    provider = BlockscoutBorrowLogProvider("http://example.invalid")
+    calls: list[tuple[int, int]] = []
+
+    async def fake_query_once(start: int, end: int):
+        calls.append((start, end))
+        if start != end:
+            raise BorrowLogResultLimit("limit")
+        return [{"blockNumber": hex(start)}]
+
+    monkeypatch.setattr(provider, "_query_once", fake_query_once)
+    rows = asyncio.run(provider.borrow_logs(10, 13))
+    assert [row["blockNumber"] for row in rows] == ["0xa", "0xb", "0xc", "0xd"]
+    assert (10, 10) in calls and (13, 13) in calls
+
+
+def test_blockscout_provider_fails_closed_if_single_block_hits_limit(monkeypatch) -> None:
+    provider = BlockscoutBorrowLogProvider("http://example.invalid")
+
+    async def fake_query_once(_start: int, _end: int):
+        raise BorrowLogResultLimit("limit")
+
+    monkeypatch.setattr(provider, "_query_once", fake_query_once)
+    with pytest.raises(RuntimeError, match="single-block"):
+        asyncio.run(provider.borrow_logs(10, 10))
 
 
 def test_blockscout_log_parser_fails_closed_on_non_list_result() -> None:
