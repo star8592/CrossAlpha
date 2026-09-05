@@ -29,8 +29,9 @@ def test_rpc_resolution_prefers_env_and_has_zero_cost_fallback() -> None:
     assert resolve_rpc_url("http://localhost:8545") == ("http://localhost:8545", "EVM_RPC_URL")
     assert resolve_rpc_url(None) == (
         DEFAULT_PUBLIC_ETHEREUM_RPC,
-        "PUBLICNODE_ZERO_COST_FALLBACK",
+        "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK",
     )
+    assert DEFAULT_PUBLIC_ETHEREUM_RPC == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
 
 
 def test_borrow_log_uses_indexed_on_behalf_of_and_ignores_removed() -> None:
