@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::info;
@@ -26,7 +27,7 @@ enum Command {
     ManifestRebuild { data_root: PathBuf },
     /// Compare Python and Rust rebuilds from the same immutable audit ledger.
     ManifestParity { data_root: PathBuf },
-    /// Run Rust Observatory health checks and write observatory_health.json.
+    /// Run Rust Observatory health checks and optionally write observatory_health.json.
     ObservatoryHealth {
         data_root: PathBuf,
         #[arg(long, default_value_t = 300)]
@@ -35,6 +36,12 @@ enum Command {
         stale_after: u64,
         #[arg(long)]
         no_verify_latest: bool,
+        /// Fixed RFC3339 timestamp for deterministic Python/Rust parity tests.
+        #[arg(long)]
+        now: Option<String>,
+        /// Do not update manifests/observatory_health.json.
+        #[arg(long)]
+        no_write_report: bool,
     },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
@@ -102,17 +109,23 @@ async fn main() -> Result<()> {
             expected_interval,
             stale_after,
             no_verify_latest,
+            now,
+            no_write_report,
         } => {
+            let now = parse_optional_rfc3339(now.as_deref())?;
             let report = crossalpha_observatory::observatory_health(
                 &data_root,
                 expected_interval,
                 stale_after,
                 !no_verify_latest,
-                None,
+                now,
             )?;
-            let report_path = crossalpha_observatory::write_health_report(&data_root, &report)?;
+            if !no_write_report {
+                let report_path =
+                    crossalpha_observatory::write_health_report(&data_root, &report)?;
+                eprintln!("report={}", report_path.display());
+            }
             println!("{}", serde_json::to_string_pretty(&report)?);
-            eprintln!("report={}", report_path.display());
             if !report.ok {
                 anyhow::bail!("OBSERVATORY HEALTH FAILED");
             }
@@ -124,6 +137,15 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_optional_rfc3339(raw: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+    raw.map(|value| {
+        DateTime::parse_from_rfc3339(value)
+            .with_context(|| format!("invalid --now RFC3339 timestamp: {value}"))
+            .map(|timestamp| timestamp.with_timezone(&Utc))
+    })
+    .transpose()
 }
 
 fn json_type(value: &serde_json::Value) -> &'static str {
