@@ -1,0 +1,19 @@
+[Unit]
+Description=CrossAlpha Observatory Rust collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=-@REPO_DIR@/.env
+ExecStart=@REPO_DIR@/target/release/crossalpha-rs observatory-run @DATA_ROOT@ --interval 300 --collector-timeout 120 --http-timeout 30 --max-consecutive-failures 3 --stale-after 900
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
