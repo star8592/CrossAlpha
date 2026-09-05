@@ -142,14 +142,21 @@ def parse_aave_liquidations(
         words: list[str] = []
         if isinstance(data, str) and data.startswith("0x"):
             raw = data[2:]
-            words = [raw[i : i + 64] for i in range(0, len(raw), 64) if len(raw[i : i + 64]) == 64]
+            words = [
+                raw[i : i + 64]
+                for i in range(0, len(raw), 64)
+                if len(raw[i : i + 64]) == 64
+            ]
         debt_to_cover_raw = int(words[0], 16) if len(words) > 0 else None
         collateral_amount_raw = int(words[1], 16) if len(words) > 1 else None
         liquidator = "0x" + words[2][-40:].lower() if len(words) > 2 else None
         receive_atoken = bool(int(words[3], 16)) if len(words) > 3 else None
+        removed = bool(item.get("removed", False))
         rows.append(
             {
-                "event_time": item.get("blockTimestamp"),
+                # Preserve the removed record itself, but remove it from event-time
+                # counts after point-in-time deduplication.
+                "event_time": None if removed else item.get("blockTimestamp"),
                 "observed_at": observed_at,
                 "known_at": known_at,
                 "block_number": _to_int_hex(item.get("blockNumber")),
@@ -157,7 +164,7 @@ def parse_aave_liquidations(
                 "transaction_index": _to_int_hex(item.get("transactionIndex")),
                 "log_index": _to_int_hex(item.get("logIndex")),
                 "block_hash": item.get("blockHash"),
-                "removed": bool(item.get("removed", False)),
+                "removed": removed,
                 "collateral_asset": _topic_address(topics[1]),
                 "debt_asset": _topic_address(topics[2]),
                 "user": _topic_address(topics[3]),
@@ -194,11 +201,13 @@ def canonicalize_aave(
 ) -> dict[str, int | str]:
     records, mode = _records(data_root, recent_days)
     market_records = [
-        row for row in records
+        row
+        for row in records
         if row.source_id == "aave:v3:graphql" and row.observation_type == "markets_snapshot"
     ]
     liquidation_records = [
-        row for row in records
+        row
+        for row in records
         if row.source_id == "aave:v3:ethereum" and row.observation_type == "liquidation_logs"
     ]
 
@@ -207,7 +216,15 @@ def canonicalize_aave(
 
     for record in sorted(market_records, key=lambda item: item.observed_at):
         observed = record.observed_at
-        out_dir = data_root / "canonical" / "aave" / "markets" / f"year={observed:%Y}" / f"month={observed:%m}" / f"day={observed:%d}"
+        out_dir = (
+            data_root
+            / "canonical"
+            / "aave"
+            / "markets"
+            / f"year={observed:%Y}"
+            / f"month={observed:%m}"
+            / f"day={observed:%d}"
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{observed:%Y%m%dT%H%M%S.%fZ}_{record.sha256[:12]}.parquet"
         if out_path.exists():
@@ -224,7 +241,15 @@ def canonicalize_aave(
 
     for record in sorted(liquidation_records, key=lambda item: item.observed_at):
         observed = record.observed_at
-        out_dir = data_root / "canonical" / "aave" / "liquidations" / f"year={observed:%Y}" / f"month={observed:%m}" / f"day={observed:%d}"
+        out_dir = (
+            data_root
+            / "canonical"
+            / "aave"
+            / "liquidations"
+            / f"year={observed:%Y}"
+            / f"month={observed:%m}"
+            / f"day={observed:%d}"
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{observed:%Y%m%dT%H%M%S.%fZ}_{record.sha256[:12]}.parquet"
         if out_path.exists():
