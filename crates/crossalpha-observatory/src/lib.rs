@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use crossalpha_storage::{ManifestLock, RawSnapshotManifest};
 use flate2::read::GzDecoder;
 use serde::Serialize;
@@ -25,7 +25,8 @@ pub struct SeriesHealth {
     pub stale: bool,
     pub gap_count: usize,
     pub max_gap_seconds: Option<f64>,
-    pub duplicate_timestamps: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate_timestamps: Option<usize>,
     pub latest_integrity: Option<Value>,
 }
 
@@ -48,7 +49,10 @@ pub struct ObservatoryHealthReport {
 pub fn load_manifest(data_root: &Path) -> Result<(Vec<RawSnapshotManifest>, Vec<String>)> {
     let path = data_root.join("manifests/raw_snapshots.jsonl");
     if !path.exists() {
-        return Ok((Vec::new(), vec![format!("manifest missing: {}", path.display())]));
+        return Ok((
+            Vec::new(),
+            vec![format!("manifest missing: {}", path.display())],
+        ));
     }
 
     let _lock = ManifestLock::acquire(data_root)?;
@@ -174,14 +178,14 @@ pub fn observatory_health(
                     stale: true,
                     gap_count: 0,
                     max_gap_seconds: None,
-                    duplicate_timestamps: 0,
+                    duplicate_timestamps: None,
                     latest_integrity: None,
                 },
             );
             continue;
         }
 
-        let latest = items[items.len() - 1];
+        let latest = items.last().copied().expect("items checked non-empty above");
         let age_seconds = duration_seconds(now - latest.observed_at).max(0.0);
         let stale = age_seconds > stale_after_seconds as f64;
         let mut gaps = Vec::new();
@@ -205,6 +209,7 @@ pub fn observatory_health(
             .unwrap_or(true);
         let series_ok = !stale && integrity_ok;
         current_ok = current_ok && series_ok;
+        let gap_count = gaps.len();
         let max_gap_seconds = gaps.into_iter().reduce(f64::max).map(round3);
 
         series.insert(
@@ -212,34 +217,30 @@ pub fn observatory_health(
             SeriesHealth {
                 ok: series_ok,
                 count: items.len(),
-                latest_observed_at: Some(latest.observed_at.to_rfc3339()),
+                latest_observed_at: Some(python_isoformat(latest.observed_at)),
                 age_seconds: Some(round3(age_seconds)),
                 stale,
-                gap_count: max_gap_seconds.map_or(0, |_| {
-                    items
-                        .windows(2)
-                        .filter(|pair| {
-                            duration_seconds(pair[1].observed_at - pair[0].observed_at)
-                                > gap_threshold
-                        })
-                        .count()
-                }),
+                gap_count,
                 max_gap_seconds,
-                duplicate_timestamps,
+                duplicate_timestamps: Some(duplicate_timestamps),
                 latest_integrity,
             },
         );
     }
 
     let raw_bytes_manifested = records.iter().map(|record| record.bytes).sum();
-    let compression_sample: Vec<&RawSnapshotManifest> = records
+    let compression_sample_records = records
         .iter()
         .filter(|record| record.compressed_bytes.is_some())
-        .collect();
-    let compression_sample_raw_bytes = compression_sample.iter().map(|record| record.bytes).sum();
-    let compressed_bytes_manifested = compression_sample
+        .count();
+    let compression_sample_raw_bytes = records
         .iter()
-        .map(|record| record.compressed_bytes.unwrap_or_default())
+        .filter(|record| record.compressed_bytes.is_some())
+        .map(|record| record.bytes)
+        .sum();
+    let compressed_bytes_manifested = records
+        .iter()
+        .filter_map(|record| record.compressed_bytes)
         .sum();
     let compression_ratio = if compression_sample_raw_bytes > 0 && compressed_bytes_manifested > 0 {
         Some(round3(
@@ -251,13 +252,13 @@ pub fn observatory_health(
 
     Ok(ObservatoryHealthReport {
         ok: current_ok,
-        checked_at: now.to_rfc3339_opts(SecondsFormat::Micros, false),
+        checked_at: python_isoformat(now),
         manifest_records: records.len(),
         manifest_errors,
         expected_interval_seconds,
         stale_after_seconds,
         raw_bytes_manifested,
-        compression_sample_records: compression_sample.len(),
+        compression_sample_records,
         compression_sample_raw_bytes,
         compressed_bytes_manifested,
         compression_ratio,
@@ -293,6 +294,15 @@ fn duration_seconds(duration: chrono::Duration) -> f64 {
         .unwrap_or_else(|| duration.num_seconds() as f64)
 }
 
+fn python_isoformat(timestamp: DateTime<Utc>) -> String {
+    let format = if timestamp.nanosecond() == 0 {
+        SecondsFormat::Secs
+    } else {
+        SecondsFormat::Micros
+    };
+    timestamp.to_rfc3339_opts(format, false)
+}
+
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
@@ -308,9 +318,26 @@ mod tests {
     }
 
     #[test]
+    fn python_isoformat_matches_datetime_shape() {
+        let whole: DateTime<Utc> = "2026-09-05T12:34:56Z".parse().unwrap();
+        let micros: DateTime<Utc> = "2026-09-05T12:34:56.123456Z".parse().unwrap();
+        assert_eq!(python_isoformat(whole), "2026-09-05T12:34:56+00:00");
+        assert_eq!(
+            python_isoformat(micros),
+            "2026-09-05T12:34:56.123456+00:00"
+        );
+    }
+
+    #[test]
     fn expected_series_matches_python_contract() {
         assert_eq!(DEFAULT_EXPECTED_SERIES.len(), 3);
-        assert_eq!(DEFAULT_EXPECTED_SERIES[0], ("hyperliquid", "metaAndAssetCtxs"));
-        assert_eq!(DEFAULT_EXPECTED_SERIES[2], ("defillama", "stablecoins_snapshot"));
+        assert_eq!(
+            DEFAULT_EXPECTED_SERIES[0],
+            ("hyperliquid", "metaAndAssetCtxs")
+        );
+        assert_eq!(
+            DEFAULT_EXPECTED_SERIES[2],
+            ("defillama", "stablecoins_snapshot")
+        );
     }
 }
