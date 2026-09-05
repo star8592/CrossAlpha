@@ -12,6 +12,7 @@ research_policy:
   historical_data_can_promote_state: false
   B_can_increase_risk_above_A: false
   B_can_change_relative_core_risk_weights: false
+  freeze_must_precede_first_eligible_effective_date: true
 return_comparison:
   A_source: immutable Frozen B3 paper mark
   B_asset_returns_source: exact immutable A mark asset_returns
@@ -19,6 +20,9 @@ return_comparison:
   B_has_independent_vendor_refresh: false
 weekly_decision:
   weekday: monday_utc
+  scheduled_time_utc: "00:20"
+  A_snapshot_is_sealed_first: true
+  state_decision_and_B_snapshot_follow_in_same_run: true
   requires_same_date_A_snapshot: true
   requires_immutable_state_decision: true
   state_unknown_policy: multiplier_1_no_modifier
