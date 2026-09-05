@@ -31,6 +31,7 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "requires_predeclared_O2_rule": True,
         "automatic_promotion_to_actionable_modifier_allowed": False,
     }
+    fallback_urls = tuple(url for url, _source in v03_rpc.ZERO_COST_PUBLIC_RPC_CANDIDATES)
     checks = {
         "protocol": raw.get("protocol") == v03.PROTOCOL,
         "mode": raw.get("mode") == v03.MODE,
@@ -46,9 +47,24 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "historical_bootstrap_not_evidence": raw.get("research_policy", {}).get("historical_bootstrap_is_evidence") is False,
         "rpc_env": source.get("rpc_env") == "EVM_RPC_URL",
         "rpc_fallback": source.get("fallback_rpc_url") == v03_rpc.DEFAULT_PUBLIC_ETHEREUM_RPC,
+        "rpc_fallback_pool": tuple(source.get("fallback_rpc_candidates", [])) == fallback_urls,
         "zero_cost": source.get("required_data_cost_usd") == 0,
         "rpc_policy": source.get("rpc_policy")
-        == "EVM_RPC_URL_PREFERRED_ZERO_COST_ARCHIVE_PUBLIC_FALLBACK",
+        == "EVM_RPC_URL_PREFERRED_CAPABILITY_PROBED_ZERO_COST_FALLBACK_POOL",
+        "rpc_required_capabilities": tuple(source.get("required_capabilities", []))
+        == (
+            "eth_blockNumber",
+            "eth_getBlockByNumber",
+            "recent_eth_getLogs",
+            "historical_eth_getLogs",
+            "fixed_block_eth_call",
+        ),
+        "single_cycle_rpc_selection": source.get("single_cycle_rpc_selection") is True,
+        "configured_rpc_may_fallback": source.get("configured_rpc_failure_may_fallback") is True,
+        "rpc_failure_diagnostics_redacted": source.get(
+            "rpc_failure_diagnostics_must_not_expose_url_or_token"
+        )
+        is True,
         "pool_address": str(source.get("aave_v3_core_pool", "")).lower()
         == v03_rpc.AAVE_V3_ETHEREUM_CORE_POOL.lower(),
         "deployment_block": source.get("deployment_block") == v03_rpc.AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
