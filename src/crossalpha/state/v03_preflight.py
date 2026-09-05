@@ -7,6 +7,11 @@ import pandas as pd
 
 from crossalpha.settings import Settings
 from crossalpha.state.v03_cycle import FINALITY_LAG_BLOCKS
+from crossalpha.state.v03_logs import (
+    BLOCKSCOUT_LOG_SOURCE,
+    BlockscoutBorrowLogProvider,
+    BorrowLogPolicy,
+)
 from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_CORE_POOL,
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
@@ -17,7 +22,20 @@ from crossalpha.state.v03_rpc import (
 
 
 async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
-    """Select one V0.3-capable RPC without mutating any research ledger."""
+    """Probe the split V0.3 data plane without mutating any research ledger."""
+    log_provider = BlockscoutBorrowLogProvider(
+        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout)
+    )
+    historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
+    historical_to = historical_from + 255
+    try:
+        historical_logs = await log_provider.borrow_logs(historical_from, historical_to)
+    except Exception as exc:
+        raise RuntimeError(
+            "State V0.3 indexed Borrow-log source failed historical probe: "
+            f"{type(exc).__name__}"
+        ) from exc
+
     attempts: dict[str, str] = {}
     for rpc_url, rpc_source in resolve_rpc_candidates(settings.evm_rpc_url):
         rpc = AaveBorrowerRpc(
@@ -38,19 +56,21 @@ async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
             if block_time > now:
                 raise RuntimeError("finalized block timestamp is in the future")
 
-            recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
-            recent_logs = await rpc.borrow_logs(recent_from, finalized)
-            historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
-            historical_to = historical_from + 255
-            historical_logs = await rpc.borrow_logs(historical_from, historical_to)
             probe = await rpc.account_data([AAVE_V3_ETHEREUM_CORE_POOL], block_number=finalized)
             if probe.empty or not bool(probe.iloc[0]["success"]):
                 raise RuntimeError("getUserAccountData fixed-block probe failed")
 
+            recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+            recent_logs = await log_provider.borrow_logs(recent_from, finalized)
             return {
                 "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
                 "data_cost_usd": 0,
+                "split_data_plane": True,
+                "archive_rpc_required": False,
+                "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+                "state_rpc_source": rpc_source,
                 "rpc_source": rpc_source,
+                "state_rpc_candidate_failures_before_selection": attempts,
                 "rpc_candidate_failures_before_selection": attempts,
                 "latest_block": latest,
                 "finalized_block": finalized,
@@ -73,6 +93,6 @@ async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
             attempts[rpc_source] = type(exc).__name__
 
     raise RuntimeError(
-        "No State V0.3-capable Ethereum RPC passed archive/log/fixed-block probes; "
+        "No State V0.3 state RPC passed finalized-block/fixed-call probes; "
         f"attempts={attempts}"
     )
