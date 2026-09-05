@@ -70,6 +70,36 @@ sha_or_missing() {
   if [[ -f "$path" ]]; then sha256sum "$path" | awk '{print $1}'; else echo MISSING; fi
 }
 
+# Enabling a timer whose OnBootSec/OnCalendar deadline already elapsed may immediately
+# launch its oneshot service. Do not race the final DuckDB/hash audit against that work.
+wait_new_oneshots_idle() {
+  local units=(
+    crossalpha-state-v02.service
+    crossalpha-state-v03.service
+    crossalpha-state-v04.service
+    crossalpha-outcome-linkage.service
+  )
+  local attempt unit state busy
+  for attempt in $(seq 1 720); do
+    busy=0
+    for unit in "${units[@]}"; do
+      state="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+      case "$state" in
+        active|activating|deactivating|reloading)
+          busy=1
+          ;;
+      esac
+    done
+    if [[ $busy -eq 0 ]]; then
+      echo "All newly installed CrossAlpha oneshot services are idle."
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Timed out waiting for newly installed CrossAlpha oneshot services to become idle." >&2
+  return 1
+}
+
 A_HASH_BASELINE="$(sha_or_missing "$A_FREEZE")"
 AB_HASH_BASELINE="$(sha_or_missing "$AB_FREEZE")"
 V02_HASH_START="$(sha_or_missing "$V02_FREEZE")"
@@ -178,6 +208,7 @@ if phase_ok; then
   run_critical "G2. install/update State V0.3 timer" bash scripts/install_state_v03_user_service.sh
   run_critical "G3. install/update State V0.4 timer" bash scripts/install_state_v04_user_service.sh
   run_critical "G4. install/update Outcome Linkage timer" bash scripts/install_outcome_linkage_user_service.sh
+  run_critical "G5. wait for timer-triggered oneshots to become idle" wait_new_oneshots_idle
 fi
 
 # H. The hard audit performs the authoritative final catalog rebuild itself.
