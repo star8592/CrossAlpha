@@ -11,6 +11,7 @@ import pandas as pd
 from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v04 import compute_market_mechanics
+from crossalpha.state.v04_prospective import freeze_path, write_live_observation
 from crossalpha.state.v04_provider import MultiVenueCollector, parse_venue_snapshot
 from crossalpha.storage.raw import RawSnapshotStore
 
@@ -100,6 +101,7 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
         raise RuntimeError(f"State V0.4 insufficient multi-venue data: {report}")
 
     venue_path, report_path = _snapshot_paths(data_root, generated)
+    prospective: dict[str, Any] = {"status": "not_frozen_no_prospective_write"}
     if write:
         venue_path.parent.mkdir(parents=True, exist_ok=True)
         venue_tmp = venue_path.with_suffix(".parquet.tmp")
@@ -116,6 +118,13 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
             encoding="utf-8",
         )
         report_tmp.replace(report_path)
+        if freeze_path(data_root).exists():
+            prospective = write_live_observation(
+                data_root,
+                mechanics_path=report_path,
+                venue_path=venue_path,
+                now=pd.Timestamp(datetime.now(timezone.utc)),
+            )
     else:
         report_payload = {**report, "raw_records": raw_records}
 
@@ -131,5 +140,6 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
         "venue_rows": frame.to_dict(orient="records"),
         "venue_snapshot_path": str(venue_path) if write else None,
         "mechanics_snapshot_path": str(report_path) if write else None,
+        "prospective": prospective,
         "written": bool(write),
     }
