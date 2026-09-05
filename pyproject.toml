@@ -64,6 +64,11 @@ crossalpha-state-v04-freeze = "crossalpha.state.v04_commands:freeze_main"
 crossalpha-state-v04-cycle = "crossalpha.state.v04_commands:cycle_main"
 crossalpha-state-v04-integrity = "crossalpha.state.v04_commands:integrity_main"
 crossalpha-state-v04-status = "crossalpha.state.v04_commands:status_main"
+crossalpha-outcome-config-check = "crossalpha.outcomes.commands:config_check_main"
+crossalpha-outcome-freeze = "crossalpha.outcomes.commands:freeze_main"
+crossalpha-outcome-materialize = "crossalpha.outcomes.commands:materialize_main"
+crossalpha-outcome-integrity = "crossalpha.outcomes.commands:integrity_main"
+crossalpha-outcome-status = "crossalpha.outcomes.commands:status_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
