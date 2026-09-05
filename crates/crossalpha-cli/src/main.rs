@@ -3,7 +3,11 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 
 #[derive(Debug, Parser)]
-#[command(name = "crossalpha-rs", version, about = "CrossAlpha Rust control plane")]
+#[command(
+    name = "crossalpha-rs",
+    version,
+    about = "CrossAlpha Rust control plane"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
