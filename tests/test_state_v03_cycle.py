@@ -12,6 +12,7 @@ from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, BORROW_E
 
 DEBTOR = "0x2222222222222222222222222222222222222222"
 DEBTOR2 = "0x3333333333333333333333333333333333333333"
+BLOCK_TIME = "2026-09-05T00:00:00+00:00"
 
 
 def _topic(address: str) -> str:
@@ -26,6 +27,10 @@ class _FakeRpc:
 
     async def latest_block(self) -> int:
         return AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK + v03_cycle.FINALITY_LAG_BLOCKS + 100
+
+    async def block_timestamp(self, block_number: int) -> str:
+        assert block_number >= AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
+        return BLOCK_TIME
 
     async def borrow_logs(self, from_block: int, to_block: int):
         assert from_block <= to_block
@@ -100,6 +105,8 @@ def test_cycle_without_configured_rpc_uses_zero_cost_fallback(monkeypatch, tmp_p
     assert report["data_cost_usd"] == 0
     assert report["risk_multiplier"] is None
     assert report["mutates_v01_or_v02"] is False
+    assert report["finalized_block_time"] == BLOCK_TIME
+    assert report["census"]["block_time"] == BLOCK_TIME
     assert _FakeRpc.last_url == "https://ethereum-rpc.publicnode.com"
 
 
@@ -113,6 +120,7 @@ def test_cycle_bootstrap_can_catch_up_and_record_nonprospective_full_census(
     assert report["rpc_source"] == "EVM_RPC_URL"
     assert report["census"]["valid_full_census"] is True
     assert report["census"]["candidate_address_count"] == 1
+    assert report["census"]["block_time"] == BLOCK_TIME
     assert report["prospective"]["status"] == "not_frozen_no_prospective_write"
     assert report["mutates_v01_or_v02"] is False
     assert (tmp_path / "derived" / "state" / "v03" / "borrower_universe.parquet").exists()
@@ -127,6 +135,7 @@ def test_followup_cycle_uses_watchlist_until_next_full_census(monkeypatch, tmp_p
     second = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
     assert second["status"] == "WATCHLIST_RECORDED"
     assert second["watchlist"]["scope"] == "WATCHLIST_ONLY"
+    assert second["watchlist"]["block_time"] == BLOCK_TIME
     assert second["watchlist"]["full_market_census_claim_allowed"] is False
 
 
