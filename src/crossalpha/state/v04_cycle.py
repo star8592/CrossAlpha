@@ -12,7 +12,8 @@ from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v04 import compute_market_mechanics
 from crossalpha.state.v04_prospective import freeze_path, write_live_observation
-from crossalpha.state.v04_provider import MultiVenueCollector, parse_venue_snapshot
+from crossalpha.state.v04_provider import parse_venue_snapshot
+from crossalpha.state.v04_safe_provider import FaultIsolatedMultiVenueCollector
 from crossalpha.storage.raw import RawSnapshotStore
 
 
@@ -52,10 +53,10 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
     settings.ensure_dirs()
     data_root = settings.crossalpha_data_dir
     collected_at = pd.Timestamp(datetime.now(timezone.utc))
-    collector = MultiVenueCollector(timeout=settings.crossalpha_http_timeout)
+    collector = FaultIsolatedMultiVenueCollector(timeout=settings.crossalpha_http_timeout)
     payloads = await collector.collect()
     if len(payloads) != 6:
-        raise RuntimeError(f"State V0.4 expected 6 venue/asset payloads, got {len(payloads)}")
+        raise RuntimeError(f"State V0.4 expected 6 venue/asset slots, got {len(payloads)}")
 
     store = RawSnapshotStore(data_root)
     normalized: list[dict[str, Any]] = []
@@ -75,11 +76,13 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
                 "venue": payload["venue"],
                 "data_cost_usd": 0,
                 "authentication_required": False,
+                "collection_error": payload.get("collection_error"),
             },
         )
         manifest = store.write(envelope)
         raw_path = Path(manifest.path)
         row = parse_venue_snapshot(payload, known_at=collected_at)
+        row["collection_error"] = payload.get("collection_error")
         row["raw_sha256"] = manifest.sha256
         row["raw_compressed_file_sha256"] = _sha256_file(raw_path)
         row["raw_path"] = manifest.path
@@ -88,6 +91,7 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
             {
                 "venue": payload["venue"],
                 "asset": payload["asset"],
+                "collection_error": payload.get("collection_error"),
                 "raw_sha256": manifest.sha256,
                 "raw_compressed_file_sha256": _sha256_file(raw_path),
                 "raw_path": manifest.path,
@@ -136,6 +140,7 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
         "risk_multiplier": None,
         "mutates_predecessors": False,
         "generated_at": generated.isoformat(),
+        "collection_error_count": int(frame["collection_error"].notna().sum()),
         "state": report,
         "venue_rows": frame.to_dict(orient="records"),
         "venue_snapshot_path": str(venue_path) if write else None,
