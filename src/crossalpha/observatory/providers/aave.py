@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
+
+from crossalpha.domain.models import ObservationEnvelope, SourceType
+
+
+AAVE_V3_GRAPHQL = "https://api.v3.aave.com/graphql"
+AAVE_V3_ETHEREUM_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+AAVE_V3_ETHEREUM_CHAIN_ID = 1
+LIQUIDATION_CALL_TOPIC = (
+    "0xe413a321e8681d831f4dbccbca790d2952b56f977908e45be37335533e005286"
+)
+
+# Keep this query deliberately small and stable. These fields are sufficient for
+# market-level liquidity stress and are part of Aave's public V3 GraphQL surface.
+MARKETS_QUERY = """
+query CrossAlphaAaveMarkets($chainIds: [ChainId!]!) {
+  markets(request: { chainIds: $chainIds }) {
+    address
+    name
+    reserves {
+      underlyingToken { address symbol decimals }
+      supplyInfo { apy { formatted } }
+      borrowInfo {
+        apy { formatted }
+        availableLiquidity { amount { value } usd }
+        borrowCapReached
+      }
+      isFrozen
+      isPaused
+    }
+  }
+}
+"""
+
+
+class AaveV3MarketProvider:
+    """Free, read-only Aave V3 GraphQL market snapshot collector.
+
+    This provider intentionally does not claim to observe the distribution of
+    borrower health factors. Market liquidity/rates and user liquidation cliffs
+    are different objects and remain separate in State V0.2.
+    """
+
+    def __init__(
+        self,
+        timeout: float = 30.0,
+        *,
+        endpoint: str = AAVE_V3_GRAPHQL,
+        chain_id: int = AAVE_V3_ETHEREUM_CHAIN_ID,
+    ) -> None:
+        self.timeout = timeout
+        self.endpoint = endpoint
+        self.chain_id = chain_id
+
+    async def collect(self) -> list[ObservationEnvelope]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                self.endpoint,
+                json={"query": MARKETS_QUERY, "variables": {"chainIds": [self.chain_id]}},
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            body = response.json()
+
+        errors = body.get("errors") if isinstance(body, dict) else None
+        if errors:
+            raise RuntimeError(f"Aave V3 GraphQL returned errors: {errors}")
+        markets = body.get("data", {}).get("markets") if isinstance(body, dict) else None
+        if not isinstance(markets, list) or not markets:
+            raise ValueError("Aave V3 GraphQL returned no markets")
+
+        now = datetime.now(timezone.utc)
+        return [
+            ObservationEnvelope(
+                observed_at=now,
+                known_at=now,
+                source_type=SourceType.AGGREGATOR,
+                source_id="aave:v3:graphql",
+                observation_type="markets_snapshot",
+                payload=body,
+                metadata={
+                    "endpoint": self.endpoint,
+                    "chain_id": self.chain_id,
+                    "data_cost_usd": 0,
+                    "scope": "market_level_not_user_health_factor_distribution",
+                },
+            )
+        ]
+
+
+class AaveV3LiquidationRpcProvider:
+    """Optional point-in-time LiquidationCall confirmation using a user RPC URL.
+
+    The provider scans only a bounded recent block window on every run. Canonical
+    materialization deduplicates by transaction hash + log index, so no mutable
+    cursor is required and overlapping scans are reorg-friendlier than a cursor.
+    """
+
+    def __init__(
+        self,
+        rpc_url: str,
+        timeout: float = 30.0,
+        *,
+        pool_address: str = AAVE_V3_ETHEREUM_POOL,
+        lookback_blocks: int = 512,
+    ) -> None:
+        self.rpc_url = rpc_url
+        self.timeout = timeout
+        self.pool_address = pool_address
+        self.lookback_blocks = max(int(lookback_blocks), 1)
+
+    async def _rpc(self, method: str, params: list[Any]) -> Any:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                self.rpc_url,
+                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            body = response.json()
+        if "error" in body:
+            raise RuntimeError(body["error"])
+        return body["result"]
+
+    async def collect(self) -> list[ObservationEnvelope]:
+        latest_raw = await self._rpc("eth_blockNumber", [])
+        latest = int(str(latest_raw), 16)
+        first = max(0, latest - self.lookback_blocks + 1)
+        logs = await self._rpc(
+            "eth_getLogs",
+            [
+                {
+                    "address": self.pool_address,
+                    "fromBlock": hex(first),
+                    "toBlock": hex(latest),
+                    "topics": [LIQUIDATION_CALL_TOPIC],
+                }
+            ],
+        )
+        if not isinstance(logs, list):
+            raise ValueError("Aave liquidation eth_getLogs did not return a list")
+        now = datetime.now(timezone.utc)
+        return [
+            ObservationEnvelope(
+                observed_at=now,
+                known_at=now,
+                source_type=SourceType.CHAIN,
+                source_id="aave:v3:ethereum",
+                observation_type="liquidation_logs",
+                payload=logs,
+                metadata={
+                    "pool_address": self.pool_address,
+                    "chain_id": AAVE_V3_ETHEREUM_CHAIN_ID,
+                    "from_block": first,
+                    "to_block": latest,
+                    "lookback_blocks": self.lookback_blocks,
+                    "data_cost_usd": 0,
+                },
+            )
+        ]
