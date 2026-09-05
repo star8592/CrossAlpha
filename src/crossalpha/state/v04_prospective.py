@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -63,6 +64,14 @@ def verify_seal(value: dict[str, Any]) -> bool:
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_gzip_payload(path: Path) -> str:
+    digest = hashlib.sha256()
+    with gzip.open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -260,15 +269,21 @@ def write_live_observation(
         raise ValueError("State V0.4 mechanics artifact must link six raw records")
     for raw in raw_records:
         path = Path(str(raw.get("raw_path", "")))
-        expected = str(raw.get("raw_sha256", ""))
-        if not path.exists() or sha256_file(path) != expected:
-            raise ValueError("State V0.4 raw snapshot hash link failed")
+        payload_hash = str(raw.get("raw_sha256", ""))
+        compressed_hash = str(raw.get("raw_compressed_file_sha256", ""))
+        if not path.exists():
+            raise ValueError("State V0.4 raw snapshot file missing")
+        if sha256_gzip_payload(path) != payload_hash:
+            raise ValueError("State V0.4 raw uncompressed payload hash link failed")
+        if sha256_file(path) != compressed_hash:
+            raise ValueError("State V0.4 raw compressed-file hash link failed")
         raw_links.append(
             {
                 "venue": str(raw.get("venue")),
                 "asset": str(raw.get("asset")),
                 "raw_path": str(path),
-                "raw_sha256": expected,
+                "raw_sha256": payload_hash,
+                "raw_compressed_file_sha256": compressed_hash,
             }
         )
 
