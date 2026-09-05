@@ -151,3 +151,20 @@ def test_new_borrower_between_full_censuses_is_added_to_temporary_watchlist(
 
     state = v03_cycle._load_state(tmp_path)
     assert state["pending_new_borrowers_since_full"] == [DEBTOR2]
+
+
+def test_full_census_needs_time_and_new_finalized_block() -> None:
+    now = pd.Timestamp("2026-09-05T12:00:00Z")
+    state = {
+        "last_valid_full_census_at": "2026-09-05T05:00:00+00:00",
+        "last_valid_full_census_block": 123456,
+    }
+    assert v03_cycle._full_census_due(state, now, 123456) is False
+    assert v03_cycle._full_census_due(state, now, 123455) is False
+    assert v03_cycle._full_census_due(state, now, 123457) is True
+
+    recent = {
+        "last_valid_full_census_at": "2026-09-05T11:00:00+00:00",
+        "last_valid_full_census_block": 123456,
+    }
+    assert v03_cycle._full_census_due(recent, now, 123457) is False
