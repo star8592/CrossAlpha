@@ -5,11 +5,13 @@ import json
 
 from crossalpha.catalog import build_catalog
 from crossalpha.settings import Settings
+from crossalpha.state.ab_integrity import (
+    strict_state_ab_integrity_report,
+    strict_state_ab_status,
+)
 from crossalpha.state.ab_paper import (
     create_state_ab_snapshot,
     freeze_state_ab_protocol,
-    state_ab_integrity_report,
-    state_ab_status,
     strict_mark_state_ab,
 )
 from crossalpha.state.shadow import build_latest_shadow_state
@@ -73,7 +75,14 @@ def ab_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(json.dumps(state_ab_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            strict_state_ab_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def ab_integrity_main() -> None:
@@ -81,7 +90,7 @@ def ab_integrity_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    report = state_ab_integrity_report(settings.crossalpha_data_dir)
+    report = strict_state_ab_integrity_report(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if not report.get("ok"):
         raise SystemExit("STATE A/B INTEGRITY FAILED")
