@@ -9,7 +9,9 @@ if [[ -f .venv/bin/activate ]]; then
   source .venv/bin/activate
 fi
 
-python -m pip install -e ".[dev]"
+if [[ "${CROSSALPHA_SKIP_EDITABLE_INSTALL:-0}" != "1" ]]; then
+  python -m pip install -e ".[dev]"
+fi
 
 # A must be frozen first; the B experiment freeze references A's immutable hash.
 crossalpha-free-paper-freeze --historical-start 2010-06-01 --historical-end 2026-09-01
