@@ -67,7 +67,7 @@ def test_preflight_splits_indexed_history_from_state_rpc_and_redacts_failures(
     assert report["split_data_plane"] is True
     assert report["archive_rpc_required"] is False
     assert report["borrow_log_source"] == BLOCKSCOUT_LOG_SOURCE
-    assert report["state_rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
+    assert report["state_rpc_source"] == "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"
     assert report["state_rpc_candidate_failures_before_selection"] == {
         "EVM_RPC_URL": "RuntimeError"
     }
