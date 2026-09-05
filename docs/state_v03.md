@@ -47,6 +47,10 @@ health factor using 18 decimals. A zero-debt `uint256.max` health factor is kept
 as unknown/non-finite for distribution purposes rather than coerced into a
 normal borrower value.
 
+The finalized block's chain event time is read independently with
+`eth_getBlockByNumber(finalized_block)` and stored as `block_time`. It is not
+replaced by the collector wall-clock time.
+
 ## RPC policy
 
 `EVM_RPC_URL` is preferred when configured. If it is absent, V0.3 may use the
@@ -58,9 +62,10 @@ No RPC source is accepted merely because it responds to `eth_blockNumber`.
 Before V0.3 can freeze, the live preflight must prove:
 
 1. current block access,
-2. historical `eth_getLogs` access near the Aave V3 Core deployment block,
-3. recent `Borrow` log access,
-4. fixed-block `eth_call` compatibility for `getUserAccountData`.
+2. finalized-block timestamp access via `eth_getBlockByNumber`,
+3. historical `eth_getLogs` access near the Aave V3 Core deployment block,
+4. recent `Borrow` log access,
+5. fixed-block `eth_call` compatibility for `getUserAccountData`.
 
 If any of those fail, V0.3 does not freeze.
 
@@ -98,9 +103,14 @@ A full census is valid only when:
 - failed account-call ratio is <= 1%,
 - each address appears at most once.
 
-The full-census cadence is six hours. A failed/partial census is preserved as an
-operational artifact but is not admitted to the prospective evidence ledger and
-does not advance the last-valid-census timestamp.
+The full-census cadence is six hours **and the finalized block must have advanced
+strictly beyond the previous valid full-census block**. A stalled chain or RPC
+view can therefore never generate a second prospective census for the same
+block merely because six hours elapsed.
+
+A failed/partial census is preserved as an operational artifact but is not
+admitted to the prospective evidence ledger and does not advance the
+last-valid-census timestamp/block.
 
 ## Measured facts
 
@@ -130,9 +140,30 @@ A valid full census creates a fast-refresh watchlist containing addresses with:
 - debt >= $1,000,000.
 
 The watchlist is refreshed on the 15-minute service cadence. It reports only the
-state of those previously selected addresses. It explicitly sets
-`full_market_census_claim_allowed=false` and cannot replace the six-hour full
-census or estimate whole-market debt shares.
+state of those selected addresses and explicitly sets
+`full_market_census_claim_allowed=false`.
+
+A borrower first appearing in a new finalized `Borrow` event after the previous
+full census is added to a **temporary pending-borrower watchlist** immediately.
+It remains there until the next valid full census absorbs it into the complete
+universe. This prevents a newly indebted address from being invisible for up to
+six hours while still preventing a watchlist from pretending to be a full
+market census.
+
+## Point-in-time time model
+
+V0.3 keeps three different clocks:
+
+- `block_time`: when the finalized Ethereum state existed on-chain,
+- `captured_at`: when CrossAlpha sampled all accounts at that block tag,
+- `known_at`: when the immutable prospective record was sealed.
+
+Every prospective record must satisfy:
+
+`block_time <= captured_at <= known_at`
+
+This ordering is independently audited. It prevents collector time from being
+silently substituted for event time.
 
 ## Prospective anti-backfill rules
 
@@ -145,6 +176,7 @@ A full census may enter the prospective ledger only when:
 
 - its `captured_at` is not before freeze,
 - its `known_at` is not before `captured_at`,
+- its on-chain `block_time` is not after `captured_at`,
 - its block is not below the frozen minimum eligible block,
 - bootstrap is complete,
 - full-census coverage gate passes,
@@ -157,7 +189,7 @@ block to fabricate prospective history.
 Records are keyed by finalized block. The same block cannot later be relabeled
 with another summary/detail artifact (`STATE_V03_BLOCK_COLLISION`).
 
-## Hash graph
+## Hash graph and independent recomputation
 
 A prospective record links:
 
@@ -168,18 +200,28 @@ The strict auditor independently verifies:
 - freeze and record seals,
 - predecessor and implementation hashes,
 - record filename/block identity,
-- temporal ordering,
 - minimum block floor,
+- `block_time <= captured_at <= known_at`,
+- monotonic finalized block numbers and block times,
 - summary/detail file hashes,
 - summary protocol and full-census semantics,
+- block-time link between ledger and summary,
 - linked key metrics,
 - unique borrower addresses,
 - candidate count,
 - RPC coverage recomputed from detail rows,
-- active debt recomputed from detail rows.
+- active debt and active borrower count recomputed from detail rows,
+- HF <= 1.00 / 1.05 / 1.20 debt shares recomputed from detail rows,
+- watchlist count recomputed from detail rows,
+- debt-weighted HF p10 / p25 / p50 recomputed from detail rows.
 
-The audit level is
-`STRICT_NON_MUTATING_HASH_GRAPH_WITH_ARTIFACT_RECOMPUTE`.
+This deliberately creates a second calculation path. A coordinated edit that
+changes a summary, updates the ledger's summary hash, and re-seals the ledger
+still fails if the account-detail parquet does not support the claimed metrics.
+
+The audit level is:
+
+`STRICT_HASH_GRAPH_EVENT_TIME_AND_DETAIL_RECOMPUTE`
 
 ## Research maturity gate
 
