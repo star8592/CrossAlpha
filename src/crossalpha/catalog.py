@@ -49,6 +49,18 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     state_v02_glob = state_v02_root / "**" / "*.parquet"
     state_v02_prospective_root = data_root / "research" / "state_v02" / "prospective"
     state_v02_prospective_glob = state_v02_prospective_root / "**" / "state_at=*.json"
+
+    state_v03_root = data_root / "derived" / "state" / "v03"
+    state_v03_universe = state_v03_root / "borrower_universe.parquet"
+    state_v03_full_root = state_v03_root / "full_census"
+    state_v03_full_summary_glob = state_v03_full_root / "**" / "summary_at=*.json"
+    state_v03_full_accounts_glob = state_v03_full_root / "**" / "accounts_at=*.parquet"
+    state_v03_watch_root = state_v03_root / "watchlist"
+    state_v03_watch_summary_glob = state_v03_watch_root / "**" / "summary_at=*.json"
+    state_v03_watch_accounts_glob = state_v03_watch_root / "**" / "accounts_at=*.parquet"
+    state_v03_prospective_root = data_root / "research" / "state_v03" / "prospective"
+    state_v03_prospective_glob = state_v03_prospective_root / "block=*.json"
+
     free_core_returns_root = data_root / "derived" / "core" / "free_v01"
     free_core_returns_glob = free_core_returns_root / "**" / "asset_returns.parquet"
     core_paper_marks_root = data_root / "research" / "free_v01" / "paper" / "marks"
@@ -76,6 +88,12 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "state_engine.shadow_ab_marks",
             "state_engine.v02",
             "state_engine.v02_prospective",
+            "state_engine.v03_borrower_universe",
+            "state_engine.v03_full_census",
+            "state_engine.v03_full_census_accounts",
+            "state_engine.v03_watchlist",
+            "state_engine.v03_watchlist_accounts",
+            "state_engine.v03_prospective",
             "core.free_asset_returns",
             "core.frozen_b3_paper_marks",
         ):
@@ -181,6 +199,48 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 f"SELECT * FROM read_json_auto({_sql_string(state_v02_prospective_glob)})"
             )
             created_views.append("state_engine.v02_prospective")
+
+        if state_v03_universe.exists():
+            con.execute(
+                "CREATE VIEW state_engine.v03_borrower_universe AS "
+                f"SELECT * FROM read_parquet({_sql_string(state_v03_universe)})"
+            )
+            created_views.append("state_engine.v03_borrower_universe")
+
+        if _has_json(state_v03_full_root):
+            con.execute(
+                "CREATE VIEW state_engine.v03_full_census AS "
+                f"SELECT * FROM read_json_auto({_sql_string(state_v03_full_summary_glob)})"
+            )
+            created_views.append("state_engine.v03_full_census")
+        if _has_parquet(state_v03_full_root):
+            con.execute(
+                "CREATE VIEW state_engine.v03_full_census_accounts AS "
+                f"SELECT * FROM read_parquet({_sql_string(state_v03_full_accounts_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("state_engine.v03_full_census_accounts")
+
+        if _has_json(state_v03_watch_root):
+            con.execute(
+                "CREATE VIEW state_engine.v03_watchlist AS "
+                f"SELECT * FROM read_json_auto({_sql_string(state_v03_watch_summary_glob)})"
+            )
+            created_views.append("state_engine.v03_watchlist")
+        if _has_parquet(state_v03_watch_root):
+            con.execute(
+                "CREATE VIEW state_engine.v03_watchlist_accounts AS "
+                f"SELECT * FROM read_parquet({_sql_string(state_v03_watch_accounts_glob)}, "
+                "union_by_name=true, hive_partitioning=true)"
+            )
+            created_views.append("state_engine.v03_watchlist_accounts")
+
+        if _has_json(state_v03_prospective_root):
+            con.execute(
+                "CREATE VIEW state_engine.v03_prospective AS "
+                f"SELECT * FROM read_json_auto({_sql_string(state_v03_prospective_glob)})"
+            )
+            created_views.append("state_engine.v03_prospective")
 
         if _has_parquet(free_core_returns_root):
             con.execute(
