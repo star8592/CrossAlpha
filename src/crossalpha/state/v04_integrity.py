@@ -91,9 +91,11 @@ def strict_state_v04_integrity_report(data_root: Path) -> dict[str, Any]:
         "known_at_not_before_generated_at": True,
         "descriptive_only": True,
         "artifact_hash_links": True,
-        "raw_hash_links": True,
+        "raw_payload_hash_links": True,
+        "raw_compressed_file_hash_links": True,
         "venue_universe_exact": True,
         "venue_pti_ordering": True,
+        "settled_funding_semantics": True,
         "mechanics_recomputed": True,
         "generated_at_unique": True,
         "generated_at_monotonic": True,
@@ -145,12 +147,22 @@ def strict_state_v04_integrity_report(data_root: Path) -> dict[str, Any]:
             continue
         raw_links = row.get("raw_links")
         if not isinstance(raw_links, list) or len(raw_links) != 6:
-            checks["raw_hash_links"] = False
+            checks["raw_payload_hash_links"] = False
+            checks["raw_compressed_file_hash_links"] = False
         else:
             for link in raw_links:
                 path = Path(str(link.get("raw_path", "")))
-                if not path.exists() or link.get("raw_sha256") != prospective.sha256_file(path):
-                    checks["raw_hash_links"] = False
+                if not path.exists():
+                    checks["raw_payload_hash_links"] = False
+                    checks["raw_compressed_file_hash_links"] = False
+                    continue
+                if link.get("raw_sha256") != prospective.sha256_gzip_payload(path):
+                    checks["raw_payload_hash_links"] = False
+                if (
+                    link.get("raw_compressed_file_sha256")
+                    != prospective.sha256_file(path)
+                ):
+                    checks["raw_compressed_file_hash_links"] = False
 
         try:
             mechanics = json.loads(mechanics_path.read_text(encoding="utf-8"))
@@ -173,10 +185,35 @@ def strict_state_v04_integrity_report(data_root: Path) -> dict[str, Any]:
         except Exception:
             checks["venue_pti_ordering"] = False
 
+        required_funding_columns = {
+            "funding_semantics",
+            "funding_rate_settled_raw",
+            "funding_settlement_time",
+            "funding_interval_hours",
+            "funding_rate_8h",
+        }
+        if not required_funding_columns.issubset(venues.columns):
+            checks["settled_funding_semantics"] = False
+        else:
+            semantics = venues["funding_semantics"].astype(str)
+            if not semantics.eq(v04.FUNDING_SEMANTICS).all():
+                checks["settled_funding_semantics"] = False
+            intervals = pd.to_numeric(venues["funding_interval_hours"], errors="coerce")
+            normalized = pd.to_numeric(venues["funding_rate_8h"], errors="coerce")
+            settled_raw = pd.to_numeric(venues["funding_rate_settled_raw"], errors="coerce")
+            comparable = normalized.notna()
+            if (
+                (comparable & ~intervals.gt(0)).any()
+                or (comparable & settled_raw.isna()).any()
+                or (comparable & venues["funding_settlement_time"].isna()).any()
+            ):
+                checks["settled_funding_semantics"] = False
+
         recomputed = v04.compute_market_mechanics(venues, generated_at=generated)
         if (
             mechanics.get("protocol") != v04.PROTOCOL
             or mechanics.get("generated_at") != generated.isoformat()
+            or mechanics.get("funding_semantics") != v04.FUNDING_SEMANTICS
             or mechanics.get("no_composite_stress_score") is not True
             or mechanics.get("data_confidence") != recomputed.get("data_confidence")
         ):
@@ -211,7 +248,7 @@ def strict_state_v04_integrity_report(data_root: Path) -> dict[str, Any]:
 
     return {
         "protocol": prospective.PROSPECTIVE_PROTOCOL,
-        "audit_level": "STRICT_RAW_TO_VECTOR_RECOMPUTE",
+        "audit_level": "STRICT_RAW_PAYLOAD_AND_COMPRESSED_TO_VECTOR_RECOMPUTE",
         "frozen": True,
         "ok": all(checks.values()),
         "observation_count": len(records),
@@ -266,6 +303,7 @@ def strict_state_v04_status(data_root: Path) -> dict[str, Any]:
         "frozen_at": freeze["frozen_at"],
         "actionability": v04.ACTIONABILITY,
         "risk_multiplier": None,
+        "funding_semantics": v04.FUNDING_SEMANTICS,
         "no_composite_stress_score": True,
         "observation_count": len(records),
         "prospective_calendar_days": days,
