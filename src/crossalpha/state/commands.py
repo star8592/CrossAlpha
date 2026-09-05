@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from crossalpha.catalog import build_catalog
 from crossalpha.core.free_paper import paper_status
@@ -17,6 +19,13 @@ from crossalpha.state.ab_paper import (
     strict_mark_state_ab,
 )
 from crossalpha.state.shadow import build_latest_shadow_state
+from crossalpha.state.v02 import build_latest_state_v02, config_consistency_report
+from crossalpha.state.v02_cycle import run_state_v02_cycle, write_cycle_health
+from crossalpha.state.v02_prospective import (
+    freeze_state_v02,
+    state_v02_integrity_report,
+    state_v02_status,
+)
 
 
 def shadow_main() -> None:
@@ -112,3 +121,61 @@ def ab_integrity_main() -> None:
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if not report.get("ok"):
         raise SystemExit("STATE A/B INTEGRITY FAILED")
+
+
+def v02_describe_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-describe")
+    parser.add_argument("--write", action="store_true", help="Materialize a derived V0.2 parquet row")
+    args = parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = build_latest_state_v02(settings.crossalpha_data_dir, write=args.write)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v02_config_check_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-config-check")
+    parser.parse_args()
+    report = config_consistency_report(Path("config/state_v02.yaml"))
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    if not report.get("ok"):
+        raise SystemExit("STATE V0.2 CONFIG CONSISTENCY FAILED")
+
+
+def v02_freeze_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-freeze")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = freeze_state_v02(settings.crossalpha_data_dir)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v02_cycle_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-cycle")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = asyncio.run(run_state_v02_cycle(settings))
+    health = write_cycle_health(settings.crossalpha_data_dir, report)
+    report = {**report, "cycle_health_file": str(health)}
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+def v02_integrity_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-integrity")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    report = state_v02_integrity_report(settings.crossalpha_data_dir)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    if not report.get("ok"):
+        raise SystemExit("STATE V0.2 PROSPECTIVE INTEGRITY FAILED")
+
+
+def v02_status_main() -> None:
+    parser = argparse.ArgumentParser(prog="crossalpha-state-v02-status")
+    parser.parse_args()
+    settings = Settings()
+    settings.ensure_dirs()
+    print(json.dumps(state_v02_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
