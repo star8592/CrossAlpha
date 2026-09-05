@@ -21,6 +21,7 @@ RUNTIME_SCRIPTS = (
     "scripts/finalize_state_v02_milestone_once.sh",
     "scripts/finalize_state_v03_milestone_once.sh",
     "scripts/finalize_crossalpha_research_stack_once.sh",
+    "scripts/resume_crossalpha_after_v03_rpc_fix_once.sh",
 )
 
 
