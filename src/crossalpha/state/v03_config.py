@@ -42,7 +42,11 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "no_v02_mutation": raw.get("research_policy", {}).get("mutates_state_v02") is False,
         "no_parameter_optimization": raw.get("research_policy", {}).get("parameter_optimization_allowed") is False,
         "no_backfill": raw.get("research_policy", {}).get("retrospective_prospective_backfill_allowed") is False,
+        "no_auto_actionability": raw.get("research_policy", {}).get("automatic_actionability_allowed") is False,
         "historical_bootstrap_not_evidence": raw.get("research_policy", {}).get("historical_bootstrap_is_evidence") is False,
+        "rpc_env": source.get("rpc_env") == "EVM_RPC_URL",
+        "zero_cost": source.get("required_data_cost_usd") == 0,
+        "rpc_policy": source.get("rpc_policy") == "USER_SUPPLIED_ZERO_COST_OR_LOCAL_ONLY",
         "pool_address": str(source.get("aave_v3_core_pool", "")).lower()
         == v03_rpc.AAVE_V3_ETHEREUM_CORE_POOL.lower(),
         "deployment_block": source.get("deployment_block") == v03_rpc.AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
@@ -55,13 +59,20 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "bootstrap_chunk": universe.get("bootstrap_chunk_blocks") == v03_cycle.BOOTSTRAP_CHUNK_BLOCKS,
         "bootstrap_chunks_per_cycle": universe.get("max_bootstrap_chunks_per_cycle")
         == v03_cycle.MAX_BOOTSTRAP_CHUNKS_PER_CYCLE,
-        "adaptive_minimum_span": universe.get("adaptive_minimum_span_blocks") == 256,
+        "adaptive_minimum_span": universe.get("adaptive_minimum_span_blocks")
+        == v03_cycle.ADAPTIVE_MINIMUM_SPAN_BLOCKS,
         "finality_lag": universe.get("finality_lag_blocks") == v03_cycle.FINALITY_LAG_BLOCKS,
+        "candidate_identity": universe.get("identity") == "Borrow.onBehalfOf",
+        "reorg_candidate_policy": universe.get("reorg_false_positive_policy")
+        == "retain_candidate_then_filter_by_current_debt",
+        "current_active_definition": universe.get("current_active_definition") == "total_debt_base_gt_0",
         "batch_size": census.get("rpc_batch_size") == v03_rpc.RpcPolicy().batch_size,
         "failed_call_ratio": census.get("maximum_failed_call_ratio_for_valid_census")
         == policy.maximum_failed_call_ratio,
         "full_census_cadence": census.get("full_census_cadence_minutes")
         == v03_cycle.FULL_CENSUS_CADENCE_MINUTES,
+        "watchlist_cadence": census.get("watchlist_cadence_minutes")
+        == v03_cycle.WATCHLIST_CADENCE_MINUTES,
         "watchlist_hf": census.get("watchlist_health_factor_max")
         == policy.watchlist_health_factor_max,
         "watchlist_debt": census.get("watchlist_debt_usd_min") == policy.watchlist_debt_usd_min,
@@ -73,6 +84,7 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
             for pair in cliff.get("hf_bands", [])
         )
         == v03.HF_BANDS,
+        "no_liquidation_price_claim": cliff.get("no_single_asset_liquidation_price_claim") is True,
         "prospective_gate": gate == frozen_gate,
         "prospective_protocol_name": v03_prospective.PROSPECTIVE_PROTOCOL
         == "CROSSALPHA_STATE_V0_3_PROSPECTIVE",
