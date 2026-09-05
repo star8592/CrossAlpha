@@ -111,7 +111,14 @@ def ab_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(json.dumps(strict_state_ab_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            strict_state_ab_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def ab_integrity_main() -> None:
@@ -163,7 +170,14 @@ def v02_cycle_main() -> None:
     settings.ensure_dirs()
     report = asyncio.run(run_state_v02_cycle(settings))
     health = write_cycle_health(settings.crossalpha_data_dir, report)
-    print(json.dumps({**report, "cycle_health_file": str(health)}, ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            {**report, "cycle_health_file": str(health)},
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def v02_integrity_main() -> None:
@@ -182,7 +196,14 @@ def v02_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(json.dumps(strict_state_v02_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            strict_state_v02_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def v03_config_check_main() -> None:
@@ -202,6 +223,14 @@ async def _v03_preflight(settings: Settings) -> dict[str, object]:
     )
     latest = await rpc.latest_block()
     finalized = max(latest - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    finalized_block_time = await rpc.block_timestamp(finalized)
+    block_time = pd.Timestamp(finalized_block_time)
+    block_time = (
+        block_time.tz_localize("UTC") if block_time.tzinfo is None else block_time.tz_convert("UTC")
+    )
+    now = pd.Timestamp(datetime.now(timezone.utc))
+    if block_time > now:
+        raise RuntimeError("finalized block timestamp is in the future")
     recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
     recent_logs = await rpc.borrow_logs(recent_from, finalized)
     historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
@@ -216,6 +245,8 @@ async def _v03_preflight(settings: Settings) -> dict[str, object]:
         "rpc_source": rpc_source,
         "latest_block": latest,
         "finalized_block": finalized,
+        "finalized_block_time": block_time.isoformat(),
+        "block_time_source": "eth_getBlockByNumber(finalized_block)",
         "finality_lag_blocks": FINALITY_LAG_BLOCKS,
         "recent_borrow_scan_from_block": recent_from,
         "recent_borrow_scan_to_block": finalized,
@@ -283,4 +314,11 @@ def v03_status_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
-    print(json.dumps(strict_state_v03_status(settings.crossalpha_data_dir), ensure_ascii=False, indent=2, default=str))
+    print(
+        json.dumps(
+            strict_state_v03_status(settings.crossalpha_data_dir),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
