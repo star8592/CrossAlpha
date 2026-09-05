@@ -32,10 +32,12 @@ borrower_universe:
   identity: Borrow.onBehalfOf
   bootstrap_start_block: 16291127
   bootstrap_chunk_blocks: 25000
-  live_overlap_blocks: 128
+  max_bootstrap_chunks_per_cycle: 8
+  adaptive_minimum_span_blocks: 256
   finality_lag_blocks: 64
   bootstrap_required_before_full_census_claim: true
   never_delete_historical_candidate_addresses: true
+  reorg_false_positive_policy: retain_candidate_then_filter_by_current_debt
   current_active_definition: total_debt_base_gt_0
 census:
   rpc_batch_size: 100
@@ -63,6 +65,8 @@ prospective_gate:
   minimum_calendar_days_before_O2_candidate: 180
   minimum_valid_full_censuses: 120
   minimum_distinct_cliff_stress_episodes: 5
+  cliff_episode_critical_debt_share_threshold: 0.05
+  cliff_episode_cooldown_hours: 24
   requires_complete_borrower_bootstrap: true
   requires_outcome_linkage_test: true
   requires_predeclared_O2_rule: true
