@@ -15,6 +15,7 @@ from crossalpha.state import v04
 PROSPECTIVE_PROTOCOL = "CROSSALPHA_STATE_V0_4_PROSPECTIVE"
 FREEZE_SCHEMA_VERSION = 1
 MAX_LIVE_WRITE_AGE_SECONDS = 180
+INVALID_GZIP_PAYLOAD_SHA256 = "__INVALID_GZIP_PAYLOAD__"
 
 
 def _repo_root() -> Path:
@@ -70,10 +71,19 @@ def sha256_file(path: Path) -> str:
 
 
 def sha256_gzip_payload(path: Path) -> str:
+    """Hash the decompressed raw envelope without letting corruption crash an audit.
+
+    Live writers compare this return value with a 64-hex SHA and therefore reject
+    the sentinel below. Integrity auditors can likewise record a false hash check
+    instead of raising gzip.BadGzipFile/EOFError on intentionally tampered evidence.
+    """
     digest = hashlib.sha256()
-    with gzip.open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+    try:
+        with gzip.open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except (gzip.BadGzipFile, EOFError, OSError):
+        return INVALID_GZIP_PAYLOAD_SHA256
     return digest.hexdigest()
 
 
@@ -173,6 +183,7 @@ def freeze_state_v04(data_root: Path, *, now: Any | None = None) -> dict[str, An
         "parameter_optimization_allowed": False,
         "automatic_actionability_allowed": False,
         "no_composite_stress_score": True,
+        "funding_semantics": v04.FUNDING_SEMANTICS,
         "implementation_file_sha256": implementation_hashes(),
         "reference_freezes": references,
         "promotion_gate": {
