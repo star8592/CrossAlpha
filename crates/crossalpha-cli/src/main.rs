@@ -28,11 +28,25 @@ enum Command {
     ManifestRebuild { data_root: PathBuf },
     /// Compare Python and Rust rebuilds from the same immutable audit ledger.
     ManifestParity { data_root: PathBuf },
-    /// Run Rust Observatory health checks and optionally write observatory_health.json.
+    /// Run the full Rust Observatory health scan.
     ObservatoryHealth {
         data_root: PathBuf,
         #[arg(long, default_value_t = 300)]
         expected_interval: u64,
+        #[arg(long, default_value_t = 900)]
+        stale_after: u64,
+        #[arg(long)]
+        no_verify_latest: bool,
+        /// Fixed RFC3339 timestamp for deterministic Python/Rust parity tests.
+        #[arg(long)]
+        now: Option<String>,
+        /// Do not update manifests/observatory_health.json.
+        #[arg(long)]
+        no_write_report: bool,
+    },
+    /// Run the O(1)-per-series Rust live health watchdog path.
+    ObservatoryLiveHealth {
+        data_root: PathBuf,
         #[arg(long, default_value_t = 900)]
         stale_after: u64,
         #[arg(long)]
@@ -57,6 +71,23 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Run the native Tokio Observatory collector/watchdog loop.
+    ObservatoryRun {
+        data_root: PathBuf,
+        /// Source to collect. Repeat for multiple sources. Defaults to both.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        #[arg(long, default_value_t = 300)]
+        interval: u64,
+        #[arg(long, default_value_t = 120)]
+        collector_timeout: u64,
+        #[arg(long, default_value_t = 30.0)]
+        http_timeout: f64,
+        #[arg(long, default_value_t = 3)]
+        max_consecutive_failures: u32,
+        #[arg(long, default_value_t = 900)]
+        stale_after: u64,
+    },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -79,8 +110,8 @@ async fn main() -> Result<()> {
         }
         Command::ManifestCheck { data_root } => {
             let records = crossalpha_storage::read_audit_manifest(&data_root)?;
-            let first = records.first().map(|r| r.observed_at.to_rfc3339());
-            let latest = records.last().map(|r| r.observed_at.to_rfc3339());
+            let first = records.first().map(|record| record.observed_at.to_rfc3339());
+            let latest = records.last().map(|record| record.observed_at.to_rfc3339());
             println!(
                 "ok=true records={} first={} latest={} data_root={}",
                 records.len(),
@@ -143,37 +174,92 @@ async fn main() -> Result<()> {
                 anyhow::bail!("OBSERVATORY HEALTH FAILED");
             }
         }
+        Command::ObservatoryLiveHealth {
+            data_root,
+            stale_after,
+            no_verify_latest,
+            now,
+            no_write_report,
+        } => {
+            let now = parse_optional_rfc3339(now.as_deref())?;
+            let report = crossalpha_observatory::observatory_live_health(
+                &data_root,
+                stale_after,
+                !no_verify_latest,
+                now,
+            )?;
+            if !no_write_report {
+                let report_path = crossalpha_observatory::write_json_report(
+                    &data_root,
+                    "observatory_health.json",
+                    &report,
+                )?;
+                eprintln!("report={}", report_path.display());
+            }
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report
+                .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                anyhow::bail!("OBSERVATORY LIVE HEALTH FAILED");
+            }
+        }
         Command::ObservatoryCollect {
             data_root,
             sources,
             timeout,
             dry_run,
         } => {
-            if !timeout.is_finite() || timeout <= 0.0 {
-                anyhow::bail!("--timeout must be a finite positive number");
-            }
+            let timeout = positive_duration(timeout, "--timeout")?;
             let sources = crossalpha_observatory::parse_sources(&sources)?;
-            let timeout = Duration::from_secs_f64(timeout);
             let client = crossalpha_observatory::ProviderClient::new(timeout)?;
-            let envelopes = client.collect_many(&sources).await?;
 
             if dry_run {
+                let envelopes = client.collect_many(&sources).await?;
                 println!("{}", serde_json::to_string_pretty(&envelopes)?);
             } else {
-                let store = crossalpha_storage::RawSnapshotStore::new(data_root.clone());
-                for envelope in &envelopes {
-                    let manifest = store.write(envelope)?;
-                    println!("{}", serde_json::to_string(&manifest)?);
+                let manifests = client.collect_and_store(&sources, &data_root).await?;
+                for manifest in &manifests {
+                    println!("{}", serde_json::to_string(manifest)?);
                 }
             }
         }
+        Command::ObservatoryRun {
+            data_root,
+            sources,
+            interval,
+            collector_timeout,
+            http_timeout,
+            max_consecutive_failures,
+            stale_after,
+        } => {
+            let sources = crossalpha_observatory::parse_sources(&sources)?;
+            let config = crossalpha_observatory::SupervisorConfig {
+                data_root,
+                sources,
+                interval: Duration::from_secs(interval),
+                collector_timeout: Duration::from_secs(collector_timeout.max(1)),
+                http_timeout: positive_duration(http_timeout, "--http-timeout")?,
+                max_consecutive_failures: max_consecutive_failures.max(1),
+                stale_after_seconds: stale_after,
+            };
+            crossalpha_observatory::run_supervisor_until_shutdown(config).await?;
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R2.3 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented collector_write_gate=dry-run-required python_compat=true"
+                "phase=R2.4 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented live_health=implemented supervisor=implemented collector_write_gate=dry-run-required live_health_parity_gate=required systemd_cutover=false python_compat=true"
             );
         }
     }
     Ok(())
+}
+
+fn positive_duration(seconds: f64, flag: &str) -> Result<Duration> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        anyhow::bail!("{flag} must be a finite positive number");
+    }
+    Ok(Duration::from_secs_f64(seconds))
 }
 
 fn parse_optional_rfc3339(raw: Option<&str>) -> Result<Option<DateTime<Utc>>> {
