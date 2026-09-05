@@ -1,6 +1,7 @@
 pub mod health;
 pub mod live_health;
 pub mod providers;
+pub mod report;
 
 pub use health::DEFAULT_EXPECTED_SERIES;
 pub use health::ObservatoryHealthReport;
@@ -15,3 +16,4 @@ pub use providers::HYPERLIQUID_URL;
 pub use providers::ProviderClient;
 pub use providers::ProviderSource;
 pub use providers::parse_sources;
+pub use report::write_json_report;
