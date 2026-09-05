@@ -14,9 +14,12 @@ ACTIVATE=false
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/cutover_rust_observatory_service.sh --activate [--data-root PATH]
+  bash scripts/cutover_rust_observatory_service.sh --activate [--data-root PATH]
 
-This command is intentionally guarded. It will:
+This command is intentionally guarded. Invoke it through `bash` so it works even
+when the repository checkout does not preserve the executable bit.
+
+It will:
   1. build the release Rust binary;
   2. run the isolated shadow-write gate against that release binary;
   3. require the current real Observatory to be healthy;
