@@ -19,7 +19,8 @@ from crossalpha.state.ab_paper import (
     strict_mark_state_ab,
 )
 from crossalpha.state.shadow import build_latest_shadow_state
-from crossalpha.state.v02 import build_latest_state_v02, config_consistency_report
+from crossalpha.state.v02 import build_latest_state_v02
+from crossalpha.state.v02_config import strict_v02_config_consistency_report
 from crossalpha.state.v02_cycle import run_state_v02_cycle, write_cycle_health
 from crossalpha.state.v02_integrity import (
     strict_state_v02_integrity_report,
@@ -136,10 +137,10 @@ def v02_describe_main() -> None:
 def v02_config_check_main() -> None:
     parser = argparse.ArgumentParser(prog="crossalpha-state-v02-config-check")
     parser.parse_args()
-    report = config_consistency_report(Path("config/state_v02.yaml"))
+    report = strict_v02_config_consistency_report(Path("config/state_v02.yaml"))
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if not report.get("ok"):
-        raise SystemExit("STATE V0.2 CONFIG CONSISTENCY FAILED")
+        raise SystemExit("STATE V0.2 STRICT CONFIG CONSISTENCY FAILED")
 
 
 def v02_freeze_main() -> None:
@@ -147,6 +148,9 @@ def v02_freeze_main() -> None:
     parser.parse_args()
     settings = Settings()
     settings.ensure_dirs()
+    consistency = strict_v02_config_consistency_report(Path("config/state_v02.yaml"))
+    if not consistency.get("ok"):
+        raise SystemExit("STATE V0.2 FREEZE REFUSED: strict config consistency failed")
     report = freeze_state_v02(settings.crossalpha_data_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
