@@ -44,9 +44,11 @@ census:
   rpc_batch_size: 100
   maximum_failed_call_ratio_for_valid_census: 0.01
   full_census_cadence_minutes: 360
+  full_census_requires_new_finalized_block: true
   watchlist_cadence_minutes: 15
   watchlist_health_factor_max: 1.50
   watchlist_debt_usd_min: 1000000
+  new_borrower_between_full_censuses_policy: include_in_temporary_watchlist_until_next_valid_full_census
   health_factor_scale_decimals: 18
   thresholds: [1.00, 1.02, 1.05, 1.10, 1.20, 1.50]
   debt_weighted_metrics: true
