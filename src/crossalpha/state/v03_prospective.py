@@ -31,6 +31,11 @@ def _record_path(data_root: Path, block_number: int) -> Path:
     return _research_root(data_root) / "prospective" / f"block={int(block_number)}.json"
 
 
+def _utc(value: Any) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(
         value,
@@ -124,6 +129,12 @@ def freeze_state_v03(
     if int(minimum_eligible_block) < 0:
         raise ValueError("minimum_eligible_block must be non-negative")
 
+    from crossalpha.state.v03_config import strict_v03_config_report
+
+    config_report = strict_v03_config_report(_repo_root() / "config" / "state_v03.yaml")
+    if not config_report.get("ok"):
+        raise ValueError(f"State V0.3 config/implementation mismatch: {config_report}")
+
     references: dict[str, dict[str, str]] = {}
     for name, reference in _reference_paths(data_root).items():
         if not reference.exists():
@@ -132,11 +143,7 @@ def freeze_state_v03(
             )
         references[name] = {"path": str(reference), "file_sha256": sha256_file(reference)}
 
-    frozen_at = pd.Timestamp(now or datetime.now(timezone.utc))
-    if frozen_at.tzinfo is None:
-        frozen_at = frozen_at.tz_localize("UTC")
-    else:
-        frozen_at = frozen_at.tz_convert("UTC")
+    frozen_at = _utc(now or datetime.now(timezone.utc))
     payload = {
         "schema_version": FREEZE_SCHEMA_VERSION,
         "protocol": PROSPECTIVE_PROTOCOL,
@@ -203,7 +210,6 @@ def hashes_unchanged(data_root: Path, freeze: dict[str, Any]) -> tuple[bool, dic
 
 def write_full_census_observation(
     data_root: Path,
-    summary: dict[str, Any],
     *,
     summary_path: Path,
     detail_path: Path,
@@ -213,23 +219,31 @@ def write_full_census_observation(
     hashes_ok, details = hashes_unchanged(data_root, freeze)
     if not hashes_ok:
         raise RuntimeError(f"STATE_V03_HASH_GRAPH_MUTATED: {details}")
+    if not summary_path.exists() or not detail_path.exists():
+        raise FileNotFoundError("full census summary/detail artifact missing")
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("protocol") != v03.PROTOCOL:
-        raise ValueError("full census summary is not State V0.3")
+        raise ValueError("full census artifact is not State V0.3")
     if summary.get("actionability") != v03.ACTIONABILITY or summary.get("risk_multiplier") is not None:
         raise ValueError("State V0.3 prospective ledger accepts descriptive-only censuses")
     if not summary.get("bootstrap_complete") or not summary.get("valid_full_census"):
         raise ValueError("prospective State V0.3 requires a valid complete full census")
-    if not summary_path.exists() or not detail_path.exists():
-        raise FileNotFoundError("full census summary/detail artifact missing")
+    if Path(str(summary.get("detail_path", ""))) != detail_path:
+        raise ValueError("full census summary points to a different detail artifact")
+    detail_hash = sha256_file(detail_path)
+    if summary.get("detail_sha256") != detail_hash:
+        raise ValueError("full census detail hash does not match its summary artifact")
 
-    current = pd.Timestamp(known_at or datetime.now(timezone.utc))
-    if current.tzinfo is None:
-        current = current.tz_localize("UTC")
-    else:
-        current = current.tz_convert("UTC")
-    frozen_at = pd.Timestamp(freeze["frozen_at"])
+    current = _utc(known_at or datetime.now(timezone.utc))
+    frozen_at = _utc(freeze["frozen_at"])
+    captured = _utc(summary["captured_at"])
     if current < frozen_at:
         raise ValueError("prospective census known_at cannot predate State V0.3 freeze")
+    if captured < frozen_at:
+        raise ValueError("prospective census captured_at cannot predate State V0.3 freeze")
+    if current < captured:
+        raise ValueError("prospective census known_at cannot precede captured_at")
 
     block_number = int(summary["block_number"])
     minimum_block = int(freeze["minimum_eligible_block"])
@@ -244,13 +258,13 @@ def write_full_census_observation(
         "state_protocol": v03.PROTOCOL,
         "freeze_record_sha256": freeze["record_sha256"],
         "known_at": current.isoformat(),
-        "captured_at": summary["captured_at"],
+        "captured_at": captured.isoformat(),
         "block_number": block_number,
         "minimum_eligible_block": minimum_block,
         "summary_path": str(summary_path),
         "summary_sha256": sha256_file(summary_path),
         "detail_path": str(detail_path),
-        "detail_sha256": sha256_file(detail_path),
+        "detail_sha256": detail_hash,
         "actionability": v03.ACTIONABILITY,
         "risk_multiplier": None,
         "candidate_address_count": summary.get("candidate_address_count"),
