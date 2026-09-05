@@ -250,7 +250,7 @@ async fn main() -> Result<()> {
         }
         Command::MigrationStatus => {
             println!(
-                "phase=R2.5 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented collector_dry_run_gate=passed live_health=production-compatible live_health_parity_gate=passed supervisor=implemented shadow_write_gate=required systemd_cutover=false python_compat=true"
+                "phase=R2.5 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented collector_dry_run_gate=passed live_health=production-compatible live_health_parity_gate=passed supervisor=implemented shadow_write_gate=passed cutover_ready=true systemd_cutover=false python_compat=true"
             );
         }
     }
