@@ -15,10 +15,10 @@ fi
 
 python - <<'PY'
 from crossalpha.settings import Settings
-from crossalpha.state.v03_rpc import resolve_rpc_url
+from crossalpha.state.v03_rpc import resolve_rpc_candidates
 settings = Settings()
-_, source = resolve_rpc_url(settings.evm_rpc_url)
-print(f"State V0.3 RPC source: {source}")
+labels = [source for _url, source in resolve_rpc_candidates(settings.evm_rpc_url)]
+print("State V0.3 capability-probed RPC candidates: " + " -> ".join(labels))
 PY
 
 UNIT_DIR="$HOME/.config/systemd/user"
@@ -42,7 +42,7 @@ cat > "$UNIT_DIR/crossalpha-state-v03.timer" <<'EOF'
 Description=Advance CrossAlpha State V0.3 borrower-risk shadow every 15 minutes
 
 [Timer]
-OnBootSec=4min
+OnActiveSec=15min
 OnUnitActiveSec=15min
 AccuracySec=30s
 Unit=crossalpha-state-v03.service
@@ -56,5 +56,6 @@ systemctl --user enable --now crossalpha-state-v03.timer
 
 echo "Installed: $UNIT_DIR/crossalpha-state-v03.service"
 echo "Installed: $UNIT_DIR/crossalpha-state-v03.timer"
+echo "First automatic cycle: approximately 15 minutes after timer activation"
 echo "Status:    systemctl --user status crossalpha-state-v03.timer --no-pager"
 echo "Logs:      journalctl --user -u crossalpha-state-v03.service -n 100 --no-pager"
