@@ -11,13 +11,13 @@ from crossalpha.state.v03_logs import (
     BLOCKSCOUT_LOG_SOURCE,
     BlockscoutBorrowLogProvider,
     BorrowLogPolicy,
+    resolve_state_rpc_candidates,
 )
 from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_CORE_POOL,
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
     AaveBorrowerRpc,
     RpcPolicy,
-    resolve_rpc_candidates,
 )
 
 
@@ -37,7 +37,7 @@ async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
         ) from exc
 
     attempts: dict[str, str] = {}
-    for rpc_url, rpc_source in resolve_rpc_candidates(settings.evm_rpc_url):
+    for rpc_url, rpc_source in resolve_state_rpc_candidates(settings.evm_rpc_url):
         rpc = AaveBorrowerRpc(
             rpc_url,
             policy=RpcPolicy(batch_size=100, timeout_seconds=settings.crossalpha_http_timeout),
