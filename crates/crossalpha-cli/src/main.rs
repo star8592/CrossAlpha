@@ -24,7 +24,7 @@ enum Command {
     ManifestCheck { data_root: PathBuf },
     /// Rebuild daily and series indexes from the immutable audit manifest.
     ManifestRebuild { data_root: PathBuf },
-    /// Compare Python-produced indexes with a Rust rebuild in a temporary directory.
+    /// Compare Python and Rust rebuilds from the same immutable audit ledger.
     ManifestParity { data_root: PathBuf },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
         }
         Command::MigrationStatus => {
             println!(
-                "phase=R1 storage=implemented manifest_read=true manifest_rebuild=true manifest_parity=true python_compat=true"
+                "phase=R1 storage=implemented manifest_read=true manifest_rebuild=true parity_gate=required python_compat=true"
             );
         }
     }
