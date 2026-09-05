@@ -11,6 +11,7 @@ import pandas as pd
 from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v04 import compute_market_mechanics
+from crossalpha.state.v04_config import strict_v04_config_report
 from crossalpha.state.v04_prospective import freeze_path, write_live_observation
 from crossalpha.state.v04_provider import parse_venue_snapshot
 from crossalpha.state.v04_safe_provider import FaultIsolatedMultiVenueCollector
@@ -51,6 +52,9 @@ def _latest_observed(payload: dict[str, Any], fallback: pd.Timestamp) -> pd.Time
 async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict[str, Any]:
     """Collect and materialize one zero-cost multi-venue mechanics observation."""
     settings.ensure_dirs()
+    config = strict_v04_config_report(Path("config/state_v04.yaml"))
+    if not config.get("ok"):
+        raise RuntimeError(f"State V0.4 runtime config/implementation drift: {config}")
     data_root = settings.crossalpha_data_dir
     collected_at = pd.Timestamp(datetime.now(timezone.utc))
     collector = FaultIsolatedMultiVenueCollector(timeout=settings.crossalpha_http_timeout)
