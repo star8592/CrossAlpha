@@ -90,11 +90,58 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
         ]
     ).to_parquet(core_dir / "asset_returns.parquet", index=False)
 
+    a_marks = (
+        tmp_path
+        / "research"
+        / "free_v01"
+        / "paper"
+        / "marks"
+        / "year=2026"
+        / "month=09"
+    )
+    a_marks.mkdir(parents=True)
+    (a_marks / "date=2026-09-07.json").write_text(
+        json.dumps(
+            {
+                "paper_protocol": "CROSSALPHA_FREE_V0_1_PAPER",
+                "date": "2026-09-07",
+                "net_return": 0.01,
+                "record_sha256": "a" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    b_marks = (
+        tmp_path
+        / "research"
+        / "free_v01"
+        / "state_ab_v01"
+        / "marks"
+        / "year=2026"
+        / "month=09"
+    )
+    b_marks.mkdir(parents=True)
+    (b_marks / "date=2026-09-07.json").write_text(
+        json.dumps(
+            {
+                "protocol": "CROSSALPHA_STATE_AB_V0_1",
+                "date": "2026-09-07",
+                "net_return": 0.008,
+                "shadow_risk_multiplier": 0.75,
+                "record_sha256": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+
     result = build_catalog(tmp_path)
     assert "observatory.raw_manifest" in result["views"]
     assert "observatory.hyperliquid_asset_contexts" in result["views"]
     assert "state_engine.shadow_v01" in result["views"]
     assert "core.free_asset_returns" in result["views"]
+    assert "core.frozen_b3_paper_marks" in result["views"]
+    assert "state_engine.shadow_ab_marks" in result["views"]
 
     con = duckdb.connect(result["database"], read_only=True)
     try:
@@ -111,5 +158,13 @@ def test_build_catalog_creates_queryable_views(tmp_path: Path) -> None:
             "SELECT economic_asset, symbol, return FROM core.free_asset_returns"
         ).fetchone()
         assert core_row == ("US_EQUITY", "SPY", 0.01)
+        a_row = con.execute(
+            "SELECT paper_protocol, net_return FROM core.frozen_b3_paper_marks"
+        ).fetchone()
+        assert a_row == ("CROSSALPHA_FREE_V0_1_PAPER", 0.01)
+        b_row = con.execute(
+            "SELECT protocol, net_return, shadow_risk_multiplier FROM state_engine.shadow_ab_marks"
+        ).fetchone()
+        assert b_row == ("CROSSALPHA_STATE_AB_V0_1", 0.008, 0.75)
     finally:
         con.close()
