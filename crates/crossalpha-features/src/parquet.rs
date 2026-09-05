@@ -6,7 +6,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use chrono::SecondsFormat;
 use parquet::arrow::ArrowWriter;
 use serde_json::Value;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -460,8 +460,11 @@ fn write_batch_atomic(path: &Path, fields: Vec<Field>, arrays: Vec<ArrayRef>) ->
     let mut writer = ArrowWriter::try_new(file, schema, None)?;
     writer.write(&batch)?;
     writer.close()?;
-    File::open(&tmp)?.sync_all()?;
+    OpenOptions::new().write(true).open(&tmp)?.sync_all()?;
     fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 
