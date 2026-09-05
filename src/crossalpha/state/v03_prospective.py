@@ -239,12 +239,17 @@ def write_full_census_observation(
     current = _utc(known_at or datetime.now(timezone.utc))
     frozen_at = _utc(freeze["frozen_at"])
     captured = _utc(summary["captured_at"])
+    if summary.get("block_time") is None:
+        raise ValueError("prospective census requires finalized block_time")
+    block_time = _utc(summary["block_time"])
     if current < frozen_at:
         raise ValueError("prospective census known_at cannot predate State V0.3 freeze")
     if captured < frozen_at:
         raise ValueError("prospective census captured_at cannot predate State V0.3 freeze")
     if current < captured:
         raise ValueError("prospective census known_at cannot precede captured_at")
+    if block_time > captured:
+        raise ValueError("prospective census block_time cannot follow captured_at")
 
     block_number = int(summary["block_number"])
     minimum_block = int(freeze["minimum_eligible_block"])
@@ -260,6 +265,7 @@ def write_full_census_observation(
         "freeze_record_sha256": freeze["record_sha256"],
         "known_at": current.isoformat(),
         "captured_at": captured.isoformat(),
+        "block_time": block_time.isoformat(),
         "block_number": block_number,
         "minimum_eligible_block": minimum_block,
         "summary_path": str(summary_path),
