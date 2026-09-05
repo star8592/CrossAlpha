@@ -98,8 +98,7 @@ async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
                 consecutive_failures = consecutive_failures.saturating_add(1);
                 error!(
                     timeout_seconds = config.collector_timeout.as_secs_f64(),
-                    consecutive_failures,
-                    "Observatory collector timed out"
+                    consecutive_failures, "Observatory collector timed out"
                 );
                 124u32
             }
