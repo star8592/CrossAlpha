@@ -15,10 +15,10 @@ fi
 
 python - <<'PY'
 from crossalpha.settings import Settings
+from crossalpha.state.v03_rpc import resolve_rpc_url
 settings = Settings()
-if not settings.evm_rpc_url:
-    raise SystemExit("EVM_RPC_URL is required before installing State V0.3 service")
-print("EVM_RPC_URL configured: yes")
+_, source = resolve_rpc_url(settings.evm_rpc_url)
+print(f"State V0.3 RPC source: {source}")
 PY
 
 UNIT_DIR="$HOME/.config/systemd/user"
