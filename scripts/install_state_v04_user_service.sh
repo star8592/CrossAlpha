@@ -34,7 +34,7 @@ cat > "$UNIT_DIR/crossalpha-state-v04.timer" <<'EOF'
 Description=Collect CrossAlpha State V0.4 multi-venue mechanics every 5 minutes
 
 [Timer]
-OnBootSec=2min
+OnActiveSec=5min
 OnUnitActiveSec=5min
 AccuracySec=20s
 Unit=crossalpha-state-v04.service
@@ -48,5 +48,6 @@ systemctl --user enable --now crossalpha-state-v04.timer
 
 echo "Installed: $UNIT_DIR/crossalpha-state-v04.service"
 echo "Installed: $UNIT_DIR/crossalpha-state-v04.timer"
+echo "First automatic cycle: approximately 5 minutes after timer activation"
 echo "Status:    systemctl --user status crossalpha-state-v04.timer --no-pager"
 echo "Logs:      journalctl --user -u crossalpha-state-v04.service -n 100 --no-pager"
