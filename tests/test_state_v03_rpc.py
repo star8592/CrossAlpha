@@ -10,9 +10,11 @@ from crossalpha.state.v03_rpc import (
     BORROW_EVENT_TOPIC0,
     DEFAULT_PUBLIC_ETHEREUM_RPC,
     UINT256_MAX,
+    ZERO_COST_PUBLIC_RPC_CANDIDATES,
     borrow_log_debtor,
     decode_get_user_account_data,
     encode_get_user_account_data,
+    resolve_rpc_candidates,
     resolve_rpc_url,
 )
 
@@ -32,6 +34,21 @@ def test_rpc_resolution_prefers_env_and_has_zero_cost_fallback() -> None:
         "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK",
     )
     assert DEFAULT_PUBLIC_ETHEREUM_RPC == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
+
+
+def test_rpc_candidate_pool_is_ordered_and_never_duplicates_configured_url() -> None:
+    public = list(ZERO_COST_PUBLIC_RPC_CANDIDATES)
+    assert [source for _url, source in public] == [
+        "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK",
+        "PUBLICNODE_ZERO_COST_FALLBACK",
+        "LLAMARPC_ZERO_COST_FALLBACK",
+    ]
+    configured = resolve_rpc_candidates("http://localhost:8545")
+    assert configured[0] == ("http://localhost:8545", "EVM_RPC_URL")
+    assert configured[1:] == public
+    same_as_default = resolve_rpc_candidates(DEFAULT_PUBLIC_ETHEREUM_RPC)
+    assert same_as_default[0] == (DEFAULT_PUBLIC_ETHEREUM_RPC, "EVM_RPC_URL")
+    assert sum(1 for url, _source in same_as_default if url == DEFAULT_PUBLIC_ETHEREUM_RPC) == 1
 
 
 def test_borrow_log_uses_indexed_on_behalf_of_and_ignores_removed() -> None:
