@@ -20,20 +20,24 @@ research_policy:
 source:
   chain: ethereum
   chain_id: 1
-  rpc_env: EVM_RPC_URL
-  fallback_rpc_url: https://ethereum-rpc.blockreq.com/v1/rpc/public
-  fallback_rpc_candidates:
+  split_data_plane: true
+  archive_rpc_required: false
+  borrower_universe_log_source: BLOCKSCOUT_INDEXED_LOGS
+  borrower_universe_log_api_url: https://eth.blockscout.com/api
+  borrower_universe_log_auth_required: false
+  borrower_universe_log_max_results: 1000
+  borrower_universe_log_limit_policy: RECURSIVE_BLOCK_RANGE_SPLIT
+  state_rpc_env: EVM_RPC_URL
+  state_rpc_fallback_candidates:
     - https://ethereum-rpc.blockreq.com/v1/rpc/public
     - https://ethereum-rpc.publicnode.com
     - https://eth.llamarpc.com
-  rpc_policy: EVM_RPC_URL_PREFERRED_CAPABILITY_PROBED_ZERO_COST_FALLBACK_POOL
-  required_capabilities:
+  state_rpc_policy: EVM_RPC_URL_PREFERRED_FINALIZED_STATE_ZERO_COST_FALLBACK_POOL
+  state_rpc_required_capabilities:
     - eth_blockNumber
     - eth_getBlockByNumber
-    - recent_eth_getLogs
-    - historical_eth_getLogs
     - fixed_block_eth_call
-  single_cycle_rpc_selection: true
+  single_cycle_state_rpc_selection: true
   configured_rpc_failure_may_fallback: true
   rpc_failure_diagnostics_must_not_expose_url_or_token: true
   required_data_cost_usd: 0
