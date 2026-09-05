@@ -11,6 +11,7 @@ import pandas as pd
 
 ASSETS = ("BTC", "ETH")
 VENUES = ("binance", "okx", "bybit")
+FUNDING_SEMANTICS = "LATEST_SETTLED_NORMALIZED_TO_8H"
 
 
 def _number(value: Any) -> float | None:
@@ -52,13 +53,6 @@ def _funding_8h(rate: Any, interval_hours: Any) -> float | None:
     return r * 8.0 / hours
 
 
-def _ms_to_iso(value: Any) -> str | None:
-    number = _number(value)
-    if number is None or number <= 0:
-        return None
-    return datetime.fromtimestamp(number / 1000.0, tz=timezone.utc).isoformat()
-
-
 def _latest_source_time(values: list[Any]) -> str | None:
     parsed: list[pd.Timestamp] = []
     for value in values:
@@ -74,6 +68,36 @@ def _latest_source_time(values: list[Any]) -> str | None:
         except Exception:
             continue
     return max(parsed).isoformat() if parsed else None
+
+
+def _settled_funding_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    rate_field: str,
+    time_field: str,
+) -> tuple[float | None, float | None, str | None]:
+    clean: list[tuple[int, dict[str, Any]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            stamp = int(row.get(time_field, 0))
+        except (TypeError, ValueError):
+            continue
+        if stamp > 0:
+            clean.append((stamp, row))
+    clean.sort(key=lambda item: item[0])
+    if not clean:
+        return None, None, None
+    latest_time, latest_row = clean[-1]
+    rate = _number(latest_row.get(rate_field))
+    interval_hours = None
+    if len(clean) >= 2:
+        previous_time = clean[-2][0]
+        delta = latest_time - previous_time
+        if delta > 0:
+            interval_hours = delta / 3_600_000.0
+    return rate, interval_hours, pd.Timestamp(latest_time, unit="ms", tz="UTC").isoformat()
 
 
 class MultiVenueCollector:
@@ -114,10 +138,14 @@ class MultiVenueCollector:
         base = "https://www.okx.com"
         spot_id = f"{asset}-USDT"
         swap_id = f"{asset}-USDT-SWAP"
-        spot, swap, funding, oi = await asyncio.gather(
+        spot, swap, funding_history, oi = await asyncio.gather(
             self._get(client, base + "/api/v5/market/ticker", {"instId": spot_id}),
             self._get(client, base + "/api/v5/market/ticker", {"instId": swap_id}),
-            self._get(client, base + "/api/v5/public/funding-rate", {"instId": swap_id}),
+            self._get(
+                client,
+                base + "/api/v5/public/funding-rate-history",
+                {"instId": swap_id, "limit": "2"},
+            ),
             self._get(
                 client,
                 base + "/api/v5/public/open-interest",
@@ -131,16 +159,29 @@ class MultiVenueCollector:
             "perp_symbol": swap_id,
             "spot": spot,
             "perp": swap,
-            "funding": funding,
+            "funding_history": funding_history,
             "open_interest": oi,
         }
 
     async def _bybit(self, client: httpx.AsyncClient, asset: str) -> dict[str, Any]:
-        base = "https://api.bybit.com/v5/market/tickers"
+        base = "https://api.bybit.com"
         symbol = f"{asset}USDT"
-        spot, perp = await asyncio.gather(
-            self._get(client, base, {"category": "spot", "symbol": symbol}),
-            self._get(client, base, {"category": "linear", "symbol": symbol}),
+        spot, perp, funding_history = await asyncio.gather(
+            self._get(
+                client,
+                base + "/v5/market/tickers",
+                {"category": "spot", "symbol": symbol},
+            ),
+            self._get(
+                client,
+                base + "/v5/market/tickers",
+                {"category": "linear", "symbol": symbol},
+            ),
+            self._get(
+                client,
+                base + "/v5/market/funding/history",
+                {"category": "linear", "symbol": symbol, "limit": 2},
+            ),
         )
         return {
             "venue": "bybit",
@@ -149,6 +190,7 @@ class MultiVenueCollector:
             "perp_symbol": symbol,
             "spot": spot,
             "perp": perp,
+            "funding_history": funding_history,
         }
 
     async def collect(self) -> list[dict[str, Any]]:
@@ -172,6 +214,13 @@ def _okx_item(payload: Any) -> dict[str, Any]:
     return data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
 
 
+def _okx_rows(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict) or str(payload.get("code")) != "0":
+        return []
+    data = payload.get("data")
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
 def _bybit_item(payload: Any) -> tuple[dict[str, Any], Any]:
     if not isinstance(payload, dict) or int(payload.get("retCode", -1)) != 0:
         return {}, None
@@ -179,6 +228,14 @@ def _bybit_item(payload: Any) -> tuple[dict[str, Any], Any]:
     data = result.get("list") if isinstance(result, dict) else None
     item = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
     return item, payload.get("time")
+
+
+def _bybit_rows(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict) or int(payload.get("retCode", -1)) != 0:
+        return []
+    result = payload.get("result")
+    data = result.get("list") if isinstance(result, dict) else None
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
 
 
 def parse_venue_snapshot(payload: dict[str, Any], *, known_at: Any | None = None) -> dict[str, Any]:
@@ -190,7 +247,9 @@ def parse_venue_snapshot(payload: dict[str, Any], *, known_at: Any | None = None
     current = current.tz_localize("UTC") if current.tzinfo is None else current.tz_convert("UTC")
 
     spot_bid = spot_ask = perp_bid = perp_ask = None
-    mark = index = funding_rate = funding_interval = oi_usd = None
+    mark = index = oi_usd = None
+    settled_rate = settled_interval = None
+    settled_time = None
     source_time = None
 
     if venue == "binance":
@@ -205,53 +264,47 @@ def parse_venue_snapshot(payload: dict[str, Any], *, known_at: Any | None = None
         perp_bid = bids[0][0] if bids and isinstance(bids[0], list) and bids[0] else None
         perp_ask = asks[0][0] if asks and isinstance(asks[0], list) and asks[0] else None
         mark, index = premium.get("markPrice"), premium.get("indexPrice")
-        history_rows = [row for row in history if isinstance(row, dict)]
-        history_rows.sort(key=lambda row: int(row.get("fundingTime", 0)))
-        if history_rows:
-            funding_rate = history_rows[-1].get("fundingRate")
-        if len(history_rows) >= 2:
-            delta_ms = int(history_rows[-1].get("fundingTime", 0)) - int(
-                history_rows[-2].get("fundingTime", 0)
-            )
-            if delta_ms > 0:
-                funding_interval = delta_ms / 3_600_000.0
+        settled_rate, settled_interval, settled_time = _settled_funding_from_rows(
+            [row for row in history if isinstance(row, dict)],
+            rate_field="fundingRate",
+            time_field="fundingTime",
+        )
         perp_mid = _mid(perp_bid, perp_ask)
         oi_base = _number(oi.get("openInterest"))
         oi_usd = oi_base * perp_mid if oi_base is not None and perp_mid is not None else None
         source_time = _latest_source_time(
-            [premium.get("time"), oi.get("time"), depth.get("E"), depth.get("T")]
-            + [row.get("fundingTime") for row in history_rows]
+            [premium.get("time"), oi.get("time"), depth.get("E"), depth.get("T"), settled_time]
         )
 
     elif venue == "okx":
         spot = _okx_item(payload.get("spot"))
         perp = _okx_item(payload.get("perp"))
-        funding = _okx_item(payload.get("funding"))
+        funding_rows = _okx_rows(payload.get("funding_history"))
         oi = _okx_item(payload.get("open_interest"))
         spot_bid, spot_ask = spot.get("bidPx"), spot.get("askPx")
         perp_bid, perp_ask = perp.get("bidPx"), perp.get("askPx")
-        mark = None
-        index = None
-        funding_rate = funding.get("fundingRate")
-        funding_time = _number(funding.get("fundingTime"))
-        next_funding = _number(funding.get("nextFundingTime"))
-        if funding_time is not None and next_funding is not None and next_funding > funding_time:
-            funding_interval = (next_funding - funding_time) / 3_600_000.0
-        oi_usd = _number(oi.get("oiUsd"))
-        source_time = _latest_source_time(
-            [spot.get("ts"), perp.get("ts"), funding.get("ts"), oi.get("ts")]
+        settled_rate, settled_interval, settled_time = _settled_funding_from_rows(
+            funding_rows,
+            rate_field="realizedRate",
+            time_field="fundingTime",
         )
+        oi_usd = _number(oi.get("oiUsd"))
+        source_time = _latest_source_time([spot.get("ts"), perp.get("ts"), oi.get("ts"), settled_time])
 
     else:
         spot, spot_time = _bybit_item(payload.get("spot"))
         perp, perp_time = _bybit_item(payload.get("perp"))
+        funding_rows = _bybit_rows(payload.get("funding_history"))
         spot_bid, spot_ask = spot.get("bid1Price"), spot.get("ask1Price")
         perp_bid, perp_ask = perp.get("bid1Price"), perp.get("ask1Price")
         mark, index = perp.get("markPrice"), perp.get("indexPrice")
-        funding_rate = perp.get("fundingRate")
-        funding_interval = perp.get("fundingIntervalHour")
+        settled_rate, settled_interval, settled_time = _settled_funding_from_rows(
+            funding_rows,
+            rate_field="fundingRate",
+            time_field="fundingRateTimestamp",
+        )
         oi_usd = _number(perp.get("openInterestValue"))
-        source_time = _latest_source_time([spot_time, perp_time])
+        source_time = _latest_source_time([spot_time, perp_time, settled_time])
 
     spot_mid = _mid(spot_bid, spot_ask)
     perp_mid = _mid(perp_bid, perp_ask)
@@ -281,9 +334,11 @@ def parse_venue_snapshot(payload: dict[str, Any], *, known_at: Any | None = None
             if mark_number is not None and index_number is not None
             else None
         ),
-        "funding_rate_raw": _number(funding_rate),
-        "funding_interval_hours": _number(funding_interval),
-        "funding_rate_8h": _funding_8h(funding_rate, funding_interval),
+        "funding_semantics": FUNDING_SEMANTICS,
+        "funding_rate_settled_raw": settled_rate,
+        "funding_settlement_time": settled_time,
+        "funding_interval_hours": settled_interval,
+        "funding_rate_8h": _funding_8h(settled_rate, settled_interval),
         "open_interest_usd": oi_usd,
         "data_cost_usd": 0,
     }
