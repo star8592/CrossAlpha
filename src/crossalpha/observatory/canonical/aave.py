@@ -12,6 +12,28 @@ from crossalpha.observatory.health import load_manifest
 from crossalpha.storage.indexes import load_recent_daily_manifests
 
 
+LIQUIDATION_COLUMNS = (
+    "event_time",
+    "observed_at",
+    "known_at",
+    "block_number",
+    "transaction_hash",
+    "transaction_index",
+    "log_index",
+    "block_hash",
+    "removed",
+    "collateral_asset",
+    "debt_asset",
+    "user",
+    "debt_to_cover_raw",
+    "liquidated_collateral_amount_raw",
+    "liquidator",
+    "receive_atoken",
+    "raw_sha256",
+    "raw_path",
+)
+
+
 def _to_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -147,7 +169,10 @@ def parse_aave_liquidations(
                 "raw_path": raw_record.path,
             }
         )
-    return pd.DataFrame(rows)
+    # An empty liquidation scan is valid evidence (zero observed events), not an
+    # absent schema. Keeping fixed columns lets parquet/catalog readers distinguish
+    # a successful zero-event scan from a missing collector.
+    return pd.DataFrame(rows, columns=LIQUIDATION_COLUMNS)
 
 
 def _records(data_root: Path, recent_days: int | None) -> tuple[list[RawSnapshotManifest], str]:
