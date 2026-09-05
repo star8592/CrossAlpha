@@ -6,6 +6,7 @@ import pandas as pd
 
 from crossalpha.settings import Settings
 from crossalpha.state import v03_preflight
+from crossalpha.state.v03_logs import BLOCKSCOUT_LOG_SOURCE
 from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
 
 
@@ -23,9 +24,6 @@ class _ProbeRpc:
 
     async def block_timestamp(self, _block_number: int) -> str:
         return BLOCK_TIME
-
-    async def borrow_logs(self, _from_block: int, _to_block: int):
-        return []
 
     async def account_data(self, addresses: list[str], *, block_number: int) -> pd.DataFrame:
         assert block_number >= AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
@@ -47,15 +45,30 @@ class _ProbeRpc:
         )
 
 
-def test_preflight_falls_back_and_redacts_configured_rpc_failure(monkeypatch, tmp_path) -> None:
+class _ProbeLogs:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    async def borrow_logs(self, from_block: int, to_block: int):
+        assert from_block <= to_block
+        return []
+
+
+def test_preflight_splits_indexed_history_from_state_rpc_and_redacts_failures(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setattr(v03_preflight, "AaveBorrowerRpc", _ProbeRpc)
+    monkeypatch.setattr(v03_preflight, "BlockscoutBorrowLogProvider", _ProbeLogs)
     settings = Settings(
         crossalpha_data_dir=tmp_path,
         evm_rpc_url="http://configured-secret.invalid/token-should-not-leak",
     )
     report = asyncio.run(v03_preflight.run_v03_preflight(settings))
-    assert report["rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
-    assert report["rpc_candidate_failures_before_selection"] == {
+    assert report["split_data_plane"] is True
+    assert report["archive_rpc_required"] is False
+    assert report["borrow_log_source"] == BLOCKSCOUT_LOG_SOURCE
+    assert report["state_rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
+    assert report["state_rpc_candidate_failures_before_selection"] == {
         "EVM_RPC_URL": "RuntimeError"
     }
     assert report["historical_log_scan_ok"] is True
