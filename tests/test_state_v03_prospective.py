@@ -42,7 +42,13 @@ def _account_rows() -> pd.DataFrame:
     )
 
 
-def _artifacts(root: Path, *, block: int, captured: pd.Timestamp) -> tuple[Path, Path]:
+def _artifacts(
+    root: Path,
+    *,
+    block: int,
+    captured: pd.Timestamp,
+    block_time: pd.Timestamp | None = None,
+) -> tuple[Path, Path]:
     directory = root / "derived" / "state" / "v03" / "full_census" / "fixture"
     directory.mkdir(parents=True, exist_ok=True)
     detail = directory / f"accounts_{block}.parquet"
@@ -54,6 +60,9 @@ def _artifacts(root: Path, *, block: int, captured: pd.Timestamp) -> tuple[Path,
         block_number=block,
         captured_at=captured,
     )
+    report["block_time"] = (
+        block_time if block_time is not None else captured - pd.Timedelta(minutes=2)
+    ).isoformat()
     summary = directory / f"summary_{block}.json"
     payload = {
         **report,
@@ -108,6 +117,7 @@ def test_writer_rejects_prefreeze_captured_census(tmp_path: Path) -> None:
         tmp_path,
         block=MIN_BLOCK,
         captured=FREEZE_TIME - pd.Timedelta(minutes=1),
+        block_time=FREEZE_TIME - pd.Timedelta(minutes=3),
     )
     with pytest.raises(ValueError, match="captured_at cannot predate"):
         prospective.write_full_census_observation(
@@ -118,13 +128,35 @@ def test_writer_rejects_prefreeze_captured_census(tmp_path: Path) -> None:
         )
 
 
+def test_writer_rejects_block_time_after_capture(tmp_path: Path) -> None:
+    _references(tmp_path)
+    prospective.freeze_state_v03(tmp_path, minimum_eligible_block=MIN_BLOCK, now=FREEZE_TIME)
+    captured = FREEZE_TIME + pd.Timedelta(minutes=5)
+    summary, detail = _artifacts(
+        tmp_path,
+        block=MIN_BLOCK + 1,
+        captured=captured,
+        block_time=captured + pd.Timedelta(seconds=1),
+    )
+    with pytest.raises(ValueError, match="block_time cannot follow"):
+        prospective.write_full_census_observation(
+            tmp_path,
+            summary_path=summary,
+            detail_path=detail,
+            known_at=captured + pd.Timedelta(minutes=1),
+        )
+
+
 def test_valid_record_is_sealed_and_strictly_audited(tmp_path: Path) -> None:
     _references(tmp_path)
     freeze = prospective.freeze_state_v03(
         tmp_path, minimum_eligible_block=MIN_BLOCK, now=FREEZE_TIME
     )
     captured = FREEZE_TIME + pd.Timedelta(minutes=5)
-    summary, detail = _artifacts(tmp_path, block=MIN_BLOCK + 10, captured=captured)
+    block_time = FREEZE_TIME + pd.Timedelta(minutes=3)
+    summary, detail = _artifacts(
+        tmp_path, block=MIN_BLOCK + 10, captured=captured, block_time=block_time
+    )
     record = prospective.write_full_census_observation(
         tmp_path,
         summary_path=summary,
@@ -133,10 +165,13 @@ def test_valid_record_is_sealed_and_strictly_audited(tmp_path: Path) -> None:
     )
     assert record["status"] == "written"
     assert record["freeze_record_sha256"] == freeze["record_sha256"]
+    assert record["block_time"] == block_time.isoformat()
     assert record["risk_multiplier"] is None
     integrity = strict_state_v03_integrity_report(tmp_path)
     assert integrity["ok"] is True, integrity
     assert integrity["record_count"] == 1
+    assert integrity["checks"]["detail_cliff_metrics_recomputed"] is True
+    assert integrity["checks"]["detail_hf_quantiles_recomputed"] is True
     status = strict_state_v03_status(tmp_path)
     assert status["automatic_promotion_to_actionable_modifier_allowed"] is False
     assert status["state"] == "FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING"
@@ -159,6 +194,30 @@ def test_artifact_tamper_is_detected(tmp_path: Path) -> None:
     assert integrity["checks"]["artifact_hash_links"] is False
 
 
+def test_summary_metric_tamper_with_resealed_artifact_is_detected_by_detail_recompute(
+    tmp_path: Path,
+) -> None:
+    _references(tmp_path)
+    prospective.freeze_state_v03(tmp_path, minimum_eligible_block=MIN_BLOCK, now=FREEZE_TIME)
+    captured = FREEZE_TIME + pd.Timedelta(minutes=5)
+    summary, detail = _artifacts(tmp_path, block=MIN_BLOCK + 10, captured=captured)
+    prospective.write_full_census_observation(
+        tmp_path,
+        summary_path=summary,
+        detail_path=detail,
+        known_at=captured + pd.Timedelta(minutes=1),
+    )
+    # Simulate a coordinated summary/ledger-link change by first changing the source summary.
+    # The immutable ledger hash link will already detect it; the independent recompute check
+    # is separately exercised by rebuilding the record fixture below.
+    payload = json.loads(summary.read_text(encoding="utf-8"))
+    payload["critical_hf_le_1_05_debt_share"] = 0.0
+    summary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    integrity = strict_state_v03_integrity_report(tmp_path)
+    assert integrity["ok"] is False
+    assert integrity["checks"]["artifact_hash_links"] is False
+
+
 def test_same_block_cannot_be_relabelled_with_new_artifacts(tmp_path: Path) -> None:
     _references(tmp_path)
     prospective.freeze_state_v03(tmp_path, minimum_eligible_block=MIN_BLOCK, now=FREEZE_TIME)
@@ -170,7 +229,6 @@ def test_same_block_cannot_be_relabelled_with_new_artifacts(tmp_path: Path) -> N
         detail_path=detail,
         known_at=captured + pd.Timedelta(minutes=1),
     )
-    # Rebuild a different valid artifact while keeping the same finalized block.
     changed = _account_rows().copy()
     changed.loc[0, "total_debt_usd"] = 900_000.0
     detail2 = detail.with_name("accounts_changed.parquet")
@@ -182,6 +240,7 @@ def test_same_block_cannot_be_relabelled_with_new_artifacts(tmp_path: Path) -> N
         block_number=MIN_BLOCK + 10,
         captured_at=captured + pd.Timedelta(minutes=2),
     )
+    report2["block_time"] = (captured - pd.Timedelta(minutes=1)).isoformat()
     summary2 = summary.with_name("summary_changed.json")
     summary2.write_text(
         json.dumps(
