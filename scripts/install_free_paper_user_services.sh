@@ -10,14 +10,18 @@ if [[ -f .venv/bin/activate ]]; then
 fi
 
 python -m pip install -e ".[dev]"
+
+# A must be frozen first; the B experiment freeze references A's immutable hash.
 crossalpha-free-paper-freeze --historical-start 2010-06-01 --historical-end 2026-09-01
+crossalpha-state-ab-freeze
+crossalpha-state-ab-integrity
 
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
 
 cat > "$UNIT_DIR/crossalpha-free-paper-daily.service" <<EOF
 [Unit]
-Description=CrossAlpha frozen B3 paper daily refresh and mark
+Description=CrossAlpha frozen B3 + State A/B daily prospective marks
 After=network-online.target
 Wants=network-online.target
 
@@ -29,7 +33,7 @@ EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-daily.timer" <<'EOF'
 [Unit]
-Description=Run CrossAlpha frozen B3 paper marks Tue-Sun
+Description=Run CrossAlpha Frozen B3 + State A/B marks Tue-Sun
 
 [Timer]
 OnCalendar=Tue..Sun *-*-* 04:00:00 UTC
@@ -42,7 +46,7 @@ EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-weekly.service" <<EOF
 [Unit]
-Description=CrossAlpha frozen B3 Monday paper snapshot
+Description=CrossAlpha frozen B3 + State A/B Monday prospective snapshots
 After=network-online.target
 Wants=network-online.target
 
@@ -54,7 +58,7 @@ EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-weekly.timer" <<'EOF'
 [Unit]
-Description=Run CrossAlpha frozen B3 snapshot every Monday
+Description=Run CrossAlpha Frozen B3 + State A/B snapshot every Monday
 
 [Timer]
 OnCalendar=Mon *-*-* 00:20:00 UTC
@@ -70,8 +74,9 @@ systemctl --user enable --now crossalpha-free-paper-daily.timer
 systemctl --user enable --now crossalpha-free-paper-weekly.timer
 
 echo
-echo "CrossAlpha frozen B3 paper engine installed."
+echo "CrossAlpha frozen B3 + prospective State A/B engine installed."
 echo "Daily timer:  systemctl --user status crossalpha-free-paper-daily.timer --no-pager"
 echo "Weekly timer: systemctl --user status crossalpha-free-paper-weekly.timer --no-pager"
 echo "Timers:       systemctl --user list-timers --all | grep crossalpha-free-paper"
-echo "Status:       crossalpha-free-paper-status"
+echo "A status:     crossalpha-free-paper-status"
+echo "A/B status:   crossalpha-state-ab-status"
