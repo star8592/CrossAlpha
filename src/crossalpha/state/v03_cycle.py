@@ -11,6 +11,11 @@ import pandas as pd
 from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v03 import CensusPolicy, compute_borrower_census
+from crossalpha.state.v03_logs import (
+    BLOCKSCOUT_LOG_SOURCE,
+    BlockscoutBorrowLogProvider,
+    BorrowLogPolicy,
+)
 from crossalpha.state.v03_prospective import freeze_path, write_full_census_observation
 from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
@@ -110,20 +115,21 @@ def _write_addresses(path: Path, addresses: set[str]) -> None:
 
 
 async def _adaptive_borrow_logs(
-    rpc: AaveBorrowerRpc,
+    provider: Any,
     start: int,
     end: int,
     *,
     minimum_span: int = ADAPTIVE_MINIMUM_SPAN_BLOCKS,
 ) -> list[dict[str, Any]]:
+    """Split on provider limits/errors so an indexed result cap can never truncate history."""
     try:
-        return await rpc.borrow_logs(start, end)
+        return await provider.borrow_logs(start, end)
     except Exception:
         if end - start + 1 <= minimum_span:
             raise
         midpoint = (start + end) // 2
-        left = await _adaptive_borrow_logs(rpc, start, midpoint, minimum_span=minimum_span)
-        right = await _adaptive_borrow_logs(rpc, midpoint + 1, end, minimum_span=minimum_span)
+        left = await _adaptive_borrow_logs(provider, start, midpoint, minimum_span=minimum_span)
+        right = await _adaptive_borrow_logs(provider, midpoint + 1, end, minimum_span=minimum_span)
         return left + right
 
 
@@ -177,7 +183,7 @@ def _write_census_artifacts(
 
 
 async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
-    """Advance the borrower universe and record point-in-time borrower risk facts."""
+    """Advance indexed borrower history and record finalized-block borrower-risk facts."""
     settings.ensure_dirs()
     data_root = settings.crossalpha_data_dir
     scan_started_at = pd.Timestamp(datetime.now(timezone.utc))
@@ -192,8 +198,27 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
     )
 
+    # Borrower history is deliberately independent of archive JSON-RPC. Prove the
+    # fixed indexed source is available before any state/raw/parquet mutation.
+    log_provider = BlockscoutBorrowLogProvider(
+        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout)
+    )
+    log_probe_from = max(next_block, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    try:
+        await _adaptive_borrow_logs(
+            log_provider,
+            log_probe_from,
+            log_probe_from + ADAPTIVE_MINIMUM_SPAN_BLOCKS - 1,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "State V0.3 indexed Borrow-log source unavailable: "
+            f"{type(exc).__name__}"
+        ) from exc
+
+    # The state RPC now needs only finalized-state capabilities, not archive logs.
     rpc: AaveBorrowerRpc | None = None
-    rpc_source: str | None = None
+    state_rpc_source: str | None = None
     latest_block: int | None = None
     finalized_block: int | None = None
     finalized_block_time: str | None = None
@@ -210,15 +235,6 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
             )
             candidate_block_time = await candidate.block_timestamp(candidate_finalized)
-            if next_block <= candidate_finalized:
-                probe_from = next_block
-            else:
-                probe_from = max(
-                    candidate_finalized - 127,
-                    AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
-                )
-            probe_to = min(probe_from + 255, candidate_finalized)
-            await candidate.borrow_logs(probe_from, probe_to)
             account_probe = await candidate.account_data(
                 [AAVE_V3_ETHEREUM_CORE_POOL],
                 block_number=candidate_finalized,
@@ -226,16 +242,16 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             if account_probe.empty or not bool(account_probe.iloc[0]["success"]):
                 raise RuntimeError("getUserAccountData fixed-block probe failed")
             rpc = candidate
-            rpc_source = candidate_source
+            state_rpc_source = candidate_source
             latest_block = candidate_latest
             finalized_block = candidate_finalized
             finalized_block_time = candidate_block_time
             break
         except Exception as exc:
             rpc_attempts[candidate_source] = type(exc).__name__
-    if rpc is None or rpc_source is None or latest_block is None or finalized_block is None:
+    if rpc is None or state_rpc_source is None or latest_block is None or finalized_block is None:
         raise RuntimeError(
-            "No State V0.3-capable Ethereum RPC passed cycle probes; "
+            "No State V0.3 state RPC passed finalized-block/fixed-call probes; "
             f"attempts={rpc_attempts}"
         )
     if finalized_block_time is None:
@@ -247,7 +263,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         if next_block > finalized_block:
             break
         end = min(next_block + BOOTSTRAP_CHUNK_BLOCKS - 1, finalized_block)
-        logs = await _adaptive_borrow_logs(rpc, next_block, end)
+        logs = await _adaptive_borrow_logs(log_provider, next_block, end)
         debtors = {address for row in logs if (address := borrow_log_debtor(row)) is not None}
         previously_known = set(borrowers)
         new_debtors = debtors - previously_known
@@ -269,8 +285,10 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "log_count": len(logs),
                 "new_candidate_count_in_chunk": len(new_debtors),
                 "historical_bootstrap_is_evidence": False,
-                "rpc_source": rpc_source,
-                "rpc_candidate_failures_before_selection": rpc_attempts,
+                "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+                "state_rpc_source": state_rpc_source,
+                "rpc_source": state_rpc_source,
+                "state_rpc_candidate_failures_before_selection": rpc_attempts,
                 "data_cost_usd": 0,
             },
         )
@@ -298,8 +316,10 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["latest_seen_block"] = latest_block
     state["latest_finalized_block"] = finalized_block
     state["latest_finalized_block_time"] = finalized_block_time
-    state["rpc_source"] = rpc_source
-    state["rpc_candidate_failures_before_selection"] = rpc_attempts
+    state["borrow_log_source"] = BLOCKSCOUT_LOG_SOURCE
+    state["state_rpc_source"] = state_rpc_source
+    state["rpc_source"] = state_rpc_source
+    state["state_rpc_candidate_failures_before_selection"] = rpc_attempts
     state["pending_new_borrowers_since_full"] = sorted(pending_new_borrowers)
     _write_state(data_root, state)
 
@@ -308,7 +328,12 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         "actionability": "DESCRIPTIVE_ONLY",
         "risk_multiplier": None,
         "data_cost_usd": 0,
-        "rpc_source": rpc_source,
+        "split_data_plane": True,
+        "archive_rpc_required": False,
+        "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+        "state_rpc_source": state_rpc_source,
+        "rpc_source": state_rpc_source,
+        "state_rpc_candidate_failures_before_selection": rpc_attempts,
         "rpc_candidate_failures_before_selection": rpc_attempts,
         "latest_block": latest_block,
         "finalized_block": finalized_block,
