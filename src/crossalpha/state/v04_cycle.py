@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,14 @@ from crossalpha.settings import Settings
 from crossalpha.state.v04 import compute_market_mechanics
 from crossalpha.state.v04_provider import MultiVenueCollector, parse_venue_snapshot
 from crossalpha.storage.raw import RawSnapshotStore
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _snapshot_paths(data_root: Path, generated: pd.Timestamp) -> tuple[Path, Path]:
@@ -68,8 +77,10 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
             },
         )
         manifest = store.write(envelope)
+        raw_path = Path(manifest.path)
         row = parse_venue_snapshot(payload, known_at=collected_at)
         row["raw_sha256"] = manifest.sha256
+        row["raw_compressed_file_sha256"] = _sha256_file(raw_path)
         row["raw_path"] = manifest.path
         normalized.append(row)
         raw_records.append(
@@ -77,6 +88,7 @@ async def run_state_v04_cycle(settings: Settings, *, write: bool = True) -> dict
                 "venue": payload["venue"],
                 "asset": payload["asset"],
                 "raw_sha256": manifest.sha256,
+                "raw_compressed_file_sha256": _sha256_file(raw_path),
                 "raw_path": manifest.path,
             }
         )
