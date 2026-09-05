@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+
+RUNTIME_SCRIPTS = (
+    "scripts/install_user_service.sh",
+    "scripts/install_materializer_timer.sh",
+    "scripts/install_all_user_services.sh",
+    "scripts/install_free_paper_user_services.sh",
+    "scripts/run_free_paper_daily.sh",
+    "scripts/run_free_paper_weekly.sh",
+    "scripts/materialize_observatory_and_state.py",  # skipped by bash check below
+    "scripts/finalize_current_milestone_once.sh",
+    "scripts/finalize_state_ab_milestone_once.sh",
+)
+
+
+def test_runtime_bash_scripts_have_valid_syntax() -> None:
+    root = Path(__file__).resolve().parents[1]
+    failures: list[str] = []
+    for relative in RUNTIME_SCRIPTS:
+        path = root / relative
+        assert path.exists(), relative
+        if path.suffix != ".sh":
+            continue
+        proc = subprocess.run(
+            ["bash", "-n", str(path)],
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            failures.append(f"{relative}: {proc.stderr.strip()}")
+    assert not failures, "\n".join(failures)
