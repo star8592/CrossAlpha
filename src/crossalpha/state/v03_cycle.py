@@ -127,11 +127,16 @@ async def _adaptive_borrow_logs(
         return left + right
 
 
-def _full_census_due(state: dict[str, Any], now: pd.Timestamp) -> bool:
-    raw = state.get("last_valid_full_census_at")
-    if not raw:
+def _full_census_due(
+    state: dict[str, Any], now: pd.Timestamp, finalized_block: int
+) -> bool:
+    raw_time = state.get("last_valid_full_census_at")
+    raw_block = state.get("last_valid_full_census_block")
+    if not raw_time:
         return True
-    previous = pd.Timestamp(raw)
+    if raw_block is not None and int(finalized_block) <= int(raw_block):
+        return False
+    previous = pd.Timestamp(raw_time)
     if previous.tzinfo is None:
         previous = previous.tz_localize("UTC")
     else:
@@ -276,7 +281,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         }
 
     decision_now = pd.Timestamp(datetime.now(timezone.utc))
-    if _full_census_due(state, decision_now):
+    if _full_census_due(state, decision_now, finalized_block):
         accounts = await rpc.account_data(sorted(borrowers), block_number=finalized_block)
         census_captured = pd.Timestamp(datetime.now(timezone.utc))
         summary = compute_borrower_census(
