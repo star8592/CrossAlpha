@@ -42,11 +42,12 @@ query CrossAlphaAaveMarkets {{
 
 
 class AaveV3MarketProvider:
-    """Free, read-only Aave V3 GraphQL market snapshot collector.
+    """Free, read-only Aave V3 GraphQL Core-market snapshot collector.
 
-    This provider intentionally does not claim to observe the distribution of
-    borrower health factors. Market liquidity/rates and user liquidation cliffs
-    are different objects and remain separate in State V0.2.
+    The upstream endpoint can return multiple V3 markets on the same chain. State
+    V0.2 is preregistered against the Ethereum Core Pool only, so ingestion fails
+    closed unless that exact address is present. This provider intentionally does
+    not claim to observe borrower health-factor distributions.
     """
 
     def __init__(
@@ -55,10 +56,12 @@ class AaveV3MarketProvider:
         *,
         endpoint: str = AAVE_V3_GRAPHQL,
         chain_id: int = AAVE_V3_ETHEREUM_CHAIN_ID,
+        market_address: str = AAVE_V3_ETHEREUM_POOL,
     ) -> None:
         self.timeout = timeout
         self.endpoint = endpoint
         self.chain_id = int(chain_id)
+        self.market_address = market_address.lower()
 
     async def collect(self) -> list[ObservationEnvelope]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -76,6 +79,18 @@ class AaveV3MarketProvider:
         markets = body.get("data", {}).get("markets") if isinstance(body, dict) else None
         if not isinstance(markets, list) or not markets:
             raise ValueError("Aave V3 GraphQL returned no markets")
+        core_markets = [
+            market
+            for market in markets
+            if isinstance(market, dict)
+            and str(market.get("address", "")).lower() == self.market_address
+        ]
+        if len(core_markets) != 1:
+            raise ValueError(
+                "Aave V3 GraphQL did not return exactly one preregistered Ethereum Core market: "
+                f"address={self.market_address} matches={len(core_markets)}"
+            )
+        filtered_body = {**body, "data": {**body.get("data", {}), "markets": core_markets}}
 
         now = datetime.now(timezone.utc)
         return [
@@ -85,12 +100,13 @@ class AaveV3MarketProvider:
                 source_type=SourceType.AGGREGATOR,
                 source_id="aave:v3:graphql",
                 observation_type="markets_snapshot",
-                payload=body,
+                payload=filtered_body,
                 metadata={
                     "endpoint": self.endpoint,
                     "chain_id": self.chain_id,
+                    "market_address": self.market_address,
                     "data_cost_usd": 0,
-                    "scope": "market_level_not_user_health_factor_distribution",
+                    "scope": "ethereum_v3_core_market_level_not_user_health_factor_distribution",
                 },
             )
         ]
