@@ -13,12 +13,11 @@ from crossalpha.observatory.providers.aave import (
 )
 from crossalpha.settings import Settings
 from crossalpha.state.v02 import build_latest_state_v02
-from crossalpha.state.v02_prospective import (
-    _freeze_path,
-    state_v02_integrity_report,
-    state_v02_status,
-    write_live_state_v02_observation,
+from crossalpha.state.v02_integrity import (
+    strict_state_v02_integrity_report,
+    strict_state_v02_status,
 )
+from crossalpha.state.v02_prospective import _freeze_path, write_live_state_v02_observation
 from crossalpha.storage.raw import RawSnapshotStore
 
 
@@ -80,8 +79,8 @@ async def run_state_v02_cycle(settings: Settings) -> dict[str, Any]:
 
     if _freeze_path(data_root).exists():
         prospective = write_live_state_v02_observation(data_root, state, strict_live=True)
-        integrity = state_v02_integrity_report(data_root)
-        status = state_v02_status(data_root)
+        integrity = strict_state_v02_integrity_report(data_root)
+        status = strict_state_v02_status(data_root)
     else:
         prospective = {
             "protocol": "CROSSALPHA_STATE_V0_2_PROSPECTIVE",
