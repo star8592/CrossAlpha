@@ -45,6 +45,11 @@ def _bootstrap_state(data_root: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _utc(value: Any) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 def _numeric_equal(left: Any, right: Any, *, tolerance: float = 1e-12) -> bool:
     if left is None or right is None:
         return left is None and right is None
@@ -53,7 +58,66 @@ def _numeric_equal(left: Any, right: Any, *, tolerance: float = 1e-12) -> bool:
         b = float(right)
     except (TypeError, ValueError):
         return left == right
-    return math.isfinite(a) and math.isfinite(b) and math.isclose(a, b, rel_tol=tolerance, abs_tol=tolerance)
+    return math.isfinite(a) and math.isfinite(b) and math.isclose(
+        a, b, rel_tol=tolerance, abs_tol=tolerance
+    )
+
+
+def _weighted_quantile_from_detail(active: pd.DataFrame, q: float) -> float | None:
+    if active.empty:
+        return None
+    frame = active[["health_factor", "total_debt_usd"]].copy()
+    frame["health_factor"] = pd.to_numeric(frame["health_factor"], errors="coerce")
+    frame["total_debt_usd"] = pd.to_numeric(frame["total_debt_usd"], errors="coerce")
+    frame = frame.dropna()
+    frame = frame.loc[frame["total_debt_usd"] > 0].sort_values("health_factor")
+    if frame.empty:
+        return None
+    total = float(frame["total_debt_usd"].sum())
+    if total <= 0:
+        return None
+    target = total * float(q)
+    cumulative = frame["total_debt_usd"].cumsum()
+    index = cumulative.searchsorted(target, side="left")
+    index = min(int(index), len(frame) - 1)
+    return float(frame.iloc[index]["health_factor"])
+
+
+def _recompute_distribution(detail: pd.DataFrame) -> dict[str, Any] | None:
+    required = {"success", "total_debt_usd", "health_factor"}
+    if not required.issubset(detail.columns):
+        return None
+    success = detail.loc[detail["success"].astype(bool)].copy()
+    success["total_debt_usd"] = pd.to_numeric(success["total_debt_usd"], errors="coerce")
+    success["health_factor"] = pd.to_numeric(success["health_factor"], errors="coerce")
+    active = success.loc[
+        (success["total_debt_usd"].fillna(0.0) > 0) & success["health_factor"].notna()
+    ].copy()
+    total_debt = float(active["total_debt_usd"].fillna(0.0).sum())
+
+    def debt_share(threshold: float) -> float:
+        debt = float(
+            active.loc[active["health_factor"] <= threshold, "total_debt_usd"]
+            .fillna(0.0)
+            .sum()
+        )
+        return debt / total_debt if total_debt > 0 else 0.0
+
+    watchlist = active.loc[
+        (active["health_factor"] <= v03.CensusPolicy().watchlist_health_factor_max)
+        | (active["total_debt_usd"] >= v03.CensusPolicy().watchlist_debt_usd_min)
+    ]
+    return {
+        "active_borrower_count": int(len(active)),
+        "total_active_debt_usd": total_debt,
+        "debt_weighted_hf_p10": _weighted_quantile_from_detail(active, 0.10),
+        "debt_weighted_hf_p25": _weighted_quantile_from_detail(active, 0.25),
+        "debt_weighted_hf_p50": _weighted_quantile_from_detail(active, 0.50),
+        "liquidatable_debt_share": debt_share(1.00),
+        "critical_hf_le_1_05_debt_share": debt_share(1.05),
+        "near_cliff_hf_le_1_20_debt_share": debt_share(1.20),
+        "watchlist_count": int(len(watchlist)),
+    }
 
 
 def _count_stress_episodes(
@@ -72,11 +136,8 @@ def _count_stress_episodes(
         except (TypeError, ValueError):
             continue
         if share >= threshold:
-            qualifying.append(pd.Timestamp(row["known_at"]))
-    qualifying = sorted(
-        ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
-        for ts in qualifying
-    )
+            qualifying.append(_utc(row["known_at"]))
+    qualifying = sorted(qualifying)
     count = 0
     last: pd.Timestamp | None = None
     cooldown = pd.Timedelta(hours=cooldown_hours)
@@ -101,8 +162,7 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
 
     records = _load_records(data_root)
     hashes_ok, hash_details = prospective.hashes_unchanged(data_root, freeze)
-    frozen_at = pd.Timestamp(freeze["frozen_at"])
-    frozen_at = frozen_at.tz_localize("UTC") if frozen_at.tzinfo is None else frozen_at.tz_convert("UTC")
+    frozen_at = _utc(freeze["frozen_at"])
     minimum_block = int(freeze["minimum_eligible_block"])
 
     checks = {
@@ -114,20 +174,26 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
         "block_not_before_freeze_floor": True,
         "known_at_not_before_freeze": True,
         "captured_at_not_before_freeze": True,
+        "block_time_not_after_captured_at": True,
         "known_at_not_before_captured_at": True,
         "descriptive_only": True,
         "artifact_hash_links": True,
         "summary_semantics": True,
+        "summary_event_time_link": True,
         "summary_metric_links": True,
         "detail_unique_addresses": True,
         "detail_candidate_count": True,
         "detail_coverage_recomputed": True,
         "detail_active_debt_recomputed": True,
+        "detail_cliff_metrics_recomputed": True,
+        "detail_hf_quantiles_recomputed": True,
         "unique_block_numbers": True,
         "block_numbers_monotonic": True,
+        "block_times_monotonic": True,
     }
 
     blocks: list[int] = []
+    block_times: list[pd.Timestamp] = []
     known_times: list[pd.Timestamp] = []
     seen_blocks: set[int] = set()
     for raw in records:
@@ -152,15 +218,23 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
         if block < minimum_block or int(row.get("minimum_eligible_block", -1)) != minimum_block:
             checks["block_not_before_freeze_floor"] = False
 
-        known = pd.Timestamp(row["known_at"])
-        captured = pd.Timestamp(row["captured_at"])
-        known = known.tz_localize("UTC") if known.tzinfo is None else known.tz_convert("UTC")
-        captured = captured.tz_localize("UTC") if captured.tzinfo is None else captured.tz_convert("UTC")
+        try:
+            known = _utc(row["known_at"])
+            captured = _utc(row["captured_at"])
+            block_time = _utc(row["block_time"])
+        except Exception:
+            checks["block_time_not_after_captured_at"] = False
+            checks["known_at_not_before_captured_at"] = False
+            checks["summary_event_time_link"] = False
+            continue
         known_times.append(known)
+        block_times.append(block_time)
         if known < frozen_at:
             checks["known_at_not_before_freeze"] = False
         if captured < frozen_at:
             checks["captured_at_not_before_freeze"] = False
+        if block_time > captured:
+            checks["block_time_not_after_captured_at"] = False
         if known < captured:
             checks["known_at_not_before_captured_at"] = False
         if row.get("actionability") != v03.ACTIONABILITY or row.get("risk_multiplier") is not None:
@@ -182,12 +256,18 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             detail = pd.read_parquet(detail_path)
         except Exception:
-            checks["summary_semantics"] = False
-            checks["summary_metric_links"] = False
-            checks["detail_unique_addresses"] = False
-            checks["detail_candidate_count"] = False
-            checks["detail_coverage_recomputed"] = False
-            checks["detail_active_debt_recomputed"] = False
+            for name in (
+                "summary_semantics",
+                "summary_event_time_link",
+                "summary_metric_links",
+                "detail_unique_addresses",
+                "detail_candidate_count",
+                "detail_coverage_recomputed",
+                "detail_active_debt_recomputed",
+                "detail_cliff_metrics_recomputed",
+                "detail_hf_quantiles_recomputed",
+            ):
+                checks[name] = False
             continue
 
         if (
@@ -201,6 +281,11 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
             or summary.get("detail_sha256") != row.get("detail_sha256")
         ):
             checks["summary_semantics"] = False
+        try:
+            if _utc(summary.get("block_time")) != block_time:
+                checks["summary_event_time_link"] = False
+        except Exception:
+            checks["summary_event_time_link"] = False
 
         for metric in LINKED_METRICS:
             if not _numeric_equal(row.get(metric), summary.get(metric)):
@@ -217,22 +302,40 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
             coverage = float(success_mask.sum()) / candidate_count if candidate_count > 0 else 1.0
             if not _numeric_equal(coverage, summary.get("account_call_coverage_ratio")):
                 checks["detail_coverage_recomputed"] = False
-            successful = detail.loc[success_mask].copy()
-            debt = pd.to_numeric(successful["total_debt_usd"], errors="coerce")
-            hf = pd.to_numeric(successful["health_factor"], errors="coerce")
-            active = successful.loc[(debt > 0) & hf.notna()].copy()
-            active_debt = float(pd.to_numeric(active["total_debt_usd"], errors="coerce").fillna(0.0).sum())
-            if (
-                len(active) != int(summary.get("active_borrower_count", -1))
-                or not _numeric_equal(active_debt, summary.get("total_active_debt_usd"))
-            ):
+            recomputed = _recompute_distribution(detail)
+            if recomputed is None:
                 checks["detail_active_debt_recomputed"] = False
+                checks["detail_cliff_metrics_recomputed"] = False
+                checks["detail_hf_quantiles_recomputed"] = False
+            else:
+                for metric in ("active_borrower_count", "total_active_debt_usd"):
+                    if not _numeric_equal(recomputed.get(metric), summary.get(metric)):
+                        checks["detail_active_debt_recomputed"] = False
+                for metric in (
+                    "liquidatable_debt_share",
+                    "critical_hf_le_1_05_debt_share",
+                    "near_cliff_hf_le_1_20_debt_share",
+                    "watchlist_count",
+                ):
+                    if not _numeric_equal(recomputed.get(metric), summary.get(metric)):
+                        checks["detail_cliff_metrics_recomputed"] = False
+                for metric in (
+                    "debt_weighted_hf_p10",
+                    "debt_weighted_hf_p25",
+                    "debt_weighted_hf_p50",
+                ):
+                    if not _numeric_equal(recomputed.get(metric), summary.get(metric)):
+                        checks["detail_hf_quantiles_recomputed"] = False
         else:
             checks["detail_coverage_recomputed"] = False
             checks["detail_active_debt_recomputed"] = False
+            checks["detail_cliff_metrics_recomputed"] = False
+            checks["detail_hf_quantiles_recomputed"] = False
 
     if blocks != sorted(blocks):
         checks["block_numbers_monotonic"] = False
+    if block_times != sorted(block_times):
+        checks["block_times_monotonic"] = False
 
     gap_count = 0
     max_gap_hours = 0.0
@@ -244,13 +347,15 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
 
     return {
         "protocol": prospective.PROSPECTIVE_PROTOCOL,
-        "audit_level": "STRICT_NON_MUTATING_HASH_GRAPH_WITH_ARTIFACT_RECOMPUTE",
+        "audit_level": "STRICT_HASH_GRAPH_EVENT_TIME_AND_DETAIL_RECOMPUTE",
         "frozen": True,
         "ok": all(checks.values()),
         "record_count": len(records),
         "minimum_eligible_block": minimum_block,
         "first_block": min(blocks) if blocks else None,
         "last_block": max(blocks) if blocks else None,
+        "first_block_time": min(block_times).isoformat() if block_times else None,
+        "last_block_time": max(block_times).isoformat() if block_times else None,
         "first_known_at": min(known_times).isoformat() if known_times else None,
         "last_known_at": max(known_times).isoformat() if known_times else None,
         "gap_count": gap_count,
@@ -276,10 +381,7 @@ def strict_state_v03_status(data_root: Path) -> dict[str, Any]:
     bootstrap = _bootstrap_state(data_root)
     gate = freeze["promotion_gate"]
     if records:
-        times = []
-        for row in records:
-            ts = pd.Timestamp(row["known_at"])
-            times.append(ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC"))
+        times = [_utc(row["known_at"]) for row in records]
         calendar_days = int((max(times) - min(times)) / pd.Timedelta(days=1)) + 1
     else:
         calendar_days = 0
@@ -318,10 +420,12 @@ def strict_state_v03_status(data_root: Path) -> dict[str, Any]:
         "bootstrap_complete": bool(bootstrap.get("bootstrap_complete")),
         "bootstrap_next_block": bootstrap.get("next_block"),
         "candidate_address_count": bootstrap.get("candidate_address_count"),
+        "pending_new_borrower_count": len(bootstrap.get("pending_new_borrowers_since_full", [])),
         "valid_full_census_count": len(records),
         "prospective_calendar_days": calendar_days,
         "cliff_stress_episode_count": episodes,
         "latest_block": latest.get("block_number") if latest else None,
+        "latest_block_time": latest.get("block_time") if latest else None,
         "latest_total_active_debt_usd": latest.get("total_active_debt_usd") if latest else None,
         "latest_critical_hf_le_1_05_debt_share": latest.get("critical_hf_le_1_05_debt_share") if latest else None,
         "latest_near_cliff_hf_le_1_20_debt_share": latest.get("near_cliff_hf_le_1_20_debt_share") if latest else None,
