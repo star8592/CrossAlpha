@@ -2,7 +2,7 @@
 
 ## Purpose
 
-State V0.3 measures borrower solvency rather than market-level lending liquidity. It builds an auditable Aave V3 Ethereum Core borrower universe and measures all eligible accounts at one common finalized Ethereum block.
+State V0.3 measures borrower solvency rather than market-level lending liquidity. It builds an auditable Aave V3 Ethereum Core borrower universe and measures eligible accounts at one common finalized Ethereum block.
 
 V0.3 is **descriptive only**. It does not modify Frozen B3, State V0.1, A/B V0.1, or State V0.2. It has no risk multiplier and no automatic path into trading logic.
 
@@ -29,32 +29,48 @@ Current account state is read with `Pool.getUserAccountData(address)` at one com
 
 The finalized block timestamp is independently obtained with `eth_getBlockByNumber(finalized_block)` and stored as `block_time`.
 
-## RPC capability policy
+## Split zero-cost data plane
 
-V0.3 requires more than a node that can answer `eth_blockNumber`. It needs historical logs and fixed-block state because the borrower universe starts at the 2023 Aave V3 Core deployment block.
+V0.3 deliberately separates **historical borrower discovery** from **current finalized account state**. This removes archive-RPC availability as a single point of failure without weakening borrower-universe completeness.
+
+### Borrower-universe history
+
+Historical and incremental Aave `Borrow` events are read from the Ethereum Blockscout indexed logs API:
+
+`https://eth.blockscout.com/api`
+
+Frozen semantics:
+
+- source label: `BLOCKSCOUT_INDEXED_LOGS`;
+- no API key required;
+- filter by the Aave Core Pool and exact `Borrow` topic0;
+- bootstrap starts at block `16291127`;
+- a provider response reaching the 1,000-log hard limit is **never** accepted as complete;
+- result-limit or range failures recursively split the block range down to the frozen minimum span.
+
+The indexed log source is an operational reconstruction input only. Historical bootstrap rows never count as prospective evidence.
+
+### Finalized account state
+
+The state RPC is responsible only for:
+
+1. `eth_blockNumber`;
+2. `eth_getBlockByNumber` for the finalized block;
+3. fixed-block `eth_call` for `getUserAccountData`.
+
+It is **not required to provide historical `eth_getLogs`**.
 
 Candidate order is frozen as:
 
 1. `EVM_RPC_URL`, when explicitly configured by the operator;
-2. `https://ethereum-rpc.blockreq.com/v1/rpc/public`;
-3. `https://ethereum-rpc.publicnode.com`;
-4. `https://eth.llamarpc.com`.
+2. `https://eth.blockscout.com/api/eth-rpc`;
+3. `https://ethereum-rpc.blockreq.com/v1/rpc/public`;
+4. `https://ethereum-rpc.publicnode.com`;
+5. `https://eth.llamarpc.com`.
 
-The public candidates are zero-cost fallbacks. A configured RPC is preferred, but it is **not** a single point of failure: if it cannot satisfy the required capability probes, V0.3 may select the next zero-cost candidate.
+A configured RPC is preferred but may fall back if it fails the finalized-state capability probe. Diagnostics persist only source labels and exception classes; configured URLs, tokens, and provider response bodies are not serialized.
 
-Before freeze, a candidate must prove all of these capabilities:
-
-1. `eth_blockNumber`;
-2. `eth_getBlockByNumber` for the finalized block;
-3. recent `eth_getLogs` for Aave `Borrow`;
-4. historical `eth_getLogs` near deployment block `16291127`;
-5. fixed-block `eth_call` for `getUserAccountData`.
-
-The first candidate passing the complete probe is selected. Failure diagnostics persist only the safe source label and exception class; configured URLs, tokens, and exception messages are never serialized.
-
-The regular V0.3 cycle also performs capability selection **before any state/raw/parquet write**. One selected RPC is then used for that whole cycle. CrossAlpha does not switch RPC providers after a cycle has begun writing evidence. If the selected endpoint later fails mid-cycle, the cycle fails and retries on a future scheduled run rather than mixing providers inside one census.
-
-The preflight implementation itself is included in the V0.3 frozen implementation hash.
+The regular V0.3 cycle proves both data planes are available **before any research state/raw/parquet write**. One state RPC is selected for the entire cycle; CrossAlpha never switches state RPC providers after evidence writing has begun.
 
 ## Borrower universe bootstrap
 
@@ -63,11 +79,11 @@ Frozen rules:
 - start block: `16291127`;
 - chunk size: 25,000 blocks;
 - maximum chunks per 15-minute cycle: 8;
-- recursive split floor after RPC range errors: 256 blocks;
+- recursive split floor after indexed-source range/limit errors: 256 blocks;
 - finalized-head lag: 64 blocks;
 - historical candidate addresses are monotonic and never deleted.
 
-Historical reconstruction is operational bootstrap only. Until the scan reaches the current finalized head, the healthy state is `FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`; no full-market census claim is allowed.
+Until the scan reaches the current finalized head, the healthy state is `FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`; no full-market census claim is allowed.
 
 A historical/reorg false-positive candidate is harmless: current active borrower status is defined by current `totalDebtBase > 0`, not merely historical event presence.
 
@@ -82,10 +98,7 @@ A full census is valid only when:
 - failed account-call ratio is <= 1%;
 - each address appears at most once.
 
-A new full census requires both:
-
-- at least six hours since the previous valid full census; and
-- a finalized block strictly greater than the previous full-census block.
+A new full census requires both at least six hours since the previous valid full census and a finalized block strictly greater than the previous full-census block.
 
 A failed/partial census remains an operational artifact but does not enter the prospective evidence ledger or advance the last-valid-census marker.
 
@@ -107,7 +120,7 @@ V0.3 records facts rather than a tuned stress score:
 
 These are current-position health distributions, not single-token liquidation-price forecasts.
 
-## Point-in-time model
+## Point-in-time and anti-backfill model
 
 V0.3 keeps three clocks:
 
@@ -119,26 +132,17 @@ Every admitted record must satisfy:
 
 `block_time <= captured_at <= known_at`
 
-At freeze, CrossAlpha also seals the current minimum eligible finalized block. A later calculation for an older block cannot be inserted as prospective evidence.
+At freeze, CrossAlpha seals the current minimum eligible finalized block. A later calculation for an older block cannot be inserted as prospective evidence.
 
-## Prospective anti-backfill and hash graph
-
-A prospective full census requires:
-
-- block >= frozen minimum eligible block;
-- `captured_at` not before freeze;
-- `known_at` not before `captured_at`;
-- `block_time` not after `captured_at`;
-- complete borrower bootstrap;
-- valid full-census coverage;
-- unchanged V0.1 / A-B V0.1 / V0.2 reference freeze hashes;
-- unchanged V0.3 implementation/config hashes.
+A prospective full census also requires complete borrower bootstrap, valid full-census coverage, unchanged V0.1/A-B/V0.2 reference freezes, and unchanged V0.3 implementation/config hashes.
 
 Records are keyed by finalized block. The same block cannot later be relabeled with different artifacts (`STATE_V03_BLOCK_COLLISION`).
 
-The frozen implementation set includes the borrower metrics, RPC reader, RPC capability preflight, cycle, watchlist, prospective writer, config checker, and YAML config.
+## Hash graph and independent recomputation
 
-The strict auditor verifies record/freeze seals, implementation/reference hashes, block identity and ordering, PTI clocks, artifact hashes, unique addresses, coverage, active debt, cliff debt shares, watchlist membership, and debt-weighted HF quantiles. Key metrics are independently recomputed from account-detail parquet rather than trusted from the summary JSON alone.
+The frozen implementation set includes borrower metrics, finalized-state RPC reader, Blockscout indexed-log reader, split-data-plane preflight, cycle, watchlist, prospective writer, config checker, and YAML config.
+
+The strict auditor verifies record/freeze seals, implementation/reference hashes, block identity and ordering, PTI clocks, artifact hashes, unique addresses, coverage, active debt, cliff debt shares, watchlist membership, and debt-weighted HF quantiles. Key metrics are independently recomputed from account-detail parquet rather than trusted from summary JSON alone.
 
 Audit level:
 
