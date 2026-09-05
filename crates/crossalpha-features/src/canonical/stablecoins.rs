@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use crossalpha_storage::{ObservationEnvelope, RawSnapshotManifest};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashSet;
 
 pub const CANONICAL_STABLECOIN_SCHEMA_VERSION: u32 = 3;
@@ -112,7 +112,7 @@ pub fn parse_stablecoin_snapshot(
             .get("chainCirculating")
             .and_then(Value::as_object)
             .cloned()
-            .unwrap_or_else(Map::new);
+            .unwrap_or_default();
 
         asset_rows.push(StablecoinAssetRow {
             canonical_schema_version: CANONICAL_STABLECOIN_SCHEMA_VERSION,
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(parsed.assets.len(), 1);
         assert_eq!(parsed.chains.len(), 1);
         assert_eq!(parsed.assets[0].delta_1d_native, Some(10.0));
-        assert_eq!(parsed.assets[0].peg_deviation_bps, Some(9.999999999998899));
+        assert!((parsed.assets[0].peg_deviation_bps.unwrap() - 10.0).abs() < 1e-9);
         assert_eq!(parsed.chains[0].circulating_native, Some(60.0));
         assert_eq!(parsed.chains[0].delta_1d_native, Some(5.0));
     }
