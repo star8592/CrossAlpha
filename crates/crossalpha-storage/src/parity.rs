@@ -4,8 +4,10 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ManifestParityReport {
@@ -18,74 +20,88 @@ pub struct ManifestParityReport {
 
 pub fn verify_manifest_parity(data_root: &Path) -> Result<ManifestParityReport> {
     let temp = tempfile::tempdir().context("create manifest parity tempdir")?;
-    let reference_root = temp.path().join("reference");
+    let reference_root = temp.path().join("python");
     let rust_root = temp.path().join("rust");
 
-    snapshot_python_indexes(data_root, &reference_root)?;
-    copy_audit_ledger(&reference_root, &rust_root)?;
-    let records = rebuild_manifest_indexes(&rust_root)?;
+    snapshot_audit_ledger(data_root, &reference_root, &rust_root)?;
+    let python_records = rebuild_python_indexes(&reference_root)?;
+    let rust_records = rebuild_manifest_indexes(&rust_root)?;
 
     let mut mismatches = Vec::new();
+    if python_records != rust_records {
+        mismatches.push(format!(
+            "record count mismatch: python={python_records} rust={rust_records}"
+        ));
+    }
+
     let daily_files = compare_daily_manifests(&reference_root, &rust_root, &mut mismatches)?;
     let series_files = compare_series_states(&reference_root, &rust_root, &mut mismatches)?;
 
     Ok(ManifestParityReport {
         ok: mismatches.is_empty(),
-        records,
+        records: rust_records,
         daily_files,
         series_files,
         mismatches,
     })
 }
 
-fn snapshot_python_indexes(data_root: &Path, destination_root: &Path) -> Result<()> {
+fn snapshot_audit_ledger(data_root: &Path, python_root: &Path, rust_root: &Path) -> Result<()> {
     let _lock = ManifestLock::acquire(data_root)?;
-    let source_manifests = data_root.join("manifests");
-    let destination_manifests = destination_root.join("manifests");
-    fs::create_dir_all(&destination_manifests)?;
-
-    let audit = source_manifests.join("raw_snapshots.jsonl");
+    let audit = data_root.join("manifests/raw_snapshots.jsonl");
     if !audit.exists() {
         anyhow::bail!("audit manifest missing: {}", audit.display());
     }
-    fs::copy(&audit, destination_manifests.join("raw_snapshots.jsonl"))?;
-    copy_tree_if_exists(
-        &source_manifests.join("daily"),
-        &destination_manifests.join("daily"),
-    )?;
-    copy_tree_if_exists(
-        &source_manifests.join("series"),
-        &destination_manifests.join("series"),
-    )?;
+
+    for destination_root in [python_root, rust_root] {
+        let destination = destination_root.join("manifests");
+        fs::create_dir_all(&destination)?;
+        fs::copy(&audit, destination.join("raw_snapshots.jsonl"))?;
+    }
     Ok(())
 }
 
-fn copy_audit_ledger(source_root: &Path, destination_root: &Path) -> Result<()> {
-    let destination = destination_root.join("manifests");
-    fs::create_dir_all(&destination)?;
-    fs::copy(
-        source_root.join("manifests/raw_snapshots.jsonl"),
-        destination.join("raw_snapshots.jsonl"),
-    )?;
-    Ok(())
-}
+fn rebuild_python_indexes(data_root: &Path) -> Result<usize> {
+    let python = env::var("CROSSALPHA_PYTHON").unwrap_or_else(|_| "python3".to_string());
+    let repo_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src");
 
-fn copy_tree_if_exists(source: &Path, destination: &Path) -> Result<()> {
-    if !source.exists() {
-        return Ok(());
+    let mut python_paths = vec![repo_src];
+    if let Some(existing) = env::var_os("PYTHONPATH") {
+        python_paths.extend(env::split_paths(&existing));
     }
-    fs::create_dir_all(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_tree_if_exists(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            fs::copy(entry.path(), target)?;
-        }
+    let python_path = env::join_paths(python_paths).context("construct PYTHONPATH for parity")?;
+
+    let code = concat!(
+        "from pathlib import Path\n",
+        "import sys\n",
+        "from crossalpha.storage.indexes import rebuild_manifest_indexes\n",
+        "result = rebuild_manifest_indexes(Path(sys.argv[1]))\n",
+        "print(result['records'])\n"
+    );
+
+    let output = Command::new(&python)
+        .arg("-c")
+        .arg(code)
+        .arg(data_root)
+        .env("PYTHONPATH", python_path)
+        .output()
+        .with_context(|| format!("run Python manifest rebuild via {python}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "Python manifest rebuild failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
     }
-    Ok(())
+
+    let stdout = String::from_utf8(output.stdout).context("decode Python rebuild output")?;
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().parse::<usize>().ok())
+        .with_context(|| format!("parse Python rebuild record count from output: {stdout:?}"))
 }
 
 fn compare_daily_manifests(
@@ -104,11 +120,18 @@ fn compare_daily_manifests(
         let expected = read_manifest_records(&reference.join(relative))?;
         let actual = read_manifest_records(&generated.join(relative))?;
         if expected != actual {
+            let first_difference = expected
+                .iter()
+                .zip(&actual)
+                .position(|(left, right)| left != right);
             mismatches.push(format!(
-                "daily content mismatch: {} expected_records={} rust_records={}",
+                "daily content mismatch: {} python_records={} rust_records={} first_difference={}",
                 relative.display(),
                 expected.len(),
-                actual.len()
+                actual.len(),
+                first_difference
+                    .map(|index| (index + 1).to_string())
+                    .unwrap_or_else(|| "length-only".to_string())
             ));
         }
     }
@@ -146,10 +169,16 @@ fn compare_path_sets(
     mismatches: &mut Vec<String>,
 ) {
     for missing in reference.difference(generated) {
-        mismatches.push(format!("{label} missing from Rust rebuild: {}", missing.display()));
+        mismatches.push(format!(
+            "{label} missing from Rust rebuild: {}",
+            missing.display()
+        ));
     }
     for extra in generated.difference(reference) {
-        mismatches.push(format!("{label} unexpected in Rust rebuild: {}", extra.display()));
+        mismatches.push(format!(
+            "{label} unexpected in Rust rebuild: {}",
+            extra.display()
+        ));
     }
 }
 
@@ -187,11 +216,7 @@ fn read_manifest_records(path: &Path) -> Result<Vec<RawSnapshotManifest>> {
         .enumerate()
         .map(|(index, line)| {
             serde_json::from_str(line).with_context(|| {
-                format!(
-                    "parse daily manifest {} line {}",
-                    path.display(),
-                    index + 1
-                )
+                format!("parse daily manifest {} line {}", path.display(), index + 1)
             })
         })
         .collect()
