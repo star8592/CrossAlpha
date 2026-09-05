@@ -88,6 +88,13 @@ enum Command {
         #[arg(long, default_value_t = 900)]
         stale_after: u64,
     },
+    /// Parse the latest raw snapshot with the Rust R3 canonical parser without writing files.
+    CanonicalPreview {
+        data_root: PathBuf,
+        /// Canonical source: hyperliquid or stablecoins.
+        #[arg(long)]
+        source: String,
+    },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -248,9 +255,41 @@ async fn main() -> Result<()> {
             };
             crossalpha_observatory::run_supervisor_until_shutdown(config).await?;
         }
+        Command::CanonicalPreview { data_root, source } => {
+            let source = match source.as_str() {
+                "hyperliquid" => crossalpha_features::CanonicalSource::Hyperliquid,
+                "stablecoins" | "defillama" => crossalpha_features::CanonicalSource::Stablecoins,
+                other => anyhow::bail!(
+                    "unsupported canonical source: {other}; expected hyperliquid or stablecoins"
+                ),
+            };
+            let record = crossalpha_features::latest_record_for_source(&data_root, source)?;
+            let envelope = crossalpha_features::load_envelope(&record)?;
+            let output = match source {
+                crossalpha_features::CanonicalSource::Hyperliquid => {
+                    let rows = crossalpha_features::parse_meta_and_asset_contexts(&envelope, &record)?;
+                    serde_json::json!({
+                        "source": "hyperliquid",
+                        "raw_sha256": record.sha256,
+                        "rows": rows,
+                    })
+                }
+                crossalpha_features::CanonicalSource::Stablecoins => {
+                    let parsed = crossalpha_features::parse_stablecoin_snapshot(&envelope, &record)?;
+                    serde_json::json!({
+                        "source": "stablecoins",
+                        "raw_sha256": record.sha256,
+                        "canonical_schema_version": crossalpha_features::CANONICAL_STABLECOIN_SCHEMA_VERSION,
+                        "assets": parsed.assets,
+                        "chains": parsed.chains,
+                    })
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R2.5 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed rust_providers=implemented collector_dry_run_gate=passed live_health=production-compatible live_health_parity_gate=passed supervisor=implemented shadow_write_gate=passed cutover_ready=true systemd_cutover=false python_compat=true"
+                "phase=R3.1 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=implemented canonical_parity_gate=required parquet_writer_gate=not-started python_compat=true"
             );
         }
     }
