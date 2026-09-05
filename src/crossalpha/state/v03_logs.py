@@ -5,7 +5,11 @@ from typing import Any
 
 import httpx
 
-from crossalpha.state.v03_rpc import AAVE_V3_ETHEREUM_CORE_POOL, BORROW_EVENT_TOPIC0
+from crossalpha.state.v03_rpc import (
+    AAVE_V3_ETHEREUM_CORE_POOL,
+    BORROW_EVENT_TOPIC0,
+    resolve_rpc_candidates,
+)
 
 
 BLOCKSCOUT_ETHEREUM_API_URL = "https://eth.blockscout.com/api"
@@ -23,6 +27,24 @@ class BorrowLogResultLimit(RuntimeError):
 class BorrowLogPolicy:
     timeout_seconds: float = 30.0
     max_results: int = BLOCKSCOUT_MAX_LOG_RESULTS
+
+
+def resolve_state_rpc_candidates(configured: str | None) -> list[tuple[str, str]]:
+    """Prefer an operator RPC, then Blockscout state RPC, then the legacy free pool."""
+    base = resolve_rpc_candidates(configured)
+    result: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    if configured:
+        result.append((configured, "EVM_RPC_URL"))
+        seen.add(configured)
+    if BLOCKSCOUT_ETHEREUM_RPC_URL not in seen:
+        result.append((BLOCKSCOUT_ETHEREUM_RPC_URL, BLOCKSCOUT_STATE_RPC_SOURCE))
+        seen.add(BLOCKSCOUT_ETHEREUM_RPC_URL)
+    for url, source in base:
+        if url not in seen:
+            result.append((url, source))
+            seen.add(url)
+    return result
 
 
 def parse_blockscout_logs(body: Any, *, max_results: int = BLOCKSCOUT_MAX_LOG_RESULTS) -> list[dict[str, Any]]:
