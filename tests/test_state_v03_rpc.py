@@ -4,10 +4,12 @@ import pytest
 
 from crossalpha.state.v03_rpc import (
     BORROW_EVENT_TOPIC0,
+    DEFAULT_PUBLIC_ETHEREUM_RPC,
     UINT256_MAX,
     borrow_log_debtor,
     decode_get_user_account_data,
     encode_get_user_account_data,
+    resolve_rpc_url,
 )
 
 
@@ -17,6 +19,14 @@ def _topic(address: str) -> str:
 
 def _word(value: int) -> str:
     return f"{value:064x}"
+
+
+def test_rpc_resolution_prefers_env_and_has_zero_cost_fallback() -> None:
+    assert resolve_rpc_url("http://localhost:8545") == ("http://localhost:8545", "EVM_RPC_URL")
+    assert resolve_rpc_url(None) == (
+        DEFAULT_PUBLIC_ETHEREUM_RPC,
+        "PUBLICNODE_ZERO_COST_FALLBACK",
+    )
 
 
 def test_borrow_log_uses_indexed_on_behalf_of_and_ignores_removed() -> None:
