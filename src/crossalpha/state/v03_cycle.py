@@ -26,8 +26,9 @@ from crossalpha.storage.raw import RawSnapshotStore
 FINALITY_LAG_BLOCKS = 64
 BOOTSTRAP_CHUNK_BLOCKS = 25_000
 MAX_BOOTSTRAP_CHUNKS_PER_CYCLE = 8
+ADAPTIVE_MINIMUM_SPAN_BLOCKS = 256
 FULL_CENSUS_CADENCE_MINUTES = 360
-LIVE_OVERLAP_BLOCKS = 128
+WATCHLIST_CADENCE_MINUTES = 15
 
 
 def _research_root(data_root: Path) -> Path:
@@ -109,7 +110,7 @@ async def _adaptive_borrow_logs(
     start: int,
     end: int,
     *,
-    minimum_span: int = 256,
+    minimum_span: int = ADAPTIVE_MINIMUM_SPAN_BLOCKS,
 ) -> list[dict[str, Any]]:
     try:
         return await rpc.borrow_logs(start, end)
@@ -280,16 +281,13 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             captured=census_captured,
             scope="full_census",
         )
-        prospective: dict[str, Any] = {
-            "status": "not_frozen_no_prospective_write"
-        }
+        prospective: dict[str, Any] = {"status": "not_frozen_no_prospective_write"}
         if summary.get("valid_full_census"):
             watchlist = set(str(value).lower() for value in summary.get("watchlist_addresses", []))
             _write_addresses(_watchlist_path(data_root), watchlist)
             if freeze_path(data_root).exists():
                 prospective = write_full_census_observation(
                     data_root,
-                    summary,
                     summary_path=Path(artifacts["summary"]),
                     detail_path=Path(artifacts["detail"]),
                     known_at=pd.Timestamp(datetime.now(timezone.utc)),
