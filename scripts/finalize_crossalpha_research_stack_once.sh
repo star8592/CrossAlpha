@@ -180,11 +180,9 @@ if phase_ok; then
   run_critical "G4. install/update Outcome Linkage timer" bash scripts/install_outcome_linkage_user_service.sh
 fi
 
-# H. Build final catalog and perform one cross-version audit.
+# H. The hard audit performs the authoritative final catalog rebuild itself.
 if phase_ok; then
-  run_critical "H1. build extended research DuckDB catalog" python -c \
-    'from crossalpha.settings import Settings; from crossalpha.research_catalog import build_research_catalog; s=Settings(); s.ensure_dirs(); print(build_research_catalog(s.crossalpha_data_dir))'
-  run_critical "H2. complete cross-version hard invariant audit" python scripts/final_crossalpha_research_system_audit.py \
+  run_critical "H1. complete cross-version hard invariant audit + final catalog" python scripts/final_crossalpha_research_system_audit.py \
     --data-root "$DATA_ROOT" \
     --a-hash-baseline "$A_HASH_BASELINE" \
     --ab-hash-baseline "$AB_HASH_BASELINE" \
