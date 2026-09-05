@@ -55,6 +55,8 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         == v03_rpc.BORROW_EVENT_TOPIC0,
         "account_selector": str(source.get("get_user_account_data_selector", "")).lower()
         == v03_rpc.GET_USER_ACCOUNT_DATA_SELECTOR,
+        "block_time_source": source.get("block_time_source")
+        == "eth_getBlockByNumber(finalized_block)",
         "base_decimals": source.get("ethereum_core_base_currency_decimals") == 8,
         "bootstrap_start": universe.get("bootstrap_start_block") == v03_rpc.AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
         "bootstrap_chunk": universe.get("bootstrap_chunk_blocks") == v03_cycle.BOOTSTRAP_CHUNK_BLOCKS,
