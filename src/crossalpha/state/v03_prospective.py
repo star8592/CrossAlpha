@@ -76,6 +76,7 @@ def _implementation_files() -> dict[str, Path]:
     return {
         "state_v03": root / "src" / "crossalpha" / "state" / "v03.py",
         "state_v03_rpc": root / "src" / "crossalpha" / "state" / "v03_rpc.py",
+        "state_v03_logs": root / "src" / "crossalpha" / "state" / "v03_logs.py",
         "state_v03_preflight": root / "src" / "crossalpha" / "state" / "v03_preflight.py",
         "state_v03_cycle": root / "src" / "crossalpha" / "state" / "v03_cycle.py",
         "state_v03_watchlist": root / "src" / "crossalpha" / "state" / "v03_watchlist.py",
