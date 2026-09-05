@@ -83,44 +83,44 @@ if [[ ! -f "$UNIT" ]]; then
 fi
 
 log "data_root=$DATA_ROOT"
-log "1/9 Rust format gate"
+log "1/9 format"
 cargo fmt --all -- --check
 
-log "2/9 Rust clippy gate"
+log "2/9 clippy"
 cargo clippy --workspace --all-targets -- -D warnings
 
-log "3/9 Rust tests"
+log "3/9 tests"
 cargo test --workspace
 
-log "4/9 Build debug binary"
+log "4/9 debug build"
 cargo build -p crossalpha-cli
 
-log "5/9 Full health Python/Rust parity"
+log "5/9 full-health parity"
 .venv/bin/python scripts/verify_rust_observatory_health_parity.py \
   --data-root "$DATA_ROOT"
 
-log "6/9 Live-health Python/Rust parity"
+log "6/9 live-health parity"
 .venv/bin/python scripts/verify_rust_observatory_live_health_parity.py \
   --data-root "$DATA_ROOT"
 
-log "7/9 Real provider dry-run contract"
+log "7/9 real-provider dry-run"
 .venv/bin/python scripts/verify_rust_observatory_collectors.py
 
-log "8/9 Debug-binary isolated shadow write"
+log "8/9 isolated shadow write"
 .venv/bin/python scripts/verify_rust_observatory_shadow_write.py
 
 if grep -Fq "$RELEASE_BINARY observatory-run" "$UNIT"; then
-  log "9/9 Rust systemd service already installed; skipping cutover and verifying existing service"
+  log "9/9 Rust service already installed; verify only"
   CUTOVER_COMPLETED=true
 else
-  log "9/9 Guarded production cutover (release build + release shadow write + automatic rollback included)"
+  log "9/9 guarded production cutover"
   bash scripts/cutover_rust_observatory_service.sh \
     --activate \
     --data-root "$DATA_ROOT"
   CUTOVER_COMPLETED=true
 fi
 
-log "Post-cutover verification"
+log "post-cutover verification"
 systemctl --user is-active --quiet crossalpha-observatory.service
 
 if [[ ! -x "$RELEASE_BINARY" ]]; then
