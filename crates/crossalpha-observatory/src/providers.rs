@@ -3,10 +3,13 @@ use anyhow::Result;
 use anyhow::bail;
 use chrono::Utc;
 use crossalpha_storage::ObservationEnvelope;
+use crossalpha_storage::RawSnapshotManifest;
+use crossalpha_storage::RawSnapshotStore;
 use reqwest::Client;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -76,6 +79,33 @@ impl ProviderClient {
             output.extend(self.collect(*source).await?);
         }
         Ok(output)
+    }
+
+    pub async fn collect_and_store(
+        &self,
+        sources: &[ProviderSource],
+        data_root: &Path,
+    ) -> Result<Vec<RawSnapshotManifest>> {
+        let mut manifests = Vec::new();
+        for source in sources {
+            let envelopes = self
+                .collect(*source)
+                .await
+                .with_context(|| format!("collect {}", source.as_str()))?;
+            let root = data_root.to_path_buf();
+            let written = tokio::task::spawn_blocking(move || {
+                let store = RawSnapshotStore::new(root);
+                let mut output = Vec::with_capacity(envelopes.len());
+                for envelope in &envelopes {
+                    output.push(store.write(envelope)?);
+                }
+                Ok::<_, anyhow::Error>(output)
+            })
+            .await
+            .context("join Observatory snapshot writer")??;
+            manifests.extend(written);
+        }
+        Ok(manifests)
     }
 
     async fn collect_hyperliquid(&self) -> Result<Vec<ObservationEnvelope>> {
