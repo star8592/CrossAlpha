@@ -19,6 +19,7 @@ def strict_v04_config_report(path: Path) -> dict[str, Any]:
     cadence = raw.get("cadence", {})
     normalization = raw.get("normalization", {})
     policy = raw.get("research_policy", {})
+    venues = raw.get("venues", {})
     gate = raw.get("prospective_gate", {})
     frozen_gate = {
         "minimum_calendar_days_before_O2_candidate": 180,
@@ -45,10 +46,34 @@ def strict_v04_config_report(path: Path) -> dict[str, Any]:
         "full_venues": universe.get("full_confidence_venues") == v04.FULL_CONFIDENCE_VENUES,
         "cadence_minutes": cadence.get("observation_minutes") == 5,
         "max_age": cadence.get("maximum_snapshot_age_seconds") == v04.MAXIMUM_SNAPSHOT_AGE_SECONDS,
+        "funding_semantics": normalization.get("funding_semantics")
+        == v04_provider.FUNDING_SEMANTICS
+        == "LATEST_SETTLED_NORMALIZED_TO_8H",
         "funding_period": normalization.get("funding_comparison_period_hours") == 8,
+        "funding_interval_source": normalization.get("funding_interval_source")
+        == "difference_between_latest_two_settlement_timestamps",
         "funding_unknown_policy": normalization.get("funding_unknown_interval_policy")
         == "exclude_from_cross_venue_funding_dispersion",
         "oi_unit": normalization.get("open_interest_unit") == "USD_NOTIONAL",
+        "binance_funding_endpoint": venues.get("binance", {}).get("settled_funding_history")
+        == "/fapi/v1/fundingRate",
+        "binance_funding_fields": (
+            venues.get("binance", {}).get("settled_rate_field") == "fundingRate"
+            and venues.get("binance", {}).get("settlement_time_field") == "fundingTime"
+        ),
+        "okx_funding_endpoint": venues.get("okx", {}).get("settled_funding_history")
+        == "/api/v5/public/funding-rate-history",
+        "okx_funding_fields": (
+            venues.get("okx", {}).get("settled_rate_field") == "realizedRate"
+            and venues.get("okx", {}).get("settlement_time_field") == "fundingTime"
+        ),
+        "bybit_funding_endpoint": venues.get("bybit", {}).get("settled_funding_history")
+        == "/v5/market/funding/history",
+        "bybit_funding_fields": (
+            venues.get("bybit", {}).get("settled_rate_field") == "fundingRate"
+            and venues.get("bybit", {}).get("settlement_time_field")
+            == "fundingRateTimestamp"
+        ),
         "no_composite": raw.get("features", {}).get("no_composite_stress_score") is True,
         "prospective_gate": gate == frozen_gate,
     }
