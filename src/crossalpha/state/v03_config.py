@@ -72,11 +72,16 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         == policy.maximum_failed_call_ratio,
         "full_census_cadence": census.get("full_census_cadence_minutes")
         == v03_cycle.FULL_CENSUS_CADENCE_MINUTES,
+        "full_census_requires_new_block": census.get("full_census_requires_new_finalized_block") is True,
         "watchlist_cadence": census.get("watchlist_cadence_minutes")
         == v03_cycle.WATCHLIST_CADENCE_MINUTES,
         "watchlist_hf": census.get("watchlist_health_factor_max")
         == policy.watchlist_health_factor_max,
         "watchlist_debt": census.get("watchlist_debt_usd_min") == policy.watchlist_debt_usd_min,
+        "new_borrower_inter_census_policy": census.get(
+            "new_borrower_between_full_censuses_policy"
+        )
+        == "include_in_temporary_watchlist_until_next_valid_full_census",
         "hf_scale_decimals": census.get("health_factor_scale_decimals") == 18,
         "hf_thresholds": tuple(float(value) for value in census.get("thresholds", []))
         == v03.HF_THRESHOLDS,
