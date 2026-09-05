@@ -1,0 +1,73 @@
+protocol: CROSSALPHA_STATE_V0_4
+mode: PROSPECTIVE_MULTI_VENUE_MARKET_MECHANICS_SHADOW
+maturity: O0_DATA_TO_O1_DESCRIPTION
+actionability: DESCRIPTIVE_ONLY
+risk_multiplier: null
+references:
+  frozen_core: CROSSALPHA_FREE_V0_1_PAPER
+  state_v01: CROSSALPHA_STATE_SHADOW_V0_1
+  state_ab_v01: CROSSALPHA_STATE_AB_V0_1
+  state_v02: CROSSALPHA_STATE_V0_2_PROSPECTIVE
+  state_v03: CROSSALPHA_STATE_V0_3_PROSPECTIVE
+research_policy:
+  mutates_predecessors: false
+  parameter_optimization_allowed: false
+  retrospective_prospective_backfill_allowed: false
+  automatic_actionability_allowed: false
+  historical_backfill_is_evidence: false
+  required_data_cost_usd: 0
+universe:
+  assets: [BTC, ETH]
+  quote: USDT
+  venues: [binance, okx, bybit]
+  minimum_valid_venues: 2
+  full_confidence_venues: 3
+cadence:
+  observation_minutes: 5
+  maximum_snapshot_age_seconds: 90
+normalization:
+  basis_bps: (perp_mid / spot_mid - 1) * 10000
+  spread_bps: (ask - bid) / mid * 10000
+  funding_comparison_period_hours: 8
+  funding_unknown_interval_policy: exclude_from_cross_venue_funding_dispersion
+  open_interest_unit: USD_NOTIONAL
+  binance_open_interest_usd: open_interest_base * perp_mid
+  okx_open_interest_usd: oiUsd
+  bybit_open_interest_usd: openInterestValue
+venues:
+  binance:
+    spot_base_url: https://api.binance.com
+    futures_base_url: https://fapi.binance.com
+    spot_book_ticker: /api/v3/ticker/bookTicker
+    perp_depth: /fapi/v1/depth
+    premium_index: /fapi/v1/premiumIndex
+    open_interest: /fapi/v1/openInterest
+    funding_history: /fapi/v1/fundingRate
+  okx:
+    base_url: https://www.okx.com
+    ticker: /api/v5/market/ticker
+    funding_rate: /api/v5/public/funding-rate
+    open_interest: /api/v5/public/open-interest
+  bybit:
+    base_url: https://api.bybit.com
+    ticker: /v5/market/tickers
+features:
+  per_asset:
+    - spot_cross_venue_range_bps
+    - basis_median_bps
+    - basis_range_bps
+    - basis_std_bps
+    - funding_8h_median
+    - funding_8h_range
+    - perp_spread_median_bps
+    - perp_spread_max_bps
+    - total_open_interest_usd
+    - open_interest_hhi
+  no_composite_stress_score: true
+prospective_gate:
+  minimum_calendar_days_before_O2_candidate: 180
+  minimum_observations: 500
+  minimum_valid_venue_share: 0.95
+  requires_outcome_linkage_test: true
+  requires_predeclared_O2_rule: true
+  automatic_promotion_to_actionable_modifier_allowed: false
