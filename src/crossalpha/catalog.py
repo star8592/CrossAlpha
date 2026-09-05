@@ -15,6 +15,12 @@ def _has_parquet(root: Path) -> bool:
     return next(root.rglob("*.parquet"), None) is not None
 
 
+def _has_json(root: Path) -> bool:
+    if not root.exists():
+        return False
+    return next(root.rglob("*.json"), None) is not None
+
+
 def build_catalog(data_root: Path) -> dict[str, object]:
     catalog_dir = data_root / "catalog"
     catalog_dir.mkdir(parents=True, exist_ok=True)
@@ -37,6 +43,10 @@ def build_catalog(data_root: Path) -> dict[str, object]:
     state_shadow_glob = state_shadow_root / "**" / "*.parquet"
     free_core_returns_root = data_root / "derived" / "core" / "free_v01"
     free_core_returns_glob = free_core_returns_root / "**" / "asset_returns.parquet"
+    core_paper_marks_root = data_root / "research" / "free_v01" / "paper" / "marks"
+    core_paper_marks_glob = core_paper_marks_root / "**" / "date=*.json"
+    state_ab_marks_root = data_root / "research" / "free_v01" / "state_ab_v01" / "marks"
+    state_ab_marks_glob = state_ab_marks_root / "**" / "date=*.json"
 
     created_views: list[str] = []
     con = duckdb.connect(str(db_path))
@@ -53,7 +63,9 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             "observatory.stablecoin_system_state",
             "observatory.stablecoin_chain_state",
             "state_engine.shadow_v01",
+            "state_engine.shadow_ab_marks",
             "core.free_asset_returns",
+            "core.frozen_b3_paper_marks",
         ):
             con.execute(f"DROP VIEW IF EXISTS {view}")
 
@@ -120,6 +132,13 @@ def build_catalog(data_root: Path) -> dict[str, object]:
             )
             created_views.append("state_engine.shadow_v01")
 
+        if _has_json(state_ab_marks_root):
+            con.execute(
+                "CREATE VIEW state_engine.shadow_ab_marks AS "
+                f"SELECT * FROM read_json_auto({_sql_string(state_ab_marks_glob)}, union_by_name=true)"
+            )
+            created_views.append("state_engine.shadow_ab_marks")
+
         if _has_parquet(free_core_returns_root):
             con.execute(
                 "CREATE VIEW core.free_asset_returns AS "
@@ -127,6 +146,13 @@ def build_catalog(data_root: Path) -> dict[str, object]:
                 "union_by_name=true, hive_partitioning=true)"
             )
             created_views.append("core.free_asset_returns")
+
+        if _has_json(core_paper_marks_root):
+            con.execute(
+                "CREATE VIEW core.frozen_b3_paper_marks AS "
+                f"SELECT * FROM read_json_auto({_sql_string(core_paper_marks_glob)}, union_by_name=true)"
+            )
+            created_views.append("core.frozen_b3_paper_marks")
     finally:
         con.close()
 
