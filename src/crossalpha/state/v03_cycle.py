@@ -188,6 +188,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     )
     latest_block = await rpc.latest_block()
     finalized_block = max(latest_block - FINALITY_LAG_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
+    finalized_block_time = await rpc.block_timestamp(finalized_block)
     state = _load_state(data_root)
     universe_path = _universe_path(data_root)
     borrowers = _load_addresses(universe_path)
@@ -254,6 +255,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["candidate_address_count"] = len(borrowers)
     state["latest_seen_block"] = latest_block
     state["latest_finalized_block"] = finalized_block
+    state["latest_finalized_block_time"] = finalized_block_time
     state["rpc_source"] = rpc_source
     state["pending_new_borrowers_since_full"] = sorted(pending_new_borrowers)
     _write_state(data_root, state)
@@ -266,6 +268,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         "rpc_source": rpc_source,
         "latest_block": latest_block,
         "finalized_block": finalized_block,
+        "finalized_block_time": finalized_block_time,
         "candidate_address_count": len(borrowers),
         "pending_new_borrower_count": len(pending_new_borrowers),
         "mutates_v01_or_v02": False,
@@ -292,6 +295,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
             captured_at=census_captured,
             policy=CensusPolicy(),
         )
+        summary["block_time"] = finalized_block_time
         artifacts = _write_census_artifacts(
             data_root,
             accounts,
@@ -312,6 +316,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 )
             state["last_valid_full_census_at"] = census_captured.isoformat()
             state["last_valid_full_census_block"] = finalized_block
+            state["last_valid_full_census_block_time"] = finalized_block_time
             state["last_valid_full_census_summary"] = artifacts["summary"]
             state["last_valid_full_census_summary_sha256"] = artifacts["summary_sha256"]
             state["pending_new_borrowers_since_full"] = []
@@ -342,6 +347,7 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         block_number=finalized_block,
         captured_at=watch_captured,
     )
+    watch["block_time"] = finalized_block_time
     watch["includes_pending_new_borrowers"] = bool(pending_new_borrowers)
     watch["pending_new_borrower_count"] = len(pending_new_borrowers)
     artifacts = _write_census_artifacts(
