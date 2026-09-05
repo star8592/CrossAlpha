@@ -54,7 +54,7 @@ def strict_v03_config_report(path: Path) -> dict[str, Any]:
         "borrow_log_result_limit": source.get("borrower_universe_log_max_results")
         == v03_logs.BLOCKSCOUT_MAX_LOG_RESULTS,
         "borrow_log_split_policy": source.get("borrower_universe_log_limit_policy")
-        == "RECURSIVE_BLOCK_RANGE_SPLIT",
+        == "RECURSIVE_BLOCK_RANGE_SPLIT_TO_SINGLE_BLOCK",
         "state_rpc_env": source.get("state_rpc_env") == "EVM_RPC_URL",
         "state_rpc_fallback_pool": tuple(source.get("state_rpc_fallback_candidates", []))
         == fallback_urls,
