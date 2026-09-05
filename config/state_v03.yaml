@@ -29,6 +29,7 @@ source:
   borrower_universe_log_limit_policy: RECURSIVE_BLOCK_RANGE_SPLIT
   state_rpc_env: EVM_RPC_URL
   state_rpc_fallback_candidates:
+    - https://eth.blockscout.com/api/eth-rpc
     - https://ethereum-rpc.blockreq.com/v1/rpc/public
     - https://ethereum-rpc.publicnode.com
     - https://eth.llamarpc.com
