@@ -24,6 +24,8 @@ enum Command {
     ManifestCheck { data_root: PathBuf },
     /// Rebuild daily and series indexes from the immutable audit manifest.
     ManifestRebuild { data_root: PathBuf },
+    /// Compare Python-produced indexes with a Rust rebuild in a temporary directory.
+    ManifestParity { data_root: PathBuf },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -64,9 +66,30 @@ async fn main() -> Result<()> {
                 data_root.display()
             );
         }
+        Command::ManifestParity { data_root } => {
+            let report = crossalpha_storage::verify_manifest_parity(&data_root)?;
+            println!(
+                "ok={} records={} daily_files={} series_files={} mismatches={} data_root={}",
+                report.ok,
+                report.records,
+                report.daily_files,
+                report.series_files,
+                report.mismatches.len(),
+                data_root.display()
+            );
+            for mismatch in &report.mismatches {
+                println!("mismatch={mismatch}");
+            }
+            if !report.ok {
+                anyhow::bail!(
+                    "manifest parity failed with {} mismatch(es)",
+                    report.mismatches.len()
+                );
+            }
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R1 storage=implemented manifest_read=true manifest_rebuild=true python_compat=true"
+                "phase=R1 storage=implemented manifest_read=true manifest_rebuild=true manifest_parity=true python_compat=true"
             );
         }
     }
