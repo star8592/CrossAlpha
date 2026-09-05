@@ -28,7 +28,9 @@ cadence:
 normalization:
   basis_bps: (perp_mid / spot_mid - 1) * 10000
   spread_bps: (ask - bid) / mid * 10000
+  funding_semantics: LATEST_SETTLED_NORMALIZED_TO_8H
   funding_comparison_period_hours: 8
+  funding_interval_source: difference_between_latest_two_settlement_timestamps
   funding_unknown_interval_policy: exclude_from_cross_venue_funding_dispersion
   open_interest_unit: USD_NOTIONAL
   binance_open_interest_usd: open_interest_base * perp_mid
@@ -42,15 +44,22 @@ venues:
     perp_depth: /fapi/v1/depth
     premium_index: /fapi/v1/premiumIndex
     open_interest: /fapi/v1/openInterest
-    funding_history: /fapi/v1/fundingRate
+    settled_funding_history: /fapi/v1/fundingRate
+    settled_rate_field: fundingRate
+    settlement_time_field: fundingTime
   okx:
     base_url: https://www.okx.com
     ticker: /api/v5/market/ticker
-    funding_rate: /api/v5/public/funding-rate
+    settled_funding_history: /api/v5/public/funding-rate-history
+    settled_rate_field: realizedRate
+    settlement_time_field: fundingTime
     open_interest: /api/v5/public/open-interest
   bybit:
     base_url: https://api.bybit.com
     ticker: /v5/market/tickers
+    settled_funding_history: /v5/market/funding/history
+    settled_rate_field: fundingRate
+    settlement_time_field: fundingRateTimestamp
 features:
   per_asset:
     - spot_cross_venue_range_bps
