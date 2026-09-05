@@ -154,13 +154,14 @@ fi
 
 # R1. Install/compile and test only the D2 fix blast radius. The immediately
 # previous grand run already proved the rest of the suite; this targeted set
-# covers RPC resolution, config locking, cycle fallback, prospective invariants,
-# and shell/finalizer syntax contracts changed since that run.
+# covers RPC resolution, capability probing, config locking, cycle fallback,
+# prospective invariants, and shell/finalizer syntax contracts changed since that run.
 if phase_ok; then
   run_critical "R1. editable install" python -m pip install -e ".[dev]"
   run_critical "R2. Python compile check" python -m compileall -q src scripts
   run_critical "R3. targeted State V0.3 regression suite" pytest -q \
     tests/test_state_v03_rpc.py \
+    tests/test_state_v03_preflight.py \
     tests/test_state_v03_config.py \
     tests/test_state_v03_cycle.py \
     tests/test_state_v03_prospective.py \
