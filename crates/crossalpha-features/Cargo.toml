@@ -6,8 +6,11 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
 chrono.workspace = true
 flate2.workspace = true
+parquet.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 crossalpha-storage = { path = "../crossalpha-storage" }
