@@ -101,13 +101,13 @@ def test_cycle_without_configured_rpc_uses_zero_cost_fallback(monkeypatch, tmp_p
     settings = Settings(crossalpha_data_dir=tmp_path, evm_rpc_url=None)
     report = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
     assert report["status"] == "FULL_CENSUS_RECORDED"
-    assert report["rpc_source"] == "PUBLICNODE_ZERO_COST_FALLBACK"
+    assert report["rpc_source"] == "BLOCKREQ_ARCHIVE_ZERO_COST_FALLBACK"
     assert report["data_cost_usd"] == 0
     assert report["risk_multiplier"] is None
     assert report["mutates_v01_or_v02"] is False
     assert report["finalized_block_time"] == BLOCK_TIME
     assert report["census"]["block_time"] == BLOCK_TIME
-    assert _FakeRpc.last_url == "https://ethereum-rpc.publicnode.com"
+    assert _FakeRpc.last_url == "https://ethereum-rpc.blockreq.com/v1/rpc/public"
 
 
 def test_cycle_bootstrap_can_catch_up_and_record_nonprospective_full_census(
