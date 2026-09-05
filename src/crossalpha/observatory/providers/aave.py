@@ -15,26 +15,29 @@ LIQUIDATION_CALL_TOPIC = (
     "0xe413a321e8681d831f4dbccbca790d2952b56f977908e45be37335533e005286"
 )
 
-# Keep this query deliberately small and stable. These fields are sufficient for
-# market-level liquidity stress and are part of Aave's public V3 GraphQL surface.
-MARKETS_QUERY = """
-query CrossAlphaAaveMarkets($chainIds: [ChainId!]!) {
-  markets(request: { chainIds: $chainIds }) {
+
+def _markets_query(chain_id: int) -> str:
+    """Build a literal-chain query to avoid depending on a custom GraphQL scalar name."""
+    if int(chain_id) <= 0:
+        raise ValueError("chain_id must be positive")
+    return f"""
+query CrossAlphaAaveMarkets {{
+  markets(request: {{ chainIds: [{int(chain_id)}] }}) {{
     address
     name
-    reserves {
-      underlyingToken { address symbol decimals }
-      supplyInfo { apy { formatted } }
-      borrowInfo {
-        apy { formatted }
-        availableLiquidity { amount { value } usd }
+    reserves {{
+      underlyingToken {{ address symbol decimals }}
+      supplyInfo {{ apy {{ formatted }} }}
+      borrowInfo {{
+        apy {{ formatted }}
+        availableLiquidity {{ amount {{ value }} usd }}
         borrowCapReached
-      }
+      }}
       isFrozen
       isPaused
-    }
-  }
-}
+    }}
+  }}
+}}
 """
 
 
@@ -55,13 +58,13 @@ class AaveV3MarketProvider:
     ) -> None:
         self.timeout = timeout
         self.endpoint = endpoint
-        self.chain_id = chain_id
+        self.chain_id = int(chain_id)
 
     async def collect(self) -> list[ObservationEnvelope]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 self.endpoint,
-                json={"query": MARKETS_QUERY, "variables": {"chainIds": [self.chain_id]}},
+                json={"query": _markets_query(self.chain_id)},
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
             )
             response.raise_for_status()
