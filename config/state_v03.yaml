@@ -28,6 +28,7 @@ source:
   deployment_block: 16291127
   borrow_event_topic0: "0xb3d084820fb1a9decffb176436bd02558d15fac9b0ddfed8c465bc7359d7dce0"
   get_user_account_data_selector: "0xbf92857c"
+  block_time_source: eth_getBlockByNumber(finalized_block)
   ethereum_core_base_currency_decimals: 8
 borrower_universe:
   identity: Borrow.onBehalfOf
