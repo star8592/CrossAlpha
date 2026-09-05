@@ -121,8 +121,7 @@ async fn main() -> Result<()> {
                 now,
             )?;
             if !no_write_report {
-                let report_path =
-                    crossalpha_observatory::write_health_report(&data_root, &report)?;
+                let report_path = crossalpha_observatory::write_health_report(&data_root, &report)?;
                 eprintln!("report={}", report_path.display());
             }
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -132,7 +131,7 @@ async fn main() -> Result<()> {
         }
         Command::MigrationStatus => {
             println!(
-                "phase=R2.1 storage=production-compatible parity_gate=passed observatory_health=implemented health_parity_gate=required python_compat=true"
+                "phase=R2.1 storage=production-compatible parity_gate=passed observatory_health=production-compatible health_parity_gate=passed python_compat=true"
             );
         }
     }
