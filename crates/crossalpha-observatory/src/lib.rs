@@ -2,6 +2,7 @@ pub mod health;
 pub mod live_health;
 pub mod providers;
 pub mod report;
+pub mod supervisor;
 
 pub use health::DEFAULT_EXPECTED_SERIES;
 pub use health::ObservatoryHealthReport;
@@ -17,3 +18,5 @@ pub use providers::ProviderClient;
 pub use providers::ProviderSource;
 pub use providers::parse_sources;
 pub use report::write_json_report;
+pub use supervisor::SupervisorConfig;
+pub use supervisor::run_supervisor_until_shutdown;
