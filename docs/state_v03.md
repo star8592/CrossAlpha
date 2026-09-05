@@ -2,14 +2,9 @@
 
 ## Purpose
 
-State V0.3 closes a deliberate gap left by State V0.2: market-level lending
-liquidity is not the same object as borrower solvency. V0.3 therefore builds an
-auditable Aave V3 Ethereum Core borrower universe and measures current borrower
-health at one common finalized Ethereum block.
+State V0.3 measures borrower solvency rather than market-level lending liquidity. It builds an auditable Aave V3 Ethereum Core borrower universe and measures all eligible accounts at one common finalized Ethereum block.
 
-V0.3 is **descriptive only**. It does not change Frozen B3, State V0.1, the
-prospective A/B V0.1 ledger, or State V0.2. It has no risk multiplier and no
-automatic promotion path into trading logic.
+V0.3 is **descriptive only**. It does not modify Frozen B3, State V0.1, A/B V0.1, or State V0.2. It has no risk multiplier and no automatic path into trading logic.
 
 ## Frozen identity
 
@@ -20,251 +15,156 @@ automatic promotion path into trading logic.
 - Actionability: `DESCRIPTIVE_ONLY`
 - Risk multiplier: `null`
 - Required data cost: `$0`
+- Historical bootstrap is **not** prospective evidence.
 
-## Data source
+## Aave object
 
-The primary object is the Aave V3 Ethereum Core Pool:
+Ethereum Core Pool:
 
 `0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2`
 
-The borrower candidate universe starts at the Core Pool deployment block
-`16291127` and is reconstructed from the Pool `Borrow` event. The debt identity
-is `Borrow.onBehalfOf`, not transaction sender and not necessarily the address
-receiving borrowed funds.
+Borrower-universe bootstrap begins at block `16291127`. Debt identity is `Borrow.onBehalfOf`.
 
-Current account state is read with `Pool.getUserAccountData(address)` at one
-common finalized block tag. CrossAlpha decodes:
+Current account state is read with `Pool.getUserAccountData(address)` at one common finalized block tag. CrossAlpha decodes collateral, debt, available borrows, liquidation threshold, LTV, and health factor. Ethereum Core base-currency values use 8 decimals; health factor uses 18 decimals. A zero-debt `uint256.max` health factor remains unknown/non-finite for distribution purposes.
 
-- total collateral in base currency,
-- total debt in base currency,
-- available borrows,
-- current liquidation threshold,
-- LTV,
-- health factor.
+The finalized block timestamp is independently obtained with `eth_getBlockByNumber(finalized_block)` and stored as `block_time`.
 
-Ethereum Core base-currency monetary values are normalized using 8 decimals and
-health factor using 18 decimals. A zero-debt `uint256.max` health factor is kept
-as unknown/non-finite for distribution purposes rather than coerced into a
-normal borrower value.
+## RPC capability policy
 
-The finalized block's chain event time is read independently with
-`eth_getBlockByNumber(finalized_block)` and stored as `block_time`. It is not
-replaced by the collector wall-clock time.
+V0.3 requires more than a node that can answer `eth_blockNumber`. It needs historical logs and fixed-block state because the borrower universe starts at the 2023 Aave V3 Core deployment block.
 
-## RPC policy
+Candidate order is frozen as:
 
-`EVM_RPC_URL` is preferred when configured. If it is absent, V0.3 may use the
-zero-cost public fallback:
+1. `EVM_RPC_URL`, when explicitly configured by the operator;
+2. `https://ethereum-rpc.blockreq.com/v1/rpc/public`;
+3. `https://ethereum-rpc.publicnode.com`;
+4. `https://eth.llamarpc.com`.
 
-`https://ethereum-rpc.publicnode.com`
+The public candidates are zero-cost fallbacks. A configured RPC is preferred, but it is **not** a single point of failure: if it cannot satisfy the required capability probes, V0.3 may select the next zero-cost candidate.
 
-No RPC source is accepted merely because it responds to `eth_blockNumber`.
-Before V0.3 can freeze, the live preflight must prove:
+Before freeze, a candidate must prove all of these capabilities:
 
-1. current block access,
-2. finalized-block timestamp access via `eth_getBlockByNumber`,
-3. historical `eth_getLogs` access near the Aave V3 Core deployment block,
-4. recent `Borrow` log access,
-5. fixed-block `eth_call` compatibility for `getUserAccountData`.
+1. `eth_blockNumber`;
+2. `eth_getBlockByNumber` for the finalized block;
+3. recent `eth_getLogs` for Aave `Borrow`;
+4. historical `eth_getLogs` near deployment block `16291127`;
+5. fixed-block `eth_call` for `getUserAccountData`.
 
-If any of those fail, V0.3 does not freeze.
+The first candidate passing the complete probe is selected. Failure diagnostics persist only the safe source label and exception class; configured URLs, tokens, and exception messages are never serialized.
+
+The regular V0.3 cycle also performs capability selection **before any state/raw/parquet write**. One selected RPC is then used for that whole cycle. CrossAlpha does not switch RPC providers after a cycle has begun writing evidence. If the selected endpoint later fails mid-cycle, the cycle fails and retries on a future scheduled run rather than mixing providers inside one census.
+
+The preflight implementation itself is included in the V0.3 frozen implementation hash.
 
 ## Borrower universe bootstrap
 
-Historical reconstruction is operational bootstrap, **not prospective research
-evidence**.
+Frozen rules:
 
-Frozen bootstrap rules:
-
-- start block: `16291127`,
-- chunk size: 25,000 blocks,
-- maximum chunks per 15-minute cycle: 8,
-- recursive split floor after RPC range errors: 256 blocks,
-- finalized-head lag: 64 blocks,
+- start block: `16291127`;
+- chunk size: 25,000 blocks;
+- maximum chunks per 15-minute cycle: 8;
+- recursive split floor after RPC range errors: 256 blocks;
+- finalized-head lag: 64 blocks;
 - historical candidate addresses are monotonic and never deleted.
 
-Retaining historical candidates is intentional. If a short-lived/reorged borrow
-causes a false-positive candidate, the next current account census will report
-zero current debt. Current active borrower status is determined by
-`totalDebtBase > 0`, not by historical event presence.
+Historical reconstruction is operational bootstrap only. Until the scan reaches the current finalized head, the healthy state is `FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`; no full-market census claim is allowed.
 
-Until the scan reaches the current finalized head, the system state is
-`FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`. No full-market census claim is allowed.
+A historical/reorg false-positive candidate is harmless: current active borrower status is defined by current `totalDebtBase > 0`, not merely historical event presence.
 
-## Full borrower census
+## Full census and watchlist
 
-After bootstrap catches up, every full census queries every candidate address at
-one common finalized block.
+After bootstrap catches up, a full census queries every candidate at the same finalized block.
 
 A full census is valid only when:
 
-- borrower bootstrap is complete,
-- candidate universe is non-empty,
-- failed account-call ratio is <= 1%,
+- bootstrap is complete;
+- candidate universe is non-empty;
+- failed account-call ratio is <= 1%;
 - each address appears at most once.
 
-The full-census cadence is six hours **and the finalized block must have advanced
-strictly beyond the previous valid full-census block**. A stalled chain or RPC
-view can therefore never generate a second prospective census for the same
-block merely because six hours elapsed.
+A new full census requires both:
 
-A failed/partial census is preserved as an operational artifact but is not
-admitted to the prospective evidence ledger and does not advance the
-last-valid-census timestamp/block.
+- at least six hours since the previous valid full census; and
+- a finalized block strictly greater than the previous full-census block.
+
+A failed/partial census remains an operational artifact but does not enter the prospective evidence ledger or advance the last-valid-census marker.
+
+The 15-minute watchlist includes addresses with HF <= 1.50 or debt >= $1,000,000. A borrower newly observed between full censuses is temporarily added to the watchlist until the next valid full census. Watchlist output never claims full-market coverage.
 
 ## Measured facts
 
-V0.3 records facts rather than tuning a new stress score:
+V0.3 records facts rather than a tuned stress score:
 
-- active borrower count,
-- total active debt,
-- total active collateral,
-- debt-weighted HF p10 / p25 / p50,
-- borrower count and debt under HF thresholds 1.00, 1.02, 1.05, 1.10, 1.20, 1.50,
-- debt share under each threshold,
-- liquidation-cliff debt bands,
-- liquidatable debt share (HF <= 1.00),
-- critical debt share (HF <= 1.05),
+- active borrower count;
+- total active debt;
+- debt-weighted HF p10 / p25 / p50;
+- borrower/debt amounts below HF 1.00 / 1.02 / 1.05 / 1.10 / 1.20 / 1.50;
+- debt share under each threshold;
+- liquidation-cliff debt bands;
+- liquidatable debt share (HF <= 1.00);
+- critical debt share (HF <= 1.05);
 - near-cliff debt share (HF <= 1.20).
 
-This is a **current-position health distribution**. It is not a single-asset
-liquidation-price simulator. Aave eMode, cross-collateral structure, oracle
-prices and weighted liquidation thresholds are preserved through the Pool's own
-`getUserAccountData` result rather than replaced by a simplistic price formula.
+These are current-position health distributions, not single-token liquidation-price forecasts.
 
-## Watchlist layer
+## Point-in-time model
 
-A valid full census creates a fast-refresh watchlist containing addresses with:
+V0.3 keeps three clocks:
 
-- HF <= 1.50, or
-- debt >= $1,000,000.
+- `block_time`: finalized chain state time;
+- `captured_at`: account sampling time;
+- `known_at`: time the prospective record was sealed.
 
-The watchlist is refreshed on the 15-minute service cadence. It reports only the
-state of those selected addresses and explicitly sets
-`full_market_census_claim_allowed=false`.
-
-A borrower first appearing in a new finalized `Borrow` event after the previous
-full census is added to a **temporary pending-borrower watchlist** immediately.
-It remains there until the next valid full census absorbs it into the complete
-universe. This prevents a newly indebted address from being invisible for up to
-six hours while still preventing a watchlist from pretending to be a full
-market census.
-
-## Point-in-time time model
-
-V0.3 keeps three different clocks:
-
-- `block_time`: when the finalized Ethereum state existed on-chain,
-- `captured_at`: when CrossAlpha sampled all accounts at that block tag,
-- `known_at`: when the immutable prospective record was sealed.
-
-Every prospective record must satisfy:
+Every admitted record must satisfy:
 
 `block_time <= captured_at <= known_at`
 
-This ordering is independently audited. It prevents collector time from being
-silently substituted for event time.
+At freeze, CrossAlpha also seals the current minimum eligible finalized block. A later calculation for an older block cannot be inserted as prospective evidence.
 
-## Prospective anti-backfill rules
+## Prospective anti-backfill and hash graph
 
-At freeze time V0.3 seals both:
+A prospective full census requires:
 
-- UTC freeze timestamp,
-- current minimum eligible finalized Ethereum block.
+- block >= frozen minimum eligible block;
+- `captured_at` not before freeze;
+- `known_at` not before `captured_at`;
+- `block_time` not after `captured_at`;
+- complete borrower bootstrap;
+- valid full-census coverage;
+- unchanged V0.1 / A-B V0.1 / V0.2 reference freeze hashes;
+- unchanged V0.3 implementation/config hashes.
 
-A full census may enter the prospective ledger only when:
+Records are keyed by finalized block. The same block cannot later be relabeled with different artifacts (`STATE_V03_BLOCK_COLLISION`).
 
-- its `captured_at` is not before freeze,
-- its `known_at` is not before `captured_at`,
-- its on-chain `block_time` is not after `captured_at`,
-- its block is not below the frozen minimum eligible block,
-- bootstrap is complete,
-- full-census coverage gate passes,
-- V0.1, A/B V0.1 and V0.2 reference freeze hashes are unchanged,
-- V0.3 implementation/config hashes are unchanged.
+The frozen implementation set includes the borrower metrics, RPC reader, RPC capability preflight, cycle, watchlist, prospective writer, config checker, and YAML config.
 
-Therefore a researcher cannot freeze V0.3 and later calculate an old Ethereum
-block to fabricate prospective history.
+The strict auditor verifies record/freeze seals, implementation/reference hashes, block identity and ordering, PTI clocks, artifact hashes, unique addresses, coverage, active debt, cliff debt shares, watchlist membership, and debt-weighted HF quantiles. Key metrics are independently recomputed from account-detail parquet rather than trusted from the summary JSON alone.
 
-Records are keyed by finalized block. The same block cannot later be relabeled
-with another summary/detail artifact (`STATE_V03_BLOCK_COLLISION`).
-
-## Hash graph and independent recomputation
-
-A prospective record links:
-
-`V0.3 freeze -> census summary JSON -> account-detail parquet`
-
-The strict auditor independently verifies:
-
-- freeze and record seals,
-- predecessor and implementation hashes,
-- record filename/block identity,
-- minimum block floor,
-- `block_time <= captured_at <= known_at`,
-- monotonic finalized block numbers and block times,
-- summary/detail file hashes,
-- summary protocol and full-census semantics,
-- block-time link between ledger and summary,
-- linked key metrics,
-- unique borrower addresses,
-- candidate count,
-- RPC coverage recomputed from detail rows,
-- active debt and active borrower count recomputed from detail rows,
-- HF <= 1.00 / 1.05 / 1.20 debt shares recomputed from detail rows,
-- watchlist count recomputed from detail rows,
-- debt-weighted HF p10 / p25 / p50 recomputed from detail rows.
-
-This deliberately creates a second calculation path. A coordinated edit that
-changes a summary, updates the ledger's summary hash, and re-seals the ledger
-still fails if the account-detail parquet does not support the claimed metrics.
-
-The audit level is:
+Audit level:
 
 `STRICT_HASH_GRAPH_EVENT_TIME_AND_DETAIL_RECOMPUTE`
 
 ## Research maturity gate
 
-V0.3 can never automatically become a trading modifier.
+V0.3 can never automatically become a trading modifier. Eligibility to design a separate preregistered O2 protocol requires all of:
 
-It may only become eligible for a separately preregistered O2 protocol after all
-of the following are true:
+- >= 180 genuine prospective calendar days;
+- >= 120 valid full censuses;
+- >= 5 distinct cliff-stress episodes;
+- complete borrower bootstrap;
+- valid ledger integrity;
+- completed outcome-linkage test;
+- a separately preregistered O2 decision rule before performance evaluation.
 
-- >= 180 genuine prospective calendar days,
-- >= 120 valid full censuses,
-- >= 5 distinct cliff-stress episodes,
-- borrower bootstrap remains complete,
-- ledger integrity remains valid,
-- an outcome-linkage test is completed,
-- a separate O2 decision rule is preregistered before performance evaluation.
+The provisional descriptive episode definition is HF <= 1.05 debt share >= 5%, with a 24-hour cooldown. It is not a trading threshold.
 
-The provisional cliff-episode descriptor is critical debt share
-(HF <= 1.05) >= 5%, with a 24-hour episode cooldown. This threshold is a frozen
-descriptive event definition, not a trading threshold.
-
-## What V0.3 does not claim
-
-V0.3 does not claim that:
-
-- HF predicts price direction,
-- HF <= 1.05 will necessarily liquidate,
-- all collateral can be liquidated at oracle value,
-- liquidation volume equals the debt currently near the cliff,
-- one token price shock can be inferred without full account collateral/debt
-  composition,
-- the watchlist represents the entire Aave market,
-- the observed cliff distribution is alpha.
-
-Those are separate hypotheses requiring separate, preregistered tests.
-
-## Operational states
+## Healthy operational states
 
 Healthy states include:
 
-- `FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`
-- `FROZEN_AWAITING_FIRST_VALID_FULL_CENSUS`
-- `O1_PROSPECTIVE_BORROWER_EVIDENCE_ACCUMULATING`
-- `ELIGIBLE_FOR_O2_PROTOCOL_DESIGN`
+- `FROZEN_BORROWER_UNIVERSE_BOOTSTRAPPING`;
+- `FROZEN_AWAITING_FIRST_VALID_FULL_CENSUS`;
+- `O1_PROSPECTIVE_BORROWER_EVIDENCE_ACCUMULATING`;
+- `ELIGIBLE_FOR_O2_PROTOCOL_DESIGN`.
 
-The final state means only that enough prospective evidence exists to design a
-new O2 protocol. It does not mean State V0.3 is actionable.
+The final state only means there is enough prospective evidence to design a new protocol. It does not mean V0.3 is actionable.
