@@ -18,8 +18,10 @@ def _topic(address: str) -> str:
 
 
 class _FakeRpc:
-    def __init__(self, *_args, **_kwargs):
-        pass
+    last_url: str | None = None
+
+    def __init__(self, rpc_url: str, *_args, **_kwargs):
+        type(self).last_url = rpc_url
 
     async def latest_block(self) -> int:
         return AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK + v03_cycle.FINALITY_LAG_BLOCKS + 100
@@ -57,12 +59,16 @@ class _FakeRpc:
         )
 
 
-def test_cycle_without_rpc_is_blocked_without_mutating_prior_versions(tmp_path: Path) -> None:
+def test_cycle_without_configured_rpc_uses_zero_cost_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(v03_cycle, "AaveBorrowerRpc", _FakeRpc)
     settings = Settings(crossalpha_data_dir=tmp_path, evm_rpc_url=None)
     report = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
-    assert report["status"] == "BLOCKED_NO_EVM_RPC_URL"
+    assert report["status"] == "FULL_CENSUS_RECORDED"
+    assert report["rpc_source"] == "PUBLICNODE_ZERO_COST_FALLBACK"
+    assert report["data_cost_usd"] == 0
     assert report["risk_multiplier"] is None
     assert report["mutates_v01_or_v02"] is False
+    assert _FakeRpc.last_url == "https://ethereum-rpc.publicnode.com"
 
 
 def test_cycle_bootstrap_can_catch_up_and_record_nonprospective_full_census(
@@ -72,6 +78,7 @@ def test_cycle_bootstrap_can_catch_up_and_record_nonprospective_full_census(
     settings = Settings(crossalpha_data_dir=tmp_path, evm_rpc_url="http://example.invalid")
     report = asyncio.run(v03_cycle.run_state_v03_cycle(settings))
     assert report["status"] == "FULL_CENSUS_RECORDED"
+    assert report["rpc_source"] == "EVM_RPC_URL"
     assert report["census"]["valid_full_census"] is True
     assert report["census"]["candidate_address_count"] == 1
     assert report["prospective"]["status"] == "not_frozen_no_prospective_write"
