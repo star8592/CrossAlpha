@@ -29,6 +29,7 @@ dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 crossalpha = "crossalpha.cli:main"
+crossalpha-research-catalog = "crossalpha.research_catalog:main"
 crossalpha-free-audit = "crossalpha.core.free_commands:audit_main"
 crossalpha-free-returns = "crossalpha.core.free_commands:returns_main"
 crossalpha-free-baselines = "crossalpha.core.free_commands:baselines_main"
