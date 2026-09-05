@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,21 @@ import pandas as pd
 
 from crossalpha.state import v03
 from crossalpha.state import v03_prospective as prospective
+
+
+LINKED_METRICS = (
+    "candidate_address_count",
+    "account_call_coverage_ratio",
+    "active_borrower_count",
+    "total_active_debt_usd",
+    "debt_weighted_hf_p10",
+    "debt_weighted_hf_p25",
+    "debt_weighted_hf_p50",
+    "liquidatable_debt_share",
+    "critical_hf_le_1_05_debt_share",
+    "near_cliff_hf_le_1_20_debt_share",
+    "watchlist_count",
+)
 
 
 def _load_records(data_root: Path) -> list[dict[str, Any]]:
@@ -27,6 +43,17 @@ def _bootstrap_state(data_root: Path) -> dict[str, Any]:
     if not path.exists():
         return {"bootstrap_complete": False}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _numeric_equal(left: Any, right: Any, *, tolerance: float = 1e-12) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    try:
+        a = float(left)
+        b = float(right)
+    except (TypeError, ValueError):
+        return left == right
+    return math.isfinite(a) and math.isfinite(b) and math.isclose(a, b, rel_tol=tolerance, abs_tol=tolerance)
 
 
 def _count_stress_episodes(
@@ -75,10 +102,7 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
     records = _load_records(data_root)
     hashes_ok, hash_details = prospective.hashes_unchanged(data_root, freeze)
     frozen_at = pd.Timestamp(freeze["frozen_at"])
-    if frozen_at.tzinfo is None:
-        frozen_at = frozen_at.tz_localize("UTC")
-    else:
-        frozen_at = frozen_at.tz_convert("UTC")
+    frozen_at = frozen_at.tz_localize("UTC") if frozen_at.tzinfo is None else frozen_at.tz_convert("UTC")
     minimum_block = int(freeze["minimum_eligible_block"])
 
     checks = {
@@ -86,12 +110,19 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
         "implementation_and_reference_hashes_unchanged": hashes_ok,
         "record_seals": True,
         "freeze_links": True,
+        "record_filename_matches_block": True,
         "block_not_before_freeze_floor": True,
         "known_at_not_before_freeze": True,
         "captured_at_not_before_freeze": True,
         "known_at_not_before_captured_at": True,
         "descriptive_only": True,
         "artifact_hash_links": True,
+        "summary_semantics": True,
+        "summary_metric_links": True,
+        "detail_unique_addresses": True,
+        "detail_candidate_count": True,
+        "detail_coverage_recomputed": True,
+        "detail_active_debt_recomputed": True,
         "unique_block_numbers": True,
         "block_numbers_monotonic": True,
     }
@@ -100,6 +131,7 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
     known_times: list[pd.Timestamp] = []
     seen_blocks: set[int] = set()
     for raw in records:
+        record_path = Path(str(raw.get("__path", "")))
         row = dict(raw)
         row.pop("__path", None)
         if not prospective.verify_seal(row):
@@ -108,22 +140,22 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
             checks["freeze_links"] = False
         block = int(row.get("block_number", -1))
         blocks.append(block)
+        try:
+            path_block = int(record_path.stem.split("=", 1)[1])
+        except (IndexError, ValueError):
+            path_block = -1
+        if path_block != block:
+            checks["record_filename_matches_block"] = False
         if block in seen_blocks:
             checks["unique_block_numbers"] = False
         seen_blocks.add(block)
-        if block < minimum_block:
+        if block < minimum_block or int(row.get("minimum_eligible_block", -1)) != minimum_block:
             checks["block_not_before_freeze_floor"] = False
 
         known = pd.Timestamp(row["known_at"])
         captured = pd.Timestamp(row["captured_at"])
-        if known.tzinfo is None:
-            known = known.tz_localize("UTC")
-        else:
-            known = known.tz_convert("UTC")
-        if captured.tzinfo is None:
-            captured = captured.tz_localize("UTC")
-        else:
-            captured = captured.tz_convert("UTC")
+        known = known.tz_localize("UTC") if known.tzinfo is None else known.tz_convert("UTC")
+        captured = captured.tz_localize("UTC") if captured.tzinfo is None else captured.tz_convert("UTC")
         known_times.append(known)
         if known < frozen_at:
             checks["known_at_not_before_freeze"] = False
@@ -136,13 +168,68 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
 
         summary_path = Path(str(row.get("summary_path", "")))
         detail_path = Path(str(row.get("detail_path", "")))
-        if (
-            not summary_path.exists()
-            or not detail_path.exists()
-            or row.get("summary_sha256") != prospective.sha256_file(summary_path)
-            or row.get("detail_sha256") != prospective.sha256_file(detail_path)
-        ):
+        artifacts_ok = (
+            summary_path.exists()
+            and detail_path.exists()
+            and row.get("summary_sha256") == prospective.sha256_file(summary_path)
+            and row.get("detail_sha256") == prospective.sha256_file(detail_path)
+        )
+        if not artifacts_ok:
             checks["artifact_hash_links"] = False
+            continue
+
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            detail = pd.read_parquet(detail_path)
+        except Exception:
+            checks["summary_semantics"] = False
+            checks["summary_metric_links"] = False
+            checks["detail_unique_addresses"] = False
+            checks["detail_candidate_count"] = False
+            checks["detail_coverage_recomputed"] = False
+            checks["detail_active_debt_recomputed"] = False
+            continue
+
+        if (
+            summary.get("protocol") != v03.PROTOCOL
+            or summary.get("actionability") != v03.ACTIONABILITY
+            or summary.get("risk_multiplier") is not None
+            or summary.get("bootstrap_complete") is not True
+            or summary.get("valid_full_census") is not True
+            or int(summary.get("block_number", -1)) != block
+            or Path(str(summary.get("detail_path", ""))) != detail_path
+            or summary.get("detail_sha256") != row.get("detail_sha256")
+        ):
+            checks["summary_semantics"] = False
+
+        for metric in LINKED_METRICS:
+            if not _numeric_equal(row.get(metric), summary.get(metric)):
+                checks["summary_metric_links"] = False
+
+        if "address" not in detail.columns or detail["address"].duplicated().any():
+            checks["detail_unique_addresses"] = False
+        candidate_count = int(summary.get("candidate_address_count", -1))
+        if len(detail) != candidate_count:
+            checks["detail_candidate_count"] = False
+
+        if {"success", "total_debt_usd", "health_factor"}.issubset(detail.columns) and candidate_count >= 0:
+            success_mask = detail["success"].astype(bool)
+            coverage = float(success_mask.sum()) / candidate_count if candidate_count > 0 else 1.0
+            if not _numeric_equal(coverage, summary.get("account_call_coverage_ratio")):
+                checks["detail_coverage_recomputed"] = False
+            successful = detail.loc[success_mask].copy()
+            debt = pd.to_numeric(successful["total_debt_usd"], errors="coerce")
+            hf = pd.to_numeric(successful["health_factor"], errors="coerce")
+            active = successful.loc[(debt > 0) & hf.notna()].copy()
+            active_debt = float(pd.to_numeric(active["total_debt_usd"], errors="coerce").fillna(0.0).sum())
+            if (
+                len(active) != int(summary.get("active_borrower_count", -1))
+                or not _numeric_equal(active_debt, summary.get("total_active_debt_usd"))
+            ):
+                checks["detail_active_debt_recomputed"] = False
+        else:
+            checks["detail_coverage_recomputed"] = False
+            checks["detail_active_debt_recomputed"] = False
 
     if blocks != sorted(blocks):
         checks["block_numbers_monotonic"] = False
@@ -157,7 +244,7 @@ def strict_state_v03_integrity_report(data_root: Path) -> dict[str, Any]:
 
     return {
         "protocol": prospective.PROSPECTIVE_PROTOCOL,
-        "audit_level": "STRICT_NON_MUTATING_HASH_GRAPH",
+        "audit_level": "STRICT_NON_MUTATING_HASH_GRAPH_WITH_ARTIFACT_RECOMPUTE",
         "frozen": True,
         "ok": all(checks.values()),
         "record_count": len(records),
