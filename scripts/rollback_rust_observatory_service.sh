@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Invoke with:
+#   bash scripts/rollback_rust_observatory_service.sh
+# This works even if the checkout does not preserve the executable bit.
+
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_DST="$UNIT_DIR/crossalpha-observatory.service"
 UNIT_BACKUP="$UNIT_DIR/crossalpha-observatory.service.pre-rust"
@@ -22,5 +26,5 @@ if systemctl --user is-active --quiet crossalpha-observatory.service; then
 fi
 
 echo "Python Observatory service failed to become active after rollback." >&2
- systemctl --user status crossalpha-observatory.service --no-pager >&2 || true
+systemctl --user status crossalpha-observatory.service --no-pager >&2 || true
 exit 1
