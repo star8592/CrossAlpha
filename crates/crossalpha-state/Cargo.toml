@@ -6,10 +6,13 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 num-bigint.workspace = true
 num-traits.workspace = true
+parquet.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -17,3 +20,4 @@ serde_yaml.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 crossalpha-config = { path = "../crossalpha-config" }
+crossalpha-storage = { path = "../crossalpha-storage" }
