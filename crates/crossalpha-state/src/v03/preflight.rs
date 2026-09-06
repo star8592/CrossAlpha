@@ -1,4 +1,4 @@
-use super::{
+use crate::v03::{
     AAVE_V3_ETHEREUM_CORE_POOL, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, ACTIONABILITY,
     BLOCKSCOUT_ETHEREUM_API_URL, BLOCKSCOUT_LOG_SOURCE, BLOCKSCOUT_MAX_LOG_RESULTS,
     BORROW_EVENT_TOPIC0, FINALITY_LAG_BLOCKS, GET_USER_ACCOUNT_DATA_SELECTOR,
@@ -230,11 +230,12 @@ fn normalize_address(value: &str) -> Result<String> {
 }
 
 fn validate_account_data_result(value: &Value) -> Result<()> {
-    let text = value
-        .as_str()
-        .context("eth_call result is not hex")?;
+    let text = value.as_str().context("eth_call result is not hex")?;
     let raw = text.strip_prefix("0x").context("eth_call result is not hex")?;
-    if raw.len() < 64 * 6 || raw.len() % 64 != 0 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if raw.len() < 64 * 6
+        || raw.len() % 64 != 0
+        || !raw.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
         bail!("getUserAccountData returned unexpected byte length");
     }
     Ok(())
@@ -267,7 +268,11 @@ fn resolve_state_rpc_candidates(configured: Option<&str>) -> Vec<RpcCandidate> {
     result
 }
 
-async fn query_blockscout_logs(client: &Client, from_block: u64, to_block: u64) -> Result<Vec<Value>> {
+async fn query_blockscout_logs(
+    client: &Client,
+    from_block: u64,
+    to_block: u64,
+) -> Result<(usize, Vec<Value>)> {
     let response = client
         .get(BLOCKSCOUT_ETHEREUM_API_URL)
         .query(&[
@@ -289,11 +294,13 @@ async fn query_blockscout_logs(client: &Client, from_block: u64, to_block: u64) 
         .and_then(|object| object.get("result"))
         .and_then(Value::as_array)
         .context("Blockscout indexed-log query failed")?;
-    Ok(result
+    let raw_len = result.len();
+    let rows = result
         .iter()
         .filter(|item| item.is_object())
         .cloned()
-        .collect())
+        .collect();
+    Ok((raw_len, rows))
 }
 
 fn borrow_logs_complete<'a>(
@@ -305,8 +312,8 @@ fn borrow_logs_complete<'a>(
         if to_block < from_block {
             bail!("invalid block range");
         }
-        let rows = query_blockscout_logs(client, from_block, to_block).await?;
-        if rows.len() < BLOCKSCOUT_MAX_LOG_RESULTS as usize {
+        let (raw_len, rows) = query_blockscout_logs(client, from_block, to_block).await?;
+        if raw_len < BLOCKSCOUT_MAX_LOG_RESULTS as usize {
             return Ok(rows);
         }
         if from_block == to_block {
