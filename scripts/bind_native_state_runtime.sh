@@ -51,8 +51,11 @@ cd "$REPO_DIR"
 cargo build --workspace --release
 BINARY="$REPO_DIR/target/release/crossalpha-state-rs"
 
-# Freeze is idempotent for a valid existing legacy freeze. The native sidecar binding
-# is immutable and includes Cargo.lock plus the complete State/CLI source hash graph.
+# Bind predecessor first because V0.3 legacy freeze references the V0.2 freeze.
+echo "==> Binding State V0.2 to Rust runtime"
+"$BINARY" v02 freeze --data-root "$DATA_ROOT"
+"$BINARY" v02 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
+
 echo "==> Binding State V0.3 to Rust runtime"
 "$BINARY" v03 freeze --data-root "$DATA_ROOT"
 "$BINARY" v03 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
@@ -62,4 +65,4 @@ echo "==> Binding State V0.4 to Rust runtime"
 "$BINARY" v04 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
 
 echo "Native State runtime bindings are valid."
-echo "Next full cutover: bash scripts/cutover_unified_rust_daemon.sh --activate --data-root '$DATA_ROOT' --include-state-v03 --include-state-v04"
+echo "Next full cutover: bash scripts/cutover_unified_rust_daemon.sh --activate --data-root '$DATA_ROOT' --include-state-v02 --include-state-v03 --include-state-v04"
