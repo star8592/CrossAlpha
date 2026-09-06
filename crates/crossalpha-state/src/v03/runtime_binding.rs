@@ -141,6 +141,8 @@ pub fn verify_runtime_binding_file(path: &Path) -> Result<bool> {
 fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
     let files = [
         ("workspace_cargo", "Cargo.toml"),
+        ("storage_cargo", "crates/crossalpha-storage/Cargo.toml"),
+        ("storage_lib", "crates/crossalpha-storage/src/lib.rs"),
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("state_lib", "crates/crossalpha-state/src/lib.rs"),
         ("state_v03", "crates/crossalpha-state/src/v03.rs"),
