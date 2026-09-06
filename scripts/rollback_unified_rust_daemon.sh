@@ -52,6 +52,10 @@ restore_timer \
   "${materializer_enabled:-false}" \
   "${materializer_active:-false}"
 restore_timer \
+  crossalpha-state-v02.timer \
+  "${state_v02_enabled:-false}" \
+  "${state_v02_active:-false}"
+restore_timer \
   crossalpha-state-v03.timer \
   "${state_v03_enabled:-false}" \
   "${state_v03_active:-false}"
@@ -65,6 +69,7 @@ systemctl --user daemon-reload
 echo "Unified Rust daemon stopped and previous service state restored."
 echo "observatory_active=${observatory_active:-false} observatory_enabled=${observatory_enabled:-false}"
 echo "materializer_active=${materializer_active:-false} materializer_enabled=${materializer_enabled:-false}"
+echo "state_v02_active=${state_v02_active:-false} state_v02_enabled=${state_v02_enabled:-false}"
 echo "state_v03_active=${state_v03_active:-false} state_v03_enabled=${state_v03_enabled:-false}"
 echo "state_v04_active=${state_v04_active:-false} state_v04_enabled=${state_v04_enabled:-false}"
 echo "data_root=${data_root:-unknown}"
