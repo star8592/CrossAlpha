@@ -16,6 +16,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = dotenvy::dotenv();
     let args = Args::parse();
     if !args.http_timeout.is_finite() || args.http_timeout <= 0.0 {
         anyhow::bail!("--http-timeout must be a finite positive number");
