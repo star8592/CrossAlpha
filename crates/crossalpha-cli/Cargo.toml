@@ -26,6 +26,10 @@ name = "crossalpha-daemon-rs"
 path = "src/bin/daemon.rs"
 
 [[bin]]
+name = "crossalpha-state-v02-kernel-rs"
+path = "src/bin/state_v02_kernel.rs"
+
+[[bin]]
 name = "crossalpha-state-v03-config-check-rs"
 path = "src/bin/state_v03_config_check.rs"
 
