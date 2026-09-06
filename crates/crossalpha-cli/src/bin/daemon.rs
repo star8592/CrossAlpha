@@ -4,6 +4,7 @@ use crossalpha_features::{materialize_recent_canonical, materialize_recent_featu
 use crossalpha_observatory::{
     ProviderSource, SupervisorConfig, run_supervisor, write_json_report,
 };
+use crossalpha_state::v02_engine::NativeStateV02;
 use crossalpha_state::v03_engine::NativeStateV03;
 use crossalpha_state::v04_engine::NativeStateV04Engine;
 use crossalpha_state::{StateRuntimeContext, StateSpec};
@@ -22,6 +23,7 @@ use tracing_subscriber::EnvFilter;
 enum Component {
     Observatory,
     Materializer,
+    StateV02,
     StateV03,
     StateV04,
 }
@@ -38,13 +40,15 @@ struct Args {
     #[arg(long = "component", value_enum, required = true)]
     components: Vec<Component>,
 
-    /// Preserve the existing Observatory 5-minute cadence.
     #[arg(long, default_value_t = 300)]
     observatory_interval_seconds: u64,
 
-    /// Preserve the existing bounded materializer 15-minute cadence.
     #[arg(long, default_value_t = 900)]
     materializer_interval_seconds: u64,
+
+    /// Preserve the existing State V0.2 15-minute cadence.
+    #[arg(long, default_value_t = 900)]
+    state_v02_interval_seconds: u64,
 
     /// Preserve the existing State V0.3 15-minute cadence.
     #[arg(long, default_value_t = 900)]
@@ -119,28 +123,20 @@ async fn main() -> Result<()> {
         });
     }
 
-    if components.contains(&Component::StateV03) {
-        let context = StateRuntimeContext {
-            data_root: args.data_root.clone(),
-            http_timeout,
-            evm_rpc_url: args.evm_rpc_url.clone(),
-        };
-        let interval = Duration::from_secs(args.state_v03_interval_seconds);
-        tasks.spawn(async move {
-            state_loop(Component::StateV03, context, interval, failure_limit).await
-        });
-    }
-
-    if components.contains(&Component::StateV04) {
-        let context = StateRuntimeContext {
-            data_root: args.data_root.clone(),
-            http_timeout,
-            evm_rpc_url: args.evm_rpc_url.clone(),
-        };
-        let interval = Duration::from_secs(args.state_v04_interval_seconds);
-        tasks.spawn(async move {
-            state_loop(Component::StateV04, context, interval, failure_limit).await
-        });
+    for (component, interval_seconds) in [
+        (Component::StateV02, args.state_v02_interval_seconds),
+        (Component::StateV03, args.state_v03_interval_seconds),
+        (Component::StateV04, args.state_v04_interval_seconds),
+    ] {
+        if components.contains(&component) {
+            let context = StateRuntimeContext {
+                data_root: args.data_root.clone(),
+                http_timeout,
+                evm_rpc_url: args.evm_rpc_url.clone(),
+            };
+            let interval = Duration::from_secs(interval_seconds);
+            tasks.spawn(async move { state_loop(component, context, interval, failure_limit).await });
+        }
     }
 
     tokio::select! {
@@ -178,6 +174,7 @@ fn validate(args: &Args) -> Result<()> {
     for (name, value) in [
         ("observatory-interval-seconds", args.observatory_interval_seconds),
         ("materializer-interval-seconds", args.materializer_interval_seconds),
+        ("state-v02-interval-seconds", args.state_v02_interval_seconds),
         ("state-v03-interval-seconds", args.state_v03_interval_seconds),
         ("state-v04-interval-seconds", args.state_v04_interval_seconds),
         ("http-timeout-seconds", args.http_timeout_seconds),
@@ -200,16 +197,33 @@ fn validate(args: &Args) -> Result<()> {
 }
 
 fn validate_state_bindings(data_root: &Path, components: &BTreeSet<Component>) -> Result<()> {
-    if components.contains(&Component::StateV03) {
-        let integrity = NativeStateV03.integrity(data_root)?;
-        if integrity.get("cycle_enabled").and_then(Value::as_bool) != Some(true) {
-            bail!("State V0.3 daemon start refused: native freeze/runtime binding gate is not valid");
-        }
-    }
-    if components.contains(&Component::StateV04) {
-        let integrity = NativeStateV04Engine.integrity(data_root)?;
-        if integrity.get("cycle_enabled").and_then(Value::as_bool) != Some(true) {
-            bail!("State V0.4 daemon start refused: native freeze/runtime binding gate is not valid");
+    for (component, integrity) in [
+        (
+            Component::StateV02,
+            components
+                .contains(&Component::StateV02)
+                .then(|| NativeStateV02.integrity(data_root))
+                .transpose()?,
+        ),
+        (
+            Component::StateV03,
+            components
+                .contains(&Component::StateV03)
+                .then(|| NativeStateV03.integrity(data_root))
+                .transpose()?,
+        ),
+        (
+            Component::StateV04,
+            components
+                .contains(&Component::StateV04)
+                .then(|| NativeStateV04Engine.integrity(data_root))
+                .transpose()?,
+        ),
+    ] {
+        if let Some(integrity) = integrity
+            && integrity.get("cycle_enabled").and_then(Value::as_bool) != Some(true)
+        {
+            bail!("{component:?} daemon start refused: native freeze/runtime binding gate is not valid");
         }
     }
     Ok(())
@@ -288,11 +302,16 @@ async fn state_loop(
     loop {
         let started = Instant::now();
         let result = match component {
+            Component::StateV02 => NativeStateV02.cycle(&context).await,
             Component::StateV03 => NativeStateV03.cycle(&context).await,
             Component::StateV04 => NativeStateV04Engine.cycle(&context).await,
             _ => bail!("state loop called for non-state component"),
         };
         let (filename, protocol) = match component {
+            Component::StateV02 => (
+                "state_v02_daemon_health.json",
+                "CROSSALPHA_STATE_V0_2_DAEMON_HEALTH",
+            ),
             Component::StateV03 => (
                 "state_v03_daemon_health.json",
                 "CROSSALPHA_STATE_V0_3_DAEMON_HEALTH",
@@ -385,6 +404,7 @@ fn write_daemon_status(
             "cadence_seconds": {
                 "Observatory": args.observatory_interval_seconds,
                 "Materializer": args.materializer_interval_seconds,
+                "StateV02": args.state_v02_interval_seconds,
                 "StateV03": args.state_v03_interval_seconds,
                 "StateV04": args.state_v04_interval_seconds,
             },
