@@ -1,15 +1,17 @@
 [Unit]
-Description=CrossAlpha Observatory O0 collector
+Description=CrossAlpha Observatory Rust collector
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/CrossAlpha
-EnvironmentFile=%h/CrossAlpha/.env
-ExecStart=%h/CrossAlpha/.venv/bin/python scripts/collect_loop.py --interval 300
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=-@REPO_DIR@/.env
+ExecStart=@REPO_DIR@/target/release/crossalpha-rs observatory-run @DATA_ROOT@ --interval 300 --collector-timeout 120 --http-timeout 30 --max-consecutive-failures 3 --stale-after 900
 Restart=always
 RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
 
