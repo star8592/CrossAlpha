@@ -20,4 +20,5 @@ crossalpha-config = { path = "../crossalpha-config" }
 crossalpha-domain = { path = "../crossalpha-domain" }
 crossalpha-features = { path = "../crossalpha-features" }
 crossalpha-observatory = { path = "../crossalpha-observatory" }
+crossalpha-state = { path = "../crossalpha-state" }
 crossalpha-storage = { path = "../crossalpha-storage" }
