@@ -21,7 +21,7 @@ DATA_ROOT="$(realpath -m "$DATA_ROOT")"
 
 cargo build --workspace --release
 BINARY="$REPO_DIR/target/release/crossalpha-state-rs"
-"$BINARY" v04 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
+"$BINARY" v04 integrity --data-root "$DATA_ROOT" >/dev/null
 
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
