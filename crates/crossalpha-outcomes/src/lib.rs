@@ -1,3 +1,5 @@
+pub mod runtime;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -152,8 +154,8 @@ pub fn cumulative_return(returns: &[f64]) -> f64 {
 
 pub fn max_drawdown(returns: &[f64]) -> f64 {
     let mut equity = 1.0;
-    let mut peak = 1.0;
-    let mut worst = 0.0;
+    let mut peak: f64 = 1.0;
+    let mut worst: f64 = 0.0;
     for value in returns {
         equity *= 1.0 + value;
         peak = peak.max(equity);
