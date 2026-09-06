@@ -1,4 +1,5 @@
 pub mod baseline;
+pub mod paper;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Utc};
@@ -96,9 +97,7 @@ pub fn build_previous_volume_roll_map(
             .filter_map(|(contract, volume)| {
                 let expiry = meta[contract];
                 let not_backwards = held_expiry.is_none_or(|held| expiry >= held);
-                (expiry > cutoff
-                    && current_available.contains(contract.as_str())
-                    && not_backwards)
+                (expiry > cutoff && current_available.contains(contract.as_str()) && not_backwards)
                     .then_some((contract.as_str(), *volume, expiry))
             })
             .collect();
@@ -140,9 +139,7 @@ pub fn build_previous_volume_roll_map(
                 };
             }
         }
-        let rolled = held_contract
-            .as_ref()
-            .is_some_and(|held| held != &candidate);
+        let rolled = held_contract.as_ref().is_some_and(|held| held != &candidate);
         result.push(RollSelection {
             date: current_date,
             contract: candidate.clone(),
@@ -174,10 +171,7 @@ pub fn build_roll_mtm_returns(
         if !row.close.is_finite() || row.close <= 0.0 {
             bail!("bars close prices must be positive and non-null");
         }
-        if prices
-            .insert((row.date, row.contract.clone()), row.close)
-            .is_some()
-        {
+        if prices.insert((row.date, row.contract.clone()), row.close).is_some() {
             bail!("bars contain duplicate date/contract rows");
         }
     }
