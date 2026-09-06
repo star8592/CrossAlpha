@@ -59,6 +59,13 @@ if [[ "$ACTIVATE" != true ]]; then
   exit 2
 fi
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing legacy Observatory cutover: unified Rust daemon already owns Observatory." >&2
+  echo "Use scripts/rollback_unified_rust_daemon.sh before changing ownership." >&2
+  exit 2
+fi
+
 if [[ -z "$DATA_ROOT" && -f "$REPO_DIR/.env" ]]; then
   line="$(grep -E '^[[:space:]]*CROSSALPHA_DATA_DIR[[:space:]]*=' "$REPO_DIR/.env" | tail -n 1 || true)"
   if [[ -n "$line" ]]; then
@@ -77,7 +84,6 @@ if [[ -z "$DATA_ROOT" ]]; then
   echo "CROSSALPHA_DATA_DIR is not set. Pass --data-root explicitly." >&2
   exit 2
 fi
-
 if [[ "$DATA_ROOT" != /* ]]; then
   DATA_ROOT="$REPO_DIR/$DATA_ROOT"
 fi
@@ -184,7 +190,6 @@ fi
 systemctl --user is-active --quiet crossalpha-observatory.service
 
 trap - ERR INT TERM
-
 echo "Rust Observatory cutover succeeded."
 echo "audit_records_before=$BEFORE_RECORDS"
 echo "audit_records_after=$NEW_RECORDS"
