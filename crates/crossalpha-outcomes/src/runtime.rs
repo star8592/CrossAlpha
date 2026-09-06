@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
