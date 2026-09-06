@@ -15,3 +15,6 @@ parquet.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 crossalpha-storage = { path = "../crossalpha-storage" }
+
+[dev-dependencies]
+tempfile.workspace = true
