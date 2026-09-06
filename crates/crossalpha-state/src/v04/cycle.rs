@@ -4,7 +4,9 @@ use crate::v04_artifacts::write_venue_rows;
 use crate::v04_provider::{MultiVenueCollector, VenuePayload, parse_venue_snapshot};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use crossalpha_storage::{ObservationEnvelope, RawSnapshotStore};
+use crossalpha_storage::{
+    ObservationEnvelope, RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION, RawSnapshotStore,
+};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -42,7 +44,7 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
                 "collection_error": payload.collection_error,
             }))?;
             let envelope = ObservationEnvelope {
-                schema_version: 1,
+                schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
                 event_time: Some(row.observed_at),
                 observed_at: row.observed_at,
                 known_at: collected_at,
@@ -195,7 +197,19 @@ mod tests {
         let time = Utc.with_ymd_and_hms(2026, 9, 6, 12, 34, 56).unwrap();
         let (venue, mechanics) = snapshot_paths(Path::new("/tmp/data"), time);
         assert!(venue.to_string_lossy().contains("year=2026/month=09/day=06"));
-        assert!(venue.file_name().unwrap().to_string_lossy().starts_with("venues_at=123456"));
-        assert!(mechanics.file_name().unwrap().to_string_lossy().starts_with("mechanics_at=123456"));
+        assert!(
+            venue
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("venues_at=123456")
+        );
+        assert!(
+            mechanics
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("mechanics_at=123456")
+        );
     }
 }
