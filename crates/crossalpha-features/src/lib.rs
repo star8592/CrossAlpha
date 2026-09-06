@@ -6,6 +6,10 @@ pub mod parquet;
 pub mod recent_features;
 pub mod stablecoin_state;
 
+pub use canonical::aave::{
+    AAVE_CANONICAL_SCHEMA_VERSION, AaveLiquidationRow, AaveMarketRow,
+    parse_aave_liquidations, parse_aave_markets,
+};
 pub use canonical::hyperliquid::{HyperliquidAssetContextRow, parse_meta_and_asset_contexts};
 pub use canonical::materialize::{
     CanonicalMaterializeReport, CanonicalSourceReport, hyperliquid_path,
