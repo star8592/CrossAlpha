@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
     if !args.http_timeout.is_finite() || args.http_timeout <= 0.0 {
         bail!("--http-timeout must be a finite positive number");
     }
+    let require_ok = matches!(args.command, Command::Integrity);
     let now = Utc::now();
     let output = match args.command {
         Command::Bind => write_runtime_binding(&args.data_root, now)?,
@@ -102,6 +103,9 @@ async fn main() -> Result<()> {
         Command::Integrity | Command::Status => integrity(&args.data_root)?,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
+    if require_ok && output.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        bail!("Frozen B3 native paper integrity failed");
+    }
     Ok(())
 }
 
