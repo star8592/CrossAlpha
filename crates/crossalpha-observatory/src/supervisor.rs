@@ -56,7 +56,7 @@ pub async fn run_supervisor_until_shutdown(config: SupervisorConfig) -> Result<(
     }
 }
 
-async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
+pub async fn run_supervisor(config: SupervisorConfig) -> Result<()> {
     config.validate()?;
     let client = ProviderClient::new(config.http_timeout)?;
     let failure_limit = config.max_consecutive_failures.max(1);
