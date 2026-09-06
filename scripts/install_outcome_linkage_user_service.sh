@@ -4,34 +4,36 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-if [[ -f .venv/bin/activate ]]; then
-  # shellcheck disable=SC1091
-  source .venv/bin/activate
-fi
+cargo build --workspace --release
+OUTCOME="$REPO_DIR/target/release/crossalpha-outcome-rs"
+[[ -x "$OUTCOME" ]] || { echo "Missing native Outcome binary: $OUTCOME" >&2; exit 2; }
 
-if ! command -v crossalpha-outcome-materialize >/dev/null 2>&1; then
-  python -m pip install -e ".[dev]"
-fi
+"$OUTCOME" integrity || {
+  echo "Outcome Linkage native binding/integrity is not green." >&2
+  echo "Run scripts/bind_native_state_runtime.sh --activate after R7 pre-cutover acceptance." >&2
+  exit 2
+}
 
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
 
 cat > "$UNIT_DIR/crossalpha-outcome-linkage.service" <<EOF
 [Unit]
-Description=CrossAlpha prospective state-to-outcome linkage materializer
+Description=CrossAlpha Rust prospective state-to-outcome linkage materializer
 After=network-online.target crossalpha-free-paper-daily.service crossalpha-free-paper-weekly.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=$REPO_DIR
-ExecStart=$REPO_DIR/.venv/bin/python $REPO_DIR/scripts/run_outcome_linkage_cycle.py
+ExecStart=$OUTCOME materialize
+ExecStart=$OUTCOME integrity
 TimeoutStartSec=5min
 EOF
 
 cat > "$UNIT_DIR/crossalpha-outcome-linkage.timer" <<'EOF'
 [Unit]
-Description=Materialize matured CrossAlpha prospective outcomes daily at 05:00 UTC
+Description=Materialize CrossAlpha Rust prospective outcomes daily at 05:00 UTC
 
 [Timer]
 OnCalendar=*-*-* 05:00:00 UTC
