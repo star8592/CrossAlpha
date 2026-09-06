@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,16 +32,14 @@ def _run(command: list[str], env: dict[str, str]) -> dict[str, Any]:
         env=env,
     )
     finished = datetime.now(timezone.utc)
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
     return {
         "ok": completed.returncode == 0,
         "returncode": completed.returncode,
         "started_at": started.isoformat(),
         "finished_at": finished.isoformat(),
         "command": command,
-        "stdout_tail": stdout[-8000:],
-        "stderr_tail": stderr[-8000:],
+        "stdout_tail": completed.stdout.strip()[-8000:],
+        "stderr_tail": completed.stderr.strip()[-8000:],
     }
 
 
@@ -55,14 +52,15 @@ def _cargo_lock_gate() -> dict[str, Any]:
         capture_output=True,
         check=False,
     ).returncode == 0
+    ok = lock.is_file() and tracked
     return {
-        "ok": lock.is_file() and tracked,
+        "ok": ok,
         "present": lock.is_file(),
         "tracked": tracked,
         "path": str(lock),
         "remediation": (
             None
-            if lock.is_file() and tracked
+            if ok
             else "Run cargo generate-lockfile (or cargo build), then git add Cargo.lock && git commit/push it before State freeze/cutover."
         ),
     }
@@ -84,60 +82,97 @@ def _git_clean_gate() -> dict[str, Any]:
     }
 
 
+def _parse_json_command(command: list[str], env: dict[str, str]) -> dict[str, Any]:
+    result = _run(command, env)
+    if not result["ok"]:
+        return result
+    try:
+        value = json.loads(result["stdout_tail"])
+    except json.JSONDecodeError as exc:
+        result["ok"] = False
+        result["parse_error"] = str(exc)
+        return result
+    result["value"] = value
+    return result
+
+
+def _production_state_integrity(data_root: Path, env: dict[str, str]) -> dict[str, Any]:
+    binary = REPO_ROOT / "target" / "release" / "crossalpha-state-rs"
+    output: dict[str, Any] = {}
+    for version in ("v03", "v04"):
+        result = _parse_json_command(
+            [str(binary), version, "integrity", "--data-root", str(data_root)], env
+        )
+        value = result.get("value", {})
+        result["cycle_enabled"] = value.get("cycle_enabled") is True
+        result["ok"] = result.get("ok") is True and result["cycle_enabled"]
+        output[version] = result
+    output["ok"] = all(output[version]["ok"] for version in ("v03", "v04"))
+    return output
+
+
+def _health_file(path: Path, now: datetime) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "ok": False, "reason": "missing"}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        checked = value.get("checked_at")
+        fresh = True
+        if checked:
+            stamp = datetime.fromisoformat(str(checked).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            fresh = (now - stamp.astimezone(timezone.utc)).total_seconds() <= 1200
+        return {
+            "path": str(path),
+            "ok": value.get("ok") is True and fresh,
+            "fresh": fresh,
+            "checked_at": checked,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"path": str(path), "ok": False, "reason": type(exc).__name__}
+
+
 def _post_cutover_gate(data_root: Path, min_soak_seconds: int) -> dict[str, Any]:
     status_path = data_root / "manifests" / "crossalpha_daemon_health.json"
-    required_health = [
-        data_root / "manifests" / "observatory_health.json",
-        data_root / "manifests" / "materializer_health.json",
-    ]
     if not status_path.exists():
-        return {
-            "ok": False,
-            "reason": "unified daemon health file missing",
-            "path": str(status_path),
-        }
+        return {"ok": False, "reason": "unified daemon health file missing", "path": str(status_path)}
     try:
         status = json.loads(status_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"invalid daemon health JSON: {type(exc).__name__}"}
     if status.get("status") != "running":
-        return {"ok": False, "reason": f"daemon status is {status.get('status')!r}", "status": status}
+        return {"ok": False, "reason": f"daemon status is {status.get('status')!r}", "daemon": status}
     try:
         started = datetime.fromisoformat(str(status["checked_at"]).replace("Z", "+00:00"))
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"invalid daemon checked_at: {type(exc).__name__}"}
+
     now = datetime.now(timezone.utc)
     soak_seconds = max(0.0, (now - started.astimezone(timezone.utc)).total_seconds())
-    health_results: list[dict[str, Any]] = []
-    all_health_ok = True
-    for path in required_health:
-        if not path.exists():
-            all_health_ok = False
-            health_results.append({"path": str(path), "ok": False, "reason": "missing"})
-            continue
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            ok = value.get("ok") is True
-            checked = value.get("checked_at")
-            fresh = True
-            if checked:
-                stamp = datetime.fromisoformat(str(checked).replace("Z", "+00:00"))
-                if stamp.tzinfo is None:
-                    stamp = stamp.replace(tzinfo=timezone.utc)
-                fresh = (now - stamp.astimezone(timezone.utc)).total_seconds() <= 1200
-            ok = ok and fresh
-            all_health_ok = all_health_ok and ok
-            health_results.append({"path": str(path), "ok": ok, "fresh": fresh})
-        except Exception as exc:  # noqa: BLE001
-            all_health_ok = False
-            health_results.append({"path": str(path), "ok": False, "reason": type(exc).__name__})
+    components = set(status.get("components") or [])
+    health_map = {
+        "Observatory": data_root / "manifests" / "observatory_health.json",
+        "Materializer": data_root / "manifests" / "materializer_health.json",
+        "StateV03": data_root / "manifests" / "state_v03_daemon_health.json",
+        "StateV04": data_root / "manifests" / "state_v04_daemon_health.json",
+    }
+    health = {
+        component: _health_file(path, now)
+        for component, path in health_map.items()
+        if component in components
+    }
+    all_running_components_healthy = bool(components) and all(row["ok"] for row in health.values())
+    full_component_set = {"Observatory", "Materializer", "StateV03", "StateV04"}.issubset(components)
     return {
-        "ok": soak_seconds >= min_soak_seconds and all_health_ok,
+        "ok": soak_seconds >= min_soak_seconds and all_running_components_healthy,
+        "full_component_set": full_component_set,
+        "components": sorted(components),
         "soak_seconds": soak_seconds,
         "minimum_soak_seconds": min_soak_seconds,
-        "component_health": health_results,
+        "component_health": health,
         "daemon": status,
     }
 
@@ -153,7 +188,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run the consolidated local-first R7 Rust migration acceptance suite. "
-            "No production service is changed by this command."
+            "This command never changes production services or freezes State."
         )
     )
     parser.add_argument("--data-root", type=Path, required=True)
@@ -171,8 +206,8 @@ def main() -> int:
     output = args.output or data_root / "manifests" / "rust_migration_acceptance.json"
     env = os.environ.copy()
     env["CROSSALPHA_DATA_DIR"] = str(data_root)
-
     py = str(REPO_ROOT / ".venv" / "bin" / "python")
+
     gates: list[Gate] = [
         Gate("cargo_fmt", ("cargo", "fmt", "--all", "--", "--check"), "build"),
         Gate("cargo_clippy", ("cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"), "build"),
@@ -193,23 +228,24 @@ def main() -> int:
         Gate("state_v04_parity", (py, "scripts/verify_rust_state_v04_parity.py"), "deterministic"),
         Gate("research_kernel_parity", (py, "scripts/verify_rust_research_kernel_parity.py"), "deterministic"),
     ]
-    live_gates = [
-        Gate("observatory_collectors_live", (py, "scripts/verify_rust_observatory_collectors.py"), "live"),
-        Gate("state_v03_preflight_live", (py, "scripts/verify_rust_state_v03_preflight_parity.py"), "live"),
-        Gate(
-            "state_v04_preflight_live",
-            (
-                str(REPO_ROOT / "target/release/crossalpha-state-rs"),
-                "v04",
-                "preflight",
-                "--data-root",
-                str(data_root),
-            ),
-            "live",
-        ),
-    ]
     if not args.skip_live:
-        gates.extend(live_gates)
+        gates.extend(
+            [
+                Gate("observatory_collectors_live", (py, "scripts/verify_rust_observatory_collectors.py"), "live"),
+                Gate("state_v03_preflight_live", (py, "scripts/verify_rust_state_v03_preflight_parity.py"), "live"),
+                Gate(
+                    "state_v04_preflight_live",
+                    (
+                        str(REPO_ROOT / "target/release/crossalpha-state-rs"),
+                        "v04",
+                        "preflight",
+                        "--data-root",
+                        str(data_root),
+                    ),
+                    "live",
+                ),
+            ]
+        )
 
     results: dict[str, Any] = {}
     build_failed = False
@@ -220,6 +256,8 @@ def main() -> int:
                 "skipped": True,
                 "reason": "build gate failed",
                 "category": gate.category,
+                "required_for_cutover": gate.required_for_cutover,
+                "required_for_retirement": gate.required_for_retirement,
             }
             continue
         print(f"▶ {gate.name}", flush=True)
@@ -234,21 +272,37 @@ def main() -> int:
 
     lock_gate = _cargo_lock_gate()
     clean_gate = _git_clean_gate()
+    production_state = _production_state_integrity(data_root, env) if not build_failed else {"ok": False, "reason": "build gate failed"}
     required_cutover = [
         result.get("ok") is True
         for result in results.values()
         if result.get("required_for_cutover") is True
     ]
     gates_green = bool(required_cutover) and all(required_cutover)
-    deterministic_and_live_complete = not args.skip_live
-    daemon_cutover_allowed = gates_green and lock_gate["ok"] and clean_gate["ok"] and deterministic_and_live_complete
+    daemon_cutover_allowed = (
+        gates_green
+        and lock_gate["ok"]
+        and clean_gate["ok"]
+        and not args.skip_live
+    )
 
     post_cutover = (
         _post_cutover_gate(data_root, args.minimum_soak_seconds)
         if args.post_cutover
-        else {"ok": False, "required": True, "reason": "rerun with --post-cutover after unified daemon cutover and soak"}
+        else {
+            "ok": False,
+            "required": True,
+            "full_component_set": False,
+            "reason": "rerun with --post-cutover after unified daemon cutover and soak",
+        }
     )
-    python_retirement_allowed = daemon_cutover_allowed and post_cutover.get("ok") is True
+    obs_retire = daemon_cutover_allowed and post_cutover.get("ok") is True and "Observatory" in set(post_cutover.get("components") or [])
+    materializer_retire = daemon_cutover_allowed and post_cutover.get("ok") is True and "Materializer" in set(post_cutover.get("components") or [])
+    state_v03_retire = obs_retire and production_state.get("v03", {}).get("ok") is True and "StateV03" in set(post_cutover.get("components") or [])
+    state_v04_retire = obs_retire and production_state.get("v04", {}).get("ok") is True and "StateV04" in set(post_cutover.get("components") or [])
+    python_retirement_allowed = all(
+        (obs_retire, materializer_retire, state_v03_retire, state_v04_retire)
+    ) and post_cutover.get("full_component_set") is True
 
     report = {
         "schema_version": 1,
@@ -258,18 +312,20 @@ def main() -> int:
         "data_root": str(data_root),
         "local_first": True,
         "changes_production_services": False,
+        "freezes_state": False,
         "skip_live": args.skip_live,
         "gates": results,
         "cargo_lock": lock_gate,
         "git_clean": clean_gate,
+        "production_state_integrity": production_state,
         "post_cutover_soak": post_cutover,
         "daemon_cutover_allowed": daemon_cutover_allowed,
         "python_retirement_allowed": python_retirement_allowed,
         "subsystems": {
-            "observatory_python_retirement_allowed": python_retirement_allowed,
-            "materializer_python_retirement_allowed": python_retirement_allowed,
-            "state_v03_python_retirement_allowed": python_retirement_allowed,
-            "state_v04_python_retirement_allowed": python_retirement_allowed,
+            "observatory_python_retirement_allowed": obs_retire,
+            "materializer_python_retirement_allowed": materializer_retire,
+            "state_v03_python_retirement_allowed": state_v03_retire,
+            "state_v04_python_retirement_allowed": state_v04_retire,
             "research_python_runtime_required_for_production": False if python_retirement_allowed else None,
         },
         "decision": (
