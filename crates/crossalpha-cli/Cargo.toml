@@ -30,6 +30,10 @@ name = "crossalpha-paper-rs"
 path = "src/bin/paper.rs"
 
 [[bin]]
+name = "crossalpha-ab-rs"
+path = "src/bin/ab.rs"
+
+[[bin]]
 name = "crossalpha-state-v02-kernel-rs"
 path = "src/bin/state_v02_kernel.rs"
 
