@@ -16,6 +16,10 @@ path = "src/bin/state_v03_config_check.rs"
 name = "crossalpha-state-v03-preflight-rs"
 path = "src/bin/state_v03_preflight.rs"
 
+[[bin]]
+name = "crossalpha-state-v03-freeze-preview-rs"
+path = "src/bin/state_v03_freeze_preview.rs"
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
