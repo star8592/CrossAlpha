@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use arrow_array::builder::{Float64Builder, Int64Builder, StringBuilder};
-use arrow_array::{ArrayRef, RecordBatch};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray};
+use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use parquet::arrow::ArrowWriter;
 use reqwest::Client;
@@ -127,7 +127,6 @@ impl FreeCoreProvider {
                     ("startDate", range.start.to_string()),
                     ("endDate", range.end.to_string()),
                 ])
-                .bearer_auth(&self.tiingo_token)
                 .header("Authorization", format!("Token {}", self.tiingo_token))
                 .send()
                 .await
@@ -142,12 +141,16 @@ impl FreeCoreProvider {
             }
             rows.extend(parsed);
         }
-        rows.sort_by(|left, right| left.date.cmp(&right.date).then(left.economic_asset.cmp(&right.economic_asset)));
+        rows.sort_by(|left, right| {
+            left.date
+                .cmp(&right.date)
+                .then(left.economic_asset.cmp(&right.economic_asset))
+        });
         let path = data_root
             .join("canonical/core/free_proxy_daily")
             .join(range.slug())
             .join("tradfi.parquet");
-        write_proxy_parquet(&path, &rows)?;
+        write_tradfi_parquet(&path, &rows)?;
         Ok(json!({
             "source":"tiingo_eod",
             "data_cost_usd":0,
@@ -160,8 +163,13 @@ impl FreeCoreProvider {
     async fn fetch_crypto(&self, range: &FreeCoreRange, data_root: &Path) -> Result<Value> {
         let raw_root = data_root.join("raw/free_core/binance").join(range.slug());
         fs::create_dir_all(&raw_root)?;
-        let start_ms = Utc.from_utc_datetime(&range.start.and_hms_opt(0, 0, 0).unwrap()).timestamp_millis();
-        let end_ms = Utc.from_utc_datetime(&range.end.and_hms_opt(0, 0, 0).unwrap()).timestamp_millis() - 1;
+        let start_ms = Utc
+            .from_utc_datetime(&range.start.and_hms_opt(0, 0, 0).unwrap())
+            .timestamp_millis();
+        let end_ms = Utc
+            .from_utc_datetime(&range.end.and_hms_opt(0, 0, 0).unwrap())
+            .timestamp_millis()
+            - 1;
         let mut rows = Vec::new();
         for (economic_asset, symbol) in FREE_CRYPTO_PROXIES {
             let mut cursor = start_ms;
@@ -186,12 +194,17 @@ impl FreeCoreProvider {
                     .json()
                     .await
                     .context("BinanceJsonDecodeError")?;
-                let array = payload.as_array().context("Binance kline payload must be array")?;
+                let array = payload
+                    .as_array()
+                    .context("Binance kline payload must be array")?;
                 if array.is_empty() {
                     break;
                 }
                 page += 1;
-                write_raw_json(&raw_root.join(format!("{symbol}_page={page:04}.json")), &payload)?;
+                write_raw_json(
+                    &raw_root.join(format!("{symbol}_page={page:04}.json")),
+                    &payload,
+                )?;
                 payload_rows.extend(array.iter().cloned());
                 let last_open = array
                     .last()
@@ -214,12 +227,16 @@ impl FreeCoreProvider {
             }
             rows.extend(parsed);
         }
-        rows.sort_by(|left, right| left.date.cmp(&right.date).then(left.economic_asset.cmp(&right.economic_asset)));
+        rows.sort_by(|left, right| {
+            left.date
+                .cmp(&right.date)
+                .then(left.economic_asset.cmp(&right.economic_asset))
+        });
         let path = data_root
             .join("canonical/core/free_proxy_daily")
             .join(range.slug())
             .join("crypto.parquet");
-        write_proxy_parquet(&path, &rows)?;
+        write_crypto_parquet(&path, &rows)?;
         Ok(json!({
             "source":"binance_spot_public",
             "data_cost_usd":0,
@@ -250,7 +267,10 @@ impl FreeCoreProvider {
             .json()
             .await
             .context("FredJsonDecodeError")?;
-        write_raw_json(&raw_root.join(format!("{FRED_CASH_SERIES}.json")), &payload)?;
+        write_raw_json(
+            &raw_root.join(format!("{FRED_CASH_SERIES}.json")),
+            &payload,
+        )?;
         let rows = parse_fred_payload(FRED_CASH_SERIES, &payload)?;
         if rows.is_empty() {
             bail!("FRED returned no data for {FRED_CASH_SERIES}");
@@ -276,7 +296,17 @@ pub fn validate_tiingo_token(value: &str) -> Result<()> {
         bail!("TIINGO_API_TOKEN is missing or invalid");
     }
     let lower = token.to_ascii_lowercase();
-    if ["token", "yourtoken", "your_token", "changeme", "replace_me", "example"].contains(&lower.as_str())
+    if [
+        "token",
+        "yourtoken",
+        "your_token",
+        "your-api-token",
+        "your_api_token",
+        "changeme",
+        "replace_me",
+        "example",
+    ]
+    .contains(&lower.as_str())
         || lower.contains("yourtoken")
     {
         bail!("TIINGO_API_TOKEN still looks like a placeholder");
@@ -286,14 +316,25 @@ pub fn validate_tiingo_token(value: &str) -> Result<()> {
 
 pub fn validate_fred_key(value: &str) -> Result<()> {
     let key = value.trim();
-    if key.len() != 32 || !key.is_ascii() || !key.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()) {
+    if key.len() != 32
+        || !key.is_ascii()
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    {
         bail!("FRED_API_KEY must be a 32-character lowercase alphanumeric key");
     }
     Ok(())
 }
 
-pub fn parse_tiingo_payload(economic_asset: &str, ticker: &str, payload: &Value) -> Result<Vec<ProxyDailyRow>> {
-    let array = payload.as_array().context("Tiingo EOD payload must be a list")?;
+pub fn parse_tiingo_payload(
+    economic_asset: &str,
+    ticker: &str,
+    payload: &Value,
+) -> Result<Vec<ProxyDailyRow>> {
+    let array = payload
+        .as_array()
+        .context("Tiingo EOD payload must be a list")?;
     let mut rows = Vec::new();
     for item in array {
         let date = parse_time(item.get("date"))?;
@@ -306,30 +347,73 @@ pub fn parse_tiingo_payload(economic_asset: &str, ticker: &str, payload: &Value)
             economic_asset: economic_asset.to_owned(),
             source: "tiingo_eod".to_owned(),
             symbol: ticker.to_owned(),
-            open: number(item.get("open")), high: number(item.get("high")), low: number(item.get("low")), close: number(item.get("close")), volume: number(item.get("volume")),
-            adj_open: number(item.get("adjOpen")), adj_high: number(item.get("adjHigh")), adj_low: number(item.get("adjLow")), adj_close, adj_volume: number(item.get("adjVolume")), div_cash: number(item.get("divCash")), split_factor: number(item.get("splitFactor")),
-            quote_volume: None, trade_count: None, taker_buy_base_volume: None, taker_buy_quote_volume: None,
+            open: number(item.get("open")),
+            high: number(item.get("high")),
+            low: number(item.get("low")),
+            close: number(item.get("close")),
+            volume: integer_number(item.get("volume")),
+            adj_open: number(item.get("adjOpen")),
+            adj_high: number(item.get("adjHigh")),
+            adj_low: number(item.get("adjLow")),
+            adj_close,
+            adj_volume: integer_number(item.get("adjVolume")),
+            div_cash: number(item.get("divCash")),
+            split_factor: number(item.get("splitFactor")),
+            quote_volume: None,
+            trade_count: None,
+            taker_buy_base_volume: None,
+            taker_buy_quote_volume: None,
         });
     }
     ensure_unique_dates(&rows, ticker)?;
     Ok(rows)
 }
 
-pub fn parse_binance_payload(economic_asset: &str, symbol: &str, payload: &[Value]) -> Result<Vec<ProxyDailyRow>> {
+pub fn parse_binance_payload(
+    economic_asset: &str,
+    symbol: &str,
+    payload: &[Value],
+) -> Result<Vec<ProxyDailyRow>> {
     let mut rows = Vec::new();
     for value in payload {
         let row = value.as_array().context("invalid Binance kline row")?;
-        if row.len() < 11 { bail!("invalid Binance kline row for {symbol}"); }
+        if row.len() < 11 {
+            bail!("invalid Binance kline row for {symbol}");
+        }
         let millis = row[0].as_i64().context("Binance open time missing")?;
-        let date = Utc.timestamp_millis_opt(millis).single().context("invalid Binance open time")?;
+        let date = Utc
+            .timestamp_millis_opt(millis)
+            .single()
+            .context("invalid Binance open time")?;
         let parse = |index: usize| number(row.get(index)).context("Binance numeric field missing");
-        let open = parse(1)?; let high = parse(2)?; let low = parse(3)?; let close = parse(4)?;
-        if [open, high, low, close].iter().any(|value| *value <= 0.0) { bail!("invalid Binance OHLC for {symbol}"); }
+        let open = parse(1)?;
+        let high = parse(2)?;
+        let low = parse(3)?;
+        let close = parse(4)?;
+        if [open, high, low, close].iter().any(|value| *value <= 0.0) {
+            bail!("invalid Binance OHLC for {symbol}");
+        }
         rows.push(ProxyDailyRow {
-            date, economic_asset: economic_asset.to_owned(), source: "binance_spot_public".to_owned(), symbol: symbol.to_owned(),
-            open: Some(open), high: Some(high), low: Some(low), close: Some(close), volume: number(row.get(5)),
-            adj_open: None, adj_high: None, adj_low: None, adj_close: None, adj_volume: None, div_cash: None, split_factor: None,
-            quote_volume: number(row.get(7)), trade_count: row.get(8).and_then(value_i64), taker_buy_base_volume: number(row.get(9)), taker_buy_quote_volume: number(row.get(10)),
+            date,
+            economic_asset: economic_asset.to_owned(),
+            source: "binance_spot_public".to_owned(),
+            symbol: symbol.to_owned(),
+            open: Some(open),
+            high: Some(high),
+            low: Some(low),
+            close: Some(close),
+            volume: number(row.get(5)),
+            adj_open: None,
+            adj_high: None,
+            adj_low: None,
+            adj_close: None,
+            adj_volume: None,
+            div_cash: None,
+            split_factor: None,
+            quote_volume: number(row.get(7)),
+            trade_count: row.get(8).and_then(value_i64),
+            taker_buy_base_volume: number(row.get(9)),
+            taker_buy_quote_volume: number(row.get(10)),
         });
     }
     ensure_unique_dates(&rows, symbol)?;
@@ -337,49 +421,357 @@ pub fn parse_binance_payload(economic_asset: &str, symbol: &str, payload: &[Valu
 }
 
 pub fn parse_fred_payload(series_id: &str, payload: &Value) -> Result<Vec<CashRateRow>> {
-    let observations = payload.get("observations").and_then(Value::as_array).context("FRED payload missing observations")?;
+    let observations = payload
+        .get("observations")
+        .and_then(Value::as_array)
+        .context("FRED payload missing observations")?;
     let mut rows = Vec::new();
     for item in observations {
-        let date_text = item.get("date").and_then(Value::as_str).context("FRED date missing")?;
+        let date_text = item
+            .get("date")
+            .and_then(Value::as_str)
+            .context("FRED date missing")?;
         let date = NaiveDate::parse_from_str(date_text, "%Y-%m-%d")?;
-        let date = Utc.from_utc_datetime(&date.and_hms_opt(0,0,0).unwrap());
-        let rate = match item.get("value").and_then(Value::as_str) { Some(".") | None => None, Some(text) => text.parse::<f64>().ok(), };
-        rows.push(CashRateRow { date, series_id: series_id.to_owned(), rate_percent: rate });
+        let date = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
+        let rate = match item.get("value").and_then(Value::as_str) {
+            Some(".") | None => None,
+            Some(text) => text.parse::<f64>().ok(),
+        };
+        rows.push(CashRateRow {
+            date,
+            series_id: series_id.to_owned(),
+            rate_percent: rate,
+        });
     }
     Ok(rows)
 }
 
-fn write_proxy_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
-    let mut fields = Vec::new(); let mut arrays = Vec::<ArrayRef>::new();
-    string_col(&mut fields,&mut arrays,"date",rows.iter().map(|r|Some(r.date.to_rfc3339())));
-    string_col(&mut fields,&mut arrays,"economic_asset",rows.iter().map(|r|Some(r.economic_asset.clone())));
-    string_col(&mut fields,&mut arrays,"source",rows.iter().map(|r|Some(r.source.clone())));
-    string_col(&mut fields,&mut arrays,"symbol",rows.iter().map(|r|Some(r.symbol.clone())));
-    f64_col(&mut fields,&mut arrays,"open",rows.iter().map(|r|r.open)); f64_col(&mut fields,&mut arrays,"high",rows.iter().map(|r|r.high)); f64_col(&mut fields,&mut arrays,"low",rows.iter().map(|r|r.low)); f64_col(&mut fields,&mut arrays,"close",rows.iter().map(|r|r.close)); f64_col(&mut fields,&mut arrays,"volume",rows.iter().map(|r|r.volume));
-    f64_col(&mut fields,&mut arrays,"adj_open",rows.iter().map(|r|r.adj_open)); f64_col(&mut fields,&mut arrays,"adj_high",rows.iter().map(|r|r.adj_high)); f64_col(&mut fields,&mut arrays,"adj_low",rows.iter().map(|r|r.adj_low)); f64_col(&mut fields,&mut arrays,"adj_close",rows.iter().map(|r|r.adj_close)); f64_col(&mut fields,&mut arrays,"adj_volume",rows.iter().map(|r|r.adj_volume)); f64_col(&mut fields,&mut arrays,"div_cash",rows.iter().map(|r|r.div_cash)); f64_col(&mut fields,&mut arrays,"split_factor",rows.iter().map(|r|r.split_factor));
-    f64_col(&mut fields,&mut arrays,"quote_volume",rows.iter().map(|r|r.quote_volume)); i64_col(&mut fields,&mut arrays,"trade_count",rows.iter().map(|r|r.trade_count)); f64_col(&mut fields,&mut arrays,"taker_buy_base_volume",rows.iter().map(|r|r.taker_buy_base_volume)); f64_col(&mut fields,&mut arrays,"taker_buy_quote_volume",rows.iter().map(|r|r.taker_buy_quote_volume));
+fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
+    let mut fields = Vec::new();
+    let mut arrays = Vec::<ArrayRef>::new();
+    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "economic_asset",
+        rows.iter().map(|row| Some(row.economic_asset.clone())),
+    );
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "source",
+        rows.iter().map(|row| Some(row.source.clone())),
+    );
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "symbol",
+        rows.iter().map(|row| Some(row.symbol.clone())),
+    );
+    f64_col(&mut fields, &mut arrays, "open", rows.iter().map(|row| row.open));
+    f64_col(&mut fields, &mut arrays, "high", rows.iter().map(|row| row.high));
+    f64_col(&mut fields, &mut arrays, "low", rows.iter().map(|row| row.low));
+    f64_col(&mut fields, &mut arrays, "close", rows.iter().map(|row| row.close));
+    i64_from_f64_col(
+        &mut fields,
+        &mut arrays,
+        "volume",
+        rows.iter().map(|row| row.volume),
+    )?;
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "adj_open",
+        rows.iter().map(|row| row.adj_open),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "adj_high",
+        rows.iter().map(|row| row.adj_high),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "adj_low",
+        rows.iter().map(|row| row.adj_low),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "adj_close",
+        rows.iter().map(|row| row.adj_close),
+    );
+    i64_from_f64_col(
+        &mut fields,
+        &mut arrays,
+        "adj_volume",
+        rows.iter().map(|row| row.adj_volume),
+    )?;
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "div_cash",
+        rows.iter().map(|row| row.div_cash),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "split_factor",
+        rows.iter().map(|row| row.split_factor),
+    );
+    write_batch(path, fields, arrays)
+}
+
+fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
+    let mut fields = Vec::new();
+    let mut arrays = Vec::<ArrayRef>::new();
+    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "economic_asset",
+        rows.iter().map(|row| Some(row.economic_asset.clone())),
+    );
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "source",
+        rows.iter().map(|row| Some(row.source.clone())),
+    );
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "symbol",
+        rows.iter().map(|row| Some(row.symbol.clone())),
+    );
+    f64_col(&mut fields, &mut arrays, "open", rows.iter().map(|row| row.open));
+    f64_col(&mut fields, &mut arrays, "high", rows.iter().map(|row| row.high));
+    f64_col(&mut fields, &mut arrays, "low", rows.iter().map(|row| row.low));
+    f64_col(&mut fields, &mut arrays, "close", rows.iter().map(|row| row.close));
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "volume",
+        rows.iter().map(|row| row.volume),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "quote_volume",
+        rows.iter().map(|row| row.quote_volume),
+    );
+    i64_col(
+        &mut fields,
+        &mut arrays,
+        "trade_count",
+        rows.iter().map(|row| row.trade_count),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "taker_buy_base_volume",
+        rows.iter().map(|row| row.taker_buy_base_volume),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "taker_buy_quote_volume",
+        rows.iter().map(|row| row.taker_buy_quote_volume),
+    );
     write_batch(path, fields, arrays)
 }
 
 fn write_cash_parquet(path: &Path, rows: &[CashRateRow]) -> Result<()> {
-    let mut fields=Vec::new(); let mut arrays=Vec::<ArrayRef>::new();
-    string_col(&mut fields,&mut arrays,"date",rows.iter().map(|r|Some(r.date.to_rfc3339())));
-    string_col(&mut fields,&mut arrays,"series_id",rows.iter().map(|r|Some(r.series_id.clone())));
-    f64_col(&mut fields,&mut arrays,"rate_percent",rows.iter().map(|r|r.rate_percent));
-    write_batch(path,fields,arrays)
+    let mut fields = Vec::new();
+    let mut arrays = Vec::<ArrayRef>::new();
+    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    string_col(
+        &mut fields,
+        &mut arrays,
+        "series_id",
+        rows.iter().map(|row| Some(row.series_id.clone())),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "rate_percent",
+        rows.iter().map(|row| row.rate_percent),
+    );
+    write_batch(path, fields, arrays)
 }
 
-fn write_batch(path:&Path, fields:Vec<Field>, arrays:Vec<ArrayRef>)->Result<()> {
-    if let Some(parent)=path.parent(){fs::create_dir_all(parent)?;}
-    let schema=Arc::new(Schema::new(fields)); let batch=RecordBatch::try_new(schema.clone(),arrays)?;
-    let tmp=path.with_extension("parquet.tmp"); let file=File::create(&tmp)?; let mut writer=ArrowWriter::try_new(file,schema,None)?; writer.write(&batch)?; writer.close()?; OpenOptions::new().write(true).open(&tmp)?.sync_all()?; fs::rename(&tmp,path)?; if let Some(parent)=path.parent(){File::open(parent)?.sync_all()?;} Ok(())
+fn write_batch(path: &Path, fields: Vec<Field>, arrays: Vec<ArrayRef>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema.clone(), arrays)?;
+    let tmp = path.with_extension("parquet.tmp");
+    let file = File::create(&tmp)?;
+    let mut writer = ArrowWriter::try_new(file, schema, None)?;
+    writer.write(&batch)?;
+    writer.close()?;
+    OpenOptions::new().write(true).open(&tmp)?.sync_all()?;
+    fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
-fn write_raw_json(path:&Path,value:&Value)->Result<()> { if let Some(parent)=path.parent(){fs::create_dir_all(parent)?;} let tmp=path.with_extension("json.tmp"); fs::write(&tmp,serde_json::to_vec(value)?)?; OpenOptions::new().write(true).open(&tmp)?.sync_all()?; fs::rename(&tmp,path)?; Ok(()) }
-fn parse_time(value:Option<&Value>)->Result<DateTime<Utc>>{let text=value.and_then(Value::as_str).context("timestamp missing")?;Ok(DateTime::parse_from_rfc3339(text)?.with_timezone(&Utc))}
-fn number(value:Option<&Value>)->Option<f64>{let value=value?; let n=value.as_f64().or_else(||value.as_str()?.replace(',','').replace('%',"").parse().ok())?;n.is_finite().then_some(n)}
-fn value_i64(value:&Value)->Option<i64>{value.as_i64().or_else(||value.as_str().and_then(|v|v.parse().ok()))}
-fn ensure_unique_dates(rows:&[ProxyDailyRow],symbol:&str)->Result<()>{let mut dates=std::collections::BTreeSet::new();for row in rows{if !dates.insert(row.date){bail!("duplicate dates for {symbol}");}}Ok(())}
-fn string_col<I:Iterator<Item=Option<String>>>(fields:&mut Vec<Field>,arrays:&mut Vec<ArrayRef>,name:&str,values:I){fields.push(Field::new(name,DataType::Utf8,true));let mut b=StringBuilder::new();for v in values{b.append_option(v.as_deref());}arrays.push(Arc::new(b.finish()));}
-fn f64_col<I:Iterator<Item=Option<f64>>>(fields:&mut Vec<Field>,arrays:&mut Vec<ArrayRef>,name:&str,values:I){fields.push(Field::new(name,DataType::Float64,true));let mut b=Float64Builder::new();for v in values{b.append_option(v);}arrays.push(Arc::new(b.finish()));}
-fn i64_col<I:Iterator<Item=Option<i64>>>(fields:&mut Vec<Field>,arrays:&mut Vec<ArrayRef>,name:&str,values:I){fields.push(Field::new(name,DataType::Int64,true));let mut b=Int64Builder::new();for v in values{b.append_option(v);}arrays.push(Arc::new(b.finish()));}
+fn write_raw_json(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec(value)?)?;
+    OpenOptions::new().write(true).open(&tmp)?.sync_all()?;
+    fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
+    let text = value
+        .and_then(Value::as_str)
+        .context("timestamp missing")?;
+    Ok(DateTime::parse_from_rfc3339(text)?.with_timezone(&Utc))
+}
+
+fn number(value: Option<&Value>) -> Option<f64> {
+    let value = value?;
+    let number = value.as_f64().or_else(|| {
+        value
+            .as_str()?
+            .replace(',', "")
+            .replace('%', "")
+            .parse()
+            .ok()
+    })?;
+    number.is_finite().then_some(number)
+}
+
+fn integer_number(value: Option<&Value>) -> Option<f64> {
+    let value = value?;
+    value
+        .as_i64()
+        .map(|number| number as f64)
+        .or_else(|| value.as_str()?.parse::<i64>().ok().map(|number| number as f64))
+}
+
+fn value_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
+fn ensure_unique_dates(rows: &[ProxyDailyRow], symbol: &str) -> Result<()> {
+    let mut dates = std::collections::BTreeSet::new();
+    for row in rows {
+        if !dates.insert(row.date) {
+            bail!("duplicate dates for {symbol}");
+        }
+    }
+    Ok(())
+}
+
+fn timestamp_col<I>(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: I,
+) where
+    I: Iterator<Item = DateTime<Utc>>,
+{
+    fields.push(Field::new(
+        name,
+        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
+        true,
+    ));
+    let values = values
+        .map(|value| value.timestamp_micros().saturating_mul(1_000))
+        .collect::<Vec<_>>();
+    arrays.push(Arc::new(
+        TimestampNanosecondArray::from(values).with_timezone_utc(),
+    ));
+}
+
+fn string_col<I>(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: I,
+) where
+    I: Iterator<Item = Option<String>>,
+{
+    fields.push(Field::new(name, DataType::Utf8, true));
+    let mut builder = StringBuilder::new();
+    for value in values {
+        builder.append_option(value.as_deref());
+    }
+    arrays.push(Arc::new(builder.finish()));
+}
+
+fn f64_col<I>(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: I,
+) where
+    I: Iterator<Item = Option<f64>>,
+{
+    fields.push(Field::new(name, DataType::Float64, true));
+    let mut builder = Float64Builder::new();
+    for value in values {
+        builder.append_option(value);
+    }
+    arrays.push(Arc::new(builder.finish()));
+}
+
+fn i64_col<I>(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: I,
+) where
+    I: Iterator<Item = Option<i64>>,
+{
+    fields.push(Field::new(name, DataType::Int64, true));
+    let mut builder = Int64Builder::new();
+    for value in values {
+        builder.append_option(value);
+    }
+    arrays.push(Arc::new(builder.finish()));
+}
+
+fn i64_from_f64_col<I>(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: I,
+) -> Result<()>
+where
+    I: Iterator<Item = Option<f64>>,
+{
+    fields.push(Field::new(name, DataType::Int64, true));
+    let mut builder = Int64Builder::new();
+    for value in values {
+        match value {
+            None => builder.append_null(),
+            Some(value)
+                if value.is_finite()
+                    && value >= i64::MIN as f64
+                    && value <= i64::MAX as f64
+                    && value.fract() == 0.0 =>
+            {
+                builder.append_value(value as i64);
+            }
+            Some(value) => bail!("{name} must be an integer-compatible value, got {value}"),
+        }
+    }
+    arrays.push(Arc::new(builder.finish()));
+    Ok(())
+}
