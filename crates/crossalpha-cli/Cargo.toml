@@ -38,6 +38,10 @@ name = "crossalpha-outcome-rs"
 path = "src/bin/outcome.rs"
 
 [[bin]]
+name = "crossalpha-raw-envelope-fixture-rs"
+path = "src/bin/raw_envelope_fixture.rs"
+
+[[bin]]
 name = "crossalpha-state-v02-kernel-rs"
 path = "src/bin/state_v02_kernel.rs"
 
