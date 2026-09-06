@@ -51,6 +51,7 @@ async fn main() -> Result<()> {
     if !args.http_timeout.is_finite() || args.http_timeout <= 0.0 {
         anyhow::bail!("--http-timeout must be a finite positive number");
     }
+    let require_cycle_enabled = matches!(&args.command, Command::Integrity);
     let state: Box<dyn StateSpec> = match args.version {
         Version::V02 => Box::new(NativeStateV02),
         Version::V03 => Box::new(NativeStateV03),
@@ -59,7 +60,9 @@ async fn main() -> Result<()> {
     let context = StateRuntimeContext {
         data_root: args.data_root.clone(),
         http_timeout: Duration::from_secs_f64(args.http_timeout),
-        evm_rpc_url: std::env::var("EVM_RPC_URL").ok().filter(|value| !value.is_empty()),
+        evm_rpc_url: std::env::var("EVM_RPC_URL")
+            .ok()
+            .filter(|value| !value.is_empty()),
     };
     let output = match args.command {
         Command::ConfigCheck { config } => {
@@ -77,5 +80,13 @@ async fn main() -> Result<()> {
         Command::Status => state.status(&args.data_root)?,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
+    if require_cycle_enabled
+        && output
+            .get("cycle_enabled")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    {
+        anyhow::bail!("native State integrity failed: cycle_enabled is not true");
+    }
     Ok(())
 }
