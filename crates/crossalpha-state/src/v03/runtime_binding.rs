@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub const RUNTIME_BINDING_PROTOCOL: &str = "CROSSALPHA_STATE_V0_3_RUST_RUNTIME_BINDING";
 pub const RUNTIME_BINDING_SCHEMA_VERSION: u32 = 1;
@@ -30,10 +31,12 @@ pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Res
     let repo_root = repo_root();
     let cargo_lock = repo_root.join("Cargo.lock");
     let lockfile_present = cargo_lock.is_file();
+    let lockfile_tracked = lockfile_present && git_tracks_cargo_lock(&repo_root);
     let lockfile_sha256 = lockfile_present
         .then(|| sha256_file(&cargo_lock))
         .transpose()?;
     let source_hashes = native_source_hashes(&repo_root)?;
+    let production_binding_eligible = lockfile_present && lockfile_tracked;
 
     let mut payload = json!({
         "schema_version": RUNTIME_BINDING_SCHEMA_VERSION,
@@ -48,9 +51,10 @@ pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Res
         "runtime": "RUST_TOKIO",
         "python_runtime_required": false,
         "cargo_lock_present": lockfile_present,
+        "cargo_lock_tracked": lockfile_tracked,
         "cargo_lock_sha256": lockfile_sha256,
         "native_source_sha256": source_hashes,
-        "production_binding_eligible": lockfile_present,
+        "production_binding_eligible": production_binding_eligible,
     });
     let digest = payload_hash(&payload)?;
     payload
@@ -76,6 +80,10 @@ fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         ("state_v03", "crates/crossalpha-state/src/v03.rs"),
         ("state_v03_preflight", "crates/crossalpha-state/src/v03/preflight.rs"),
         ("state_v03_freeze", "crates/crossalpha-state/src/v03/freeze.rs"),
+        (
+            "state_v03_runtime_binding",
+            "crates/crossalpha-state/src/v03/runtime_binding.rs",
+        ),
         ("cli_cargo", "crates/crossalpha-cli/Cargo.toml"),
         (
             "cli_v03_config",
@@ -96,6 +104,16 @@ fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         result.insert(name.to_owned(), sha256_file(&repo_root.join(relative))?);
     }
     Ok(result)
+}
+
+fn git_tracks_cargo_lock(repo_root: &Path) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["ls-files", "--error-unmatch", "Cargo.lock"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
