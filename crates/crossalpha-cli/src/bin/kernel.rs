@@ -7,7 +7,7 @@ use crossalpha_research::baseline::{BaselineConfig, apply_constraints, compute_f
 use crossalpha_research::{ContractMeta, FuturesBar, build_previous_volume_roll_map, build_roll_mtm_returns};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::PathBuf;
 
