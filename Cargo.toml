@@ -5,6 +5,7 @@ members = [
   "crates/crossalpha-storage",
   "crates/crossalpha-observatory",
   "crates/crossalpha-features",
+  "crates/crossalpha-state",
   "crates/crossalpha-cli",
 ]
 resolver = "2"
@@ -18,6 +19,7 @@ license = "Proprietary"
 anyhow = "1"
 arrow-array = "56"
 arrow-schema = "56"
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 flate2 = "1"
