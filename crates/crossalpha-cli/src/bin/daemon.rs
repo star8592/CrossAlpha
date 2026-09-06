@@ -38,8 +38,21 @@ struct Args {
     #[arg(long = "component", value_enum, required = true)]
     components: Vec<Component>,
 
+    /// Preserve the existing Observatory 5-minute cadence.
     #[arg(long, default_value_t = 300)]
-    interval_seconds: u64,
+    observatory_interval_seconds: u64,
+
+    /// Preserve the existing bounded materializer 15-minute cadence.
+    #[arg(long, default_value_t = 900)]
+    materializer_interval_seconds: u64,
+
+    /// Preserve the existing State V0.3 15-minute cadence.
+    #[arg(long, default_value_t = 900)]
+    state_v03_interval_seconds: u64,
+
+    /// Preserve the existing State V0.4 5-minute cadence.
+    #[arg(long, default_value_t = 300)]
+    state_v04_interval_seconds: u64,
 
     #[arg(long, default_value_t = 30)]
     http_timeout_seconds: u64,
@@ -78,15 +91,9 @@ async fn main() -> Result<()> {
     let _daemon_lock = acquire_daemon_lock(&args.data_root)?;
 
     validate_state_bindings(&args.data_root, &components)?;
-    write_daemon_status(
-        &args.data_root,
-        "running",
-        &components,
-        None,
-    )?;
+    write_daemon_status(&args.data_root, "running", &components, None, &args)?;
 
     let mut tasks: JoinSet<Result<()>> = JoinSet::new();
-    let interval = Duration::from_secs(args.interval_seconds);
     let http_timeout = Duration::from_secs(args.http_timeout_seconds);
     let failure_limit = args.max_consecutive_failures.max(1);
 
@@ -94,7 +101,7 @@ async fn main() -> Result<()> {
         let config = SupervisorConfig {
             data_root: args.data_root.clone(),
             sources: vec![ProviderSource::Hyperliquid, ProviderSource::DefiLlama],
-            interval,
+            interval: Duration::from_secs(args.observatory_interval_seconds),
             collector_timeout: Duration::from_secs(args.collector_timeout_seconds),
             http_timeout,
             max_consecutive_failures: failure_limit,
@@ -106,6 +113,7 @@ async fn main() -> Result<()> {
     if components.contains(&Component::Materializer) {
         let data_root = args.data_root.clone();
         let recent_days = args.materializer_recent_days;
+        let interval = Duration::from_secs(args.materializer_interval_seconds);
         tasks.spawn(async move {
             materializer_loop(data_root, recent_days, interval, failure_limit).await
         });
@@ -117,6 +125,7 @@ async fn main() -> Result<()> {
             http_timeout,
             evm_rpc_url: args.evm_rpc_url.clone(),
         };
+        let interval = Duration::from_secs(args.state_v03_interval_seconds);
         tasks.spawn(async move {
             state_loop(Component::StateV03, context, interval, failure_limit).await
         });
@@ -128,6 +137,7 @@ async fn main() -> Result<()> {
             http_timeout,
             evm_rpc_url: args.evm_rpc_url.clone(),
         };
+        let interval = Duration::from_secs(args.state_v04_interval_seconds);
         tasks.spawn(async move {
             state_loop(Component::StateV04, context, interval, failure_limit).await
         });
@@ -139,7 +149,7 @@ async fn main() -> Result<()> {
             info!("CrossAlpha daemon received shutdown signal");
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
-            write_daemon_status(&args.data_root, "stopped", &components, None)?;
+            write_daemon_status(&args.data_root, "stopped", &components, None, &args)?;
             Ok(())
         }
         joined = tasks.join_next() => {
@@ -157,6 +167,7 @@ async fn main() -> Result<()> {
                 "failed",
                 &components,
                 Some(format!("{error:#}")),
+                &args,
             )?;
             Err(error)
         }
@@ -164,14 +175,17 @@ async fn main() -> Result<()> {
 }
 
 fn validate(args: &Args) -> Result<()> {
-    if args.interval_seconds == 0 {
-        bail!("interval-seconds must be positive");
-    }
-    if args.http_timeout_seconds == 0 {
-        bail!("http-timeout-seconds must be positive");
-    }
-    if args.collector_timeout_seconds == 0 {
-        bail!("collector-timeout-seconds must be positive");
+    for (name, value) in [
+        ("observatory-interval-seconds", args.observatory_interval_seconds),
+        ("materializer-interval-seconds", args.materializer_interval_seconds),
+        ("state-v03-interval-seconds", args.state_v03_interval_seconds),
+        ("state-v04-interval-seconds", args.state_v04_interval_seconds),
+        ("http-timeout-seconds", args.http_timeout_seconds),
+        ("collector-timeout-seconds", args.collector_timeout_seconds),
+    ] {
+        if value == 0 {
+            bail!("{name} must be positive");
+        }
     }
     if args.materializer_recent_days == 0 {
         bail!("materializer-recent-days must be positive");
@@ -214,10 +228,7 @@ async fn materializer_loop(
         let result = tokio::task::spawn_blocking(move || -> Result<Value> {
             let canonical = materialize_recent_canonical(&root, &root, recent_days)?;
             let features = materialize_recent_features(&root, &root, recent_days)?;
-            Ok(json!({
-                "canonical": canonical,
-                "features": features,
-            }))
+            Ok(json!({"canonical": canonical, "features": features}))
         })
         .await
         .context("join native materializer worker")?;
@@ -234,11 +245,12 @@ async fn materializer_loop(
                         "checked_at": chrono::Utc::now().to_rfc3339(),
                         "bounded": true,
                         "recent_days": recent_days,
+                        "interval_seconds": interval.as_secs(),
                         "consecutive_failures": consecutive_failures,
                         "report": report,
                     }),
                 )?;
-                info!(recent_days, "native materializer cycle succeeded");
+                info!(recent_days, interval_seconds = interval.as_secs(), "native materializer cycle succeeded");
             }
             Err(error) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
@@ -252,6 +264,7 @@ async fn materializer_loop(
                         "checked_at": chrono::Utc::now().to_rfc3339(),
                         "bounded": true,
                         "recent_days": recent_days,
+                        "interval_seconds": interval.as_secs(),
                         "consecutive_failures": consecutive_failures,
                         "error": format!("{error:#}"),
                     }),
@@ -280,8 +293,14 @@ async fn state_loop(
             _ => bail!("state loop called for non-state component"),
         };
         let (filename, protocol) = match component {
-            Component::StateV03 => ("state_v03_daemon_health.json", "CROSSALPHA_STATE_V0_3_DAEMON_HEALTH"),
-            Component::StateV04 => ("state_v04_daemon_health.json", "CROSSALPHA_STATE_V0_4_DAEMON_HEALTH"),
+            Component::StateV03 => (
+                "state_v03_daemon_health.json",
+                "CROSSALPHA_STATE_V0_3_DAEMON_HEALTH",
+            ),
+            Component::StateV04 => (
+                "state_v04_daemon_health.json",
+                "CROSSALPHA_STATE_V0_4_DAEMON_HEALTH",
+            ),
             _ => unreachable!(),
         };
         match result {
@@ -294,11 +313,12 @@ async fn state_loop(
                         "protocol": protocol,
                         "ok": true,
                         "checked_at": chrono::Utc::now().to_rfc3339(),
+                        "interval_seconds": interval.as_secs(),
                         "consecutive_failures": consecutive_failures,
                         "report": report,
                     }),
                 )?;
-                info!(component = ?component, "native State cycle succeeded");
+                info!(component = ?component, interval_seconds = interval.as_secs(), "native State cycle succeeded");
             }
             Err(error) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
@@ -310,6 +330,7 @@ async fn state_loop(
                         "protocol": protocol,
                         "ok": false,
                         "checked_at": chrono::Utc::now().to_rfc3339(),
+                        "interval_seconds": interval.as_secs(),
                         "consecutive_failures": consecutive_failures,
                         "error": format!("{error:#}"),
                     }),
@@ -348,6 +369,7 @@ fn write_daemon_status(
     status: &str,
     components: &BTreeSet<Component>,
     error: Option<String>,
+    args: &Args,
 ) -> Result<()> {
     write_json_report(
         data_root,
@@ -360,6 +382,12 @@ fn write_daemon_status(
             "runtime": "RUST_TOKIO",
             "single_instance_lock": true,
             "components": components.iter().map(|component| format!("{component:?}")).collect::<Vec<_>>(),
+            "cadence_seconds": {
+                "Observatory": args.observatory_interval_seconds,
+                "Materializer": args.materializer_interval_seconds,
+                "StateV03": args.state_v03_interval_seconds,
+                "StateV04": args.state_v04_interval_seconds,
+            },
             "error": error,
         }),
     )?;
@@ -380,7 +408,9 @@ async fn shutdown_signal() -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c().await.context("listen for Ctrl-C")?;
+        tokio::signal::ctrl_c()
+            .await
+            .context("listen for Ctrl-C")?;
     }
     Ok(())
 }
