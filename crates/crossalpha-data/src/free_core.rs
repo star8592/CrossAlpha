@@ -446,6 +446,47 @@ pub fn parse_fred_payload(series_id: &str, payload: &Value) -> Result<Vec<CashRa
     Ok(rows)
 }
 
+pub fn write_free_core_fixture_canonical(
+    data_root: &Path,
+    range: &FreeCoreRange,
+    tradfi_rows: &[ProxyDailyRow],
+    crypto_rows: &[ProxyDailyRow],
+    cash_rows: &[CashRateRow],
+) -> Result<Value> {
+    let mut tradfi = tradfi_rows.to_vec();
+    let mut crypto = crypto_rows.to_vec();
+    let mut cash = cash_rows.to_vec();
+    tradfi.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then(left.economic_asset.cmp(&right.economic_asset))
+    });
+    crypto.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then(left.economic_asset.cmp(&right.economic_asset))
+    });
+    cash.sort_by_key(|row| row.date);
+
+    let slug = range.slug();
+    let proxy_root = data_root.join("canonical/core/free_proxy_daily").join(&slug);
+    let cash_root = data_root.join("canonical/core/cash_rate").join(&slug);
+    let tradfi_path = proxy_root.join("tradfi.parquet");
+    let crypto_path = proxy_root.join("crypto.parquet");
+    let cash_path = cash_root.join(format!("{FRED_CASH_SERIES}.parquet"));
+    write_tradfi_parquet(&tradfi_path, &tradfi)?;
+    write_crypto_parquet(&crypto_path, &crypto)?;
+    write_cash_parquet(&cash_path, &cash)?;
+    Ok(json!({
+        "tradfi": tradfi_path,
+        "crypto": crypto_path,
+        "cash": cash_path,
+        "tradfi_rows": tradfi.len(),
+        "crypto_rows": crypto.len(),
+        "cash_rows": cash.len(),
+    }))
+}
+
 fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
