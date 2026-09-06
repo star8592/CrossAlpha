@@ -28,6 +28,12 @@ if [[ "$ACTIVATE" != true ]]; then
   exit 2
 fi
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing standalone materializer install: unified Rust daemon already owns materialization." >&2
+  exit 2
+fi
+
 if [[ -z "$DATA_ROOT" && -f "$REPO_DIR/.env" ]]; then
   line="$(grep -E '^[[:space:]]*CROSSALPHA_DATA_DIR[[:space:]]*=' "$REPO_DIR/.env" | tail -n 1 || true)"
   if [[ -n "$line" ]]; then
