@@ -18,7 +18,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$ACTIVATE" == true ]] || { echo "Refusing State runtime binding without explicit --activate." >&2; exit 2; }
+[[ "$ACTIVATE" == true ]] || {
+  echo "Refusing native runtime binding without explicit --activate." >&2
+  exit 2
+}
 
 if [[ -z "$DATA_ROOT" && -f "$REPO_DIR/.env" ]]; then
   line="$(grep -E '^[[:space:]]*CROSSALPHA_DATA_DIR[[:space:]]*=' "$REPO_DIR/.env" | tail -n 1 || true)"
@@ -36,33 +39,72 @@ DATA_ROOT="$(realpath -m "$DATA_ROOT")"
 
 ACCEPTANCE="$DATA_ROOT/manifests/rust_migration_acceptance.json"
 [[ -f "$ACCEPTANCE" ]] || { echo "Acceptance report missing: $ACCEPTANCE" >&2; exit 2; }
-python3 - "$ACCEPTANCE" <<'PY'
-import json, sys
-v=json.load(open(sys.argv[1], encoding="utf-8"))
-if v.get("daemon_cutover_allowed") is not True:
-    raise SystemExit("State runtime binding refused: daemon_cutover_allowed is not true")
-if v.get("cargo_lock", {}).get("ok") is not True:
-    raise SystemExit("State runtime binding refused: Cargo.lock gate is not green")
-if v.get("git_clean", {}).get("ok") is not True:
-    raise SystemExit("State runtime binding refused: git worktree is not clean")
-PY
+grep -Eq '"daemon_cutover_allowed"[[:space:]]*:[[:space:]]*true' "$ACCEPTANCE" || {
+  echo "Native runtime binding refused: daemon_cutover_allowed is not true" >&2
+  exit 2
+}
 
 cd "$REPO_DIR"
+[[ -f Cargo.lock ]] || { echo "Native runtime binding refused: Cargo.lock missing" >&2; exit 2; }
+git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 || {
+  echo "Native runtime binding refused: Cargo.lock is not tracked" >&2
+  exit 2
+}
+[[ -z "$(git status --porcelain)" ]] || {
+  echo "Native runtime binding refused: git worktree is not clean" >&2
+  git status --short >&2
+  exit 2
+}
+
+# This migration is allowed to bind only already-frozen experiments. Never
+# create a legacy research freeze as a side effect of language migration.
+for required in \
+  "$DATA_ROOT/research/state_v02/freeze.json" \
+  "$DATA_ROOT/research/state_v03/freeze.json" \
+  "$DATA_ROOT/research/state_v04/freeze.json" \
+  "$DATA_ROOT/research/free_v01/paper/freeze.json" \
+  "$DATA_ROOT/research/free_v01/state_ab_v01/freeze.json" \
+  "$DATA_ROOT/research/outcome_linkage_v01/freeze.json"; do
+  [[ -f "$required" ]] || {
+    echo "Native runtime binding refused: legacy freeze missing: $required" >&2
+    exit 2
+  }
+done
+
 cargo build --workspace --release
-BINARY="$REPO_DIR/target/release/crossalpha-state-rs"
+STATE="$REPO_DIR/target/release/crossalpha-state-rs"
+PAPER="$REPO_DIR/target/release/crossalpha-paper-rs"
+AB="$REPO_DIR/target/release/crossalpha-ab-rs"
+OUTCOME="$REPO_DIR/target/release/crossalpha-outcome-rs"
+for binary in "$STATE" "$PAPER" "$AB" "$OUTCOME"; do
+  [[ -x "$binary" ]] || { echo "Native binary missing: $binary" >&2; exit 2; }
+done
 
-# Bind predecessor first because V0.3 legacy freeze references the V0.2 freeze.
-echo "==> Binding State V0.2 to Rust runtime"
-"$BINARY" v02 freeze --data-root "$DATA_ROOT"
-"$BINARY" v02 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
+bind_state() {
+  local version="$1"
+  echo "==> Binding State $version to Rust runtime"
+  "$STATE" "$version" freeze --data-root "$DATA_ROOT"
+  "$STATE" "$version" integrity --data-root "$DATA_ROOT" \
+    | grep -Eq '"cycle_enabled"[[:space:]]*:[[:space:]]*true'
+}
 
-echo "==> Binding State V0.3 to Rust runtime"
-"$BINARY" v03 freeze --data-root "$DATA_ROOT"
-"$BINARY" v03 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
+# Bind predecessor State layers first because later freezes reference them.
+bind_state v02
+bind_state v03
+bind_state v04
 
-echo "==> Binding State V0.4 to Rust runtime"
-"$BINARY" v04 freeze --data-root "$DATA_ROOT"
-"$BINARY" v04 integrity --data-root "$DATA_ROOT" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(json.dumps(v,indent=2)); raise SystemExit(0 if v.get("cycle_enabled") is True else 2)'
+echo "==> Binding Frozen B3 Paper to Rust runtime"
+"$PAPER" bind --data-root "$DATA_ROOT"
+"$PAPER" integrity --data-root "$DATA_ROOT"
 
-echo "Native State runtime bindings are valid."
+echo "==> Binding State A/B to Rust runtime"
+"$AB" bind --data-root "$DATA_ROOT"
+"$AB" integrity --data-root "$DATA_ROOT"
+
+echo "==> Binding Outcome Linkage to Rust runtime"
+"$OUTCOME" bind --data-root "$DATA_ROOT"
+"$OUTCOME" integrity --data-root "$DATA_ROOT"
+
+echo "All production research runtimes are Rust-bound and integrity-valid."
 echo "Next full cutover: bash scripts/cutover_unified_rust_daemon.sh --activate --data-root '$DATA_ROOT' --include-state-v02 --include-state-v03 --include-state-v04"
+echo "Then install Rust Paper/A-B/Outcome timers with scripts/install_free_paper_user_services.sh and scripts/install_outcome_linkage_user_service.sh"
