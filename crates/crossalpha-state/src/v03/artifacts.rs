@@ -1,7 +1,7 @@
 use crate::v03_census::AccountDataRow;
 use anyhow::{Context, Result};
 use arrow_array::builder::{BooleanBuilder, Float64Builder, StringBuilder};
-use arrow_array::{ArrayRef, RecordBatch};
+use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use parquet::arrow::ArrowWriter;
 use std::collections::BTreeSet;
