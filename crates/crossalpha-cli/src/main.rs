@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::info;
 
@@ -117,6 +119,22 @@ enum Command {
         /// Explicitly allow writes when output_root is the production data_root.
         #[arg(long)]
         allow_production_write: bool,
+    },
+    /// Compute bounded recent causal feature rows and write JSON only to an explicit file.
+    FeaturePreview {
+        data_root: PathBuf,
+        /// Feature source: hyperliquid or stablecoins.
+        #[arg(long)]
+        source: String,
+        /// Number of most recent daily manifest partitions to process.
+        #[arg(long, default_value_t = 2)]
+        recent_days: usize,
+        /// Hyperliquid asset to include. Repeat for multiple assets.
+        #[arg(long = "asset")]
+        assets: Vec<String>,
+        /// Explicit JSON output file used by the R3.4 parity gate.
+        #[arg(long)]
+        output_json: PathBuf,
     },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
@@ -370,11 +388,81 @@ async fn main() -> Result<()> {
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        Command::MigrationStatus => {
+        Command::FeaturePreview {
+            data_root,
+            source,
+            recent_days,
+            assets,
+            output_json,
+        } => {
+            if recent_days == 0 {
+                anyhow::bail!("--recent-days must be >= 1");
+            }
+            let output = match source.as_str() {
+                "hyperliquid" => {
+                    let rows = crossalpha_features::compute_recent_hyperliquid_market_state(
+                        &data_root,
+                        recent_days,
+                        &assets,
+                    )?;
+                    serde_json::json!({
+                        "source": "hyperliquid",
+                        "recent_days": recent_days,
+                        "assets": assets,
+                        "rows": rows,
+                    })
+                }
+                "stablecoins" | "defillama" => {
+                    let (system, chains) = crossalpha_features::compute_recent_stablecoin_state(
+                        &data_root,
+                        recent_days,
+                    )?;
+                    serde_json::json!({
+                        "source": "stablecoins",
+                        "recent_days": recent_days,
+                        "system": system,
+                        "chains": chains,
+                    })
+                }
+                other => anyhow::bail!(
+                    "unsupported feature source: {other}; expected hyperliquid or stablecoins"
+                ),
+            };
+            write_json_atomic(&output_json, &output)?;
             println!(
-                "phase=R3.3 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=production-compatible canonical_parity_gate=passed parquet_writer=implemented parquet_writer_gate=required canonical_materializer=implemented canonical_materializer_gate=required production_canonical_write=false python_compat=true"
+                "ok=true source={} recent_days={} output={}",
+                source,
+                recent_days,
+                output_json.display()
             );
         }
+        Command::MigrationStatus => {
+            println!(
+                "phase=R3.4 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=production-compatible canonical_parity_gate=passed parquet_writer=implemented parquet_writer_gate=required canonical_materializer=implemented canonical_materializer_gate=required feature_kernels=implemented feature_parity_gate=required production_canonical_write=false production_feature_write=false python_compat=true"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    {
+        let mut file = File::create(&tmp)?;
+        serde_json::to_writer(&mut file, value)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent()
+        && let Ok(directory) = File::open(parent)
+    {
+        let _ = directory.sync_all();
     }
     Ok(())
 }
