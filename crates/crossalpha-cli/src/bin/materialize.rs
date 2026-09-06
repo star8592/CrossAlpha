@@ -2,7 +2,6 @@ use anyhow::{Result, bail};
 use clap::{Parser, ValueEnum};
 use crossalpha_features::{materialize_recent_canonical, materialize_recent_features};
 use serde::Serialize;
-use serde_json::json;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -52,7 +51,10 @@ fn main() -> Result<()> {
     if args.recent_days == 0 {
         bail!("recent-days must be positive");
     }
-    let output_root = args.output_root.clone().unwrap_or_else(|| args.data_root.clone());
+    let output_root = args
+        .output_root
+        .clone()
+        .unwrap_or_else(|| args.data_root.clone());
     let production_write = same_path(&output_root, &args.data_root);
     if production_write && !args.allow_production_write {
         bail!(
@@ -100,11 +102,9 @@ fn same_path(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn default_report_protocol_is_explicit() {
-        let value = json!({"protocol": "CROSSALPHA_NATIVE_MATERIALIZER_V1"});
+        let value = serde_json::json!({"protocol": "CROSSALPHA_NATIVE_MATERIALIZER_V1"});
         assert_eq!(value["protocol"], "CROSSALPHA_NATIVE_MATERIALIZER_V1");
     }
 }
