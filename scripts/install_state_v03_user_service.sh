@@ -4,6 +4,12 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing standalone State V0.3 install: unified Rust daemon already owns State runtime." >&2
+  exit 2
+fi
+
 DATA_ROOT="${CROSSALPHA_DATA_DIR:-}"
 if [[ -z "$DATA_ROOT" && -f .env ]]; then
   line="$(grep -E '^[[:space:]]*CROSSALPHA_DATA_DIR[[:space:]]*=' .env | tail -n 1 || true)"
