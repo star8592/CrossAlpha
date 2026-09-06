@@ -1,4 +1,5 @@
 pub mod v03;
+pub mod v04;
 #[path = "v03/artifacts.rs"]
 pub mod v03_artifacts;
 #[path = "v03/census.rs"]
@@ -21,6 +22,8 @@ pub mod v03_prospective;
 pub mod v03_runtime_binding;
 #[path = "v03/watchlist.rs"]
 pub mod v03_watchlist;
+#[path = "v04/provider.rs"]
+pub mod v04_provider;
 
 use anyhow::Result;
 use async_trait::async_trait;
