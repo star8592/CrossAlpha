@@ -3,6 +3,7 @@ name = "crossalpha-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "crossalpha-rs"
 
 [[bin]]
 name = "crossalpha-rs"
