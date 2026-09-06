@@ -1,6 +1,8 @@
 mod parity;
+mod recent;
 
 pub use parity::{ManifestParityReport, verify_manifest_parity};
+pub use recent::{RecentManifestLoad, load_recent_daily_manifests};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
