@@ -18,10 +18,16 @@ pub fn write_full_census_observation(
 ) -> Result<Value> {
     let freeze = load_freeze(data_root)?;
     verify_hash_graph(data_root, &freeze)?;
-    let binding = runtime_binding_path(data_root);
-    if !verify_runtime_binding_file(&binding)? {
+    let binding_path = runtime_binding_path(data_root);
+    if !verify_runtime_binding_file(&binding_path)? {
         bail!("STATE_V03_RUST_RUNTIME_BINDING_INVALID");
     }
+    let binding: Value = serde_json::from_reader(File::open(&binding_path)?)?;
+    let binding_file_sha = sha256_file(&binding_path)?;
+    let binding_record_sha = binding
+        .get("record_sha256")
+        .cloned()
+        .context("State V0.3 runtime binding record_sha256 missing")?;
     if !summary_path.exists() || !detail_path.exists() {
         bail!("full census summary/detail artifact missing");
     }
@@ -81,6 +87,9 @@ pub fn write_full_census_observation(
         "protocol": PROSPECTIVE_PROTOCOL,
         "state_protocol": PROTOCOL,
         "freeze_record_sha256": freeze.get("record_sha256").cloned().unwrap_or(Value::Null),
+        "rust_runtime_binding_path": binding_path.to_string_lossy(),
+        "rust_runtime_binding_file_sha256": binding_file_sha,
+        "rust_runtime_binding_record_sha256": binding_record_sha,
         "known_at": known_at.to_rfc3339_opts(SecondsFormat::Micros, false),
         "captured_at": captured.to_rfc3339_opts(SecondsFormat::Micros, false),
         "block_time": block_time.to_rfc3339_opts(SecondsFormat::Micros, false),
@@ -110,9 +119,15 @@ pub fn write_full_census_observation(
         if !verify_seal(&existing)? {
             bail!("existing block record failed seal verification: {}", path.display());
         }
-        for key in ["summary_sha256", "detail_sha256", "freeze_record_sha256"] {
+        for key in [
+            "summary_sha256",
+            "detail_sha256",
+            "freeze_record_sha256",
+            "rust_runtime_binding_file_sha256",
+            "rust_runtime_binding_record_sha256",
+        ] {
             if existing.get(key) != payload.get(key) {
-                bail!("STATE_V03_BLOCK_COLLISION: same finalized block cannot be relabeled with different census artifacts");
+                bail!("STATE_V03_BLOCK_COLLISION: same finalized block cannot be relabeled with different {key}");
             }
         }
         return Ok(merge_status(existing, "already_exists", &path));
@@ -129,6 +144,78 @@ pub fn verify_prospective_record(path: &Path) -> Result<bool> {
     }
     let value: Value = serde_json::from_reader(File::open(path)?)?;
     verify_seal(&value)
+}
+
+pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
+    let freeze = load_freeze(data_root)?;
+    let binding_path = runtime_binding_path(data_root);
+    let binding_ok = verify_runtime_binding_file(&binding_path)?;
+    let binding = binding_ok
+        .then(|| serde_json::from_reader::<_, Value>(File::open(&binding_path)?))
+        .transpose()?;
+    let binding_file_sha = binding_ok.then(|| sha256_file(&binding_path)).transpose()?;
+    let binding_record_sha = binding
+        .as_ref()
+        .and_then(|value| value.get("record_sha256"));
+    let root = data_root.join("research/state_v03/prospective");
+    let mut paths = Vec::new();
+    if root.exists() {
+        for entry in fs::read_dir(&root)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) == Some("json") {
+                paths.push(path);
+            }
+        }
+    }
+    paths.sort();
+
+    let mut seals_ok = true;
+    let mut freeze_links = true;
+    let mut runtime_links = true;
+    let mut artifact_links = true;
+    let mut descriptive_only = true;
+    let mut native_binding_linked_count = 0_usize;
+    for path in &paths {
+        let value: Value = serde_json::from_reader(File::open(path)?)?;
+        seals_ok &= verify_seal(&value)?;
+        freeze_links &= value.get("freeze_record_sha256") == freeze.get("record_sha256");
+        descriptive_only &= value.get("actionability").and_then(Value::as_str) == Some(ACTIONABILITY)
+            && value.get("risk_multiplier").is_some_and(Value::is_null);
+        if value.get("rust_runtime_binding_record_sha256").is_some() {
+            native_binding_linked_count += 1;
+            runtime_links &= value.get("rust_runtime_binding_record_sha256") == binding_record_sha;
+            runtime_links &= value
+                .get("rust_runtime_binding_file_sha256")
+                .and_then(Value::as_str)
+                == binding_file_sha.as_deref();
+        }
+        for (path_key, sha_key) in [
+            ("summary_path", "summary_sha256"),
+            ("detail_path", "detail_sha256"),
+        ] {
+            let artifact = value.get(path_key).and_then(Value::as_str).map(PathBuf::from);
+            let expected = value.get(sha_key).and_then(Value::as_str);
+            artifact_links &= artifact.as_ref().is_some_and(|path| path.exists())
+                && artifact
+                    .as_ref()
+                    .and_then(|path| sha256_file(path).ok())
+                    .as_deref()
+                    == expected;
+        }
+    }
+    let ok = binding_ok && seals_ok && freeze_links && runtime_links && artifact_links && descriptive_only;
+    Ok(json!({
+        "protocol": PROSPECTIVE_PROTOCOL,
+        "ok": ok,
+        "record_count": paths.len(),
+        "native_binding_linked_count": native_binding_linked_count,
+        "record_seals": seals_ok,
+        "freeze_links": freeze_links,
+        "rust_runtime_binding": binding_ok,
+        "rust_runtime_binding_links": runtime_links,
+        "artifact_hash_links": artifact_links,
+        "descriptive_only": descriptive_only,
+    }))
 }
 
 fn load_freeze(data_root: &Path) -> Result<Value> {
