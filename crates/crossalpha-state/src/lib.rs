@@ -3,6 +3,8 @@ pub mod v03;
 pub mod v03_freeze;
 #[path = "v03/preflight.rs"]
 pub mod v03_preflight;
+#[path = "v03/runtime_binding.rs"]
+pub mod v03_runtime_binding;
 
 use anyhow::Result;
 use async_trait::async_trait;
