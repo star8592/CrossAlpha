@@ -45,13 +45,16 @@ def _run(command: list[str], env: dict[str, str]) -> dict[str, Any]:
 
 def _cargo_lock_gate() -> dict[str, Any]:
     lock = REPO_ROOT / "Cargo.lock"
-    tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "Cargo.lock"],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    ).returncode == 0
+    tracked = (
+        subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "Cargo.lock"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+    )
     ok = lock.is_file() and tracked
     return {
         "ok": ok,
@@ -61,7 +64,7 @@ def _cargo_lock_gate() -> dict[str, Any]:
         "remediation": (
             None
             if ok
-            else "Run cargo generate-lockfile (or cargo build), then git add Cargo.lock && git commit/push it before State freeze/cutover."
+            else "Run cargo generate-lockfile (or cargo build), then git add Cargo.lock && git commit/push it before runtime binding/cutover."
         ),
     }
 
@@ -83,11 +86,29 @@ def _git_clean_gate() -> dict[str, Any]:
 
 
 def _parse_json_command(command: list[str], env: dict[str, str]) -> dict[str, Any]:
-    result = _run(command, env)
-    if not result["ok"]:
+    started = datetime.now(timezone.utc)
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    finished = datetime.now(timezone.utc)
+    result: dict[str, Any] = {
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "command": command,
+        "stdout_tail": completed.stdout.strip()[-8000:],
+        "stderr_tail": completed.stderr.strip()[-8000:],
+    }
+    if completed.returncode != 0:
         return result
     try:
-        value = json.loads(result["stdout_tail"])
+        value = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         result["ok"] = False
         result["parse_error"] = str(exc)
@@ -212,7 +233,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run the consolidated local-first R7 Rust migration acceptance suite. "
-            "This command never changes production services or freezes State."
+            "This command never changes production services or creates legacy freezes."
         )
     )
     parser.add_argument("--data-root", type=Path, required=True)
@@ -277,13 +298,51 @@ def main() -> int:
             (py, "scripts/verify_rust_feature_parity.py", "--data-root", str(data_root)),
             "real_data",
         ),
-        Gate("state_v02_parity", (py, "scripts/verify_rust_state_v02_parity.py"), "deterministic"),
-        Gate("state_kernel_parity", (py, "scripts/verify_rust_state_kernel_parity.py"), "deterministic"),
-        Gate("state_v03_config_parity", (py, "scripts/verify_rust_state_v03_config_parity.py"), "deterministic"),
-        Gate("state_v03_freeze_parity", (py, "scripts/verify_rust_state_v03_freeze_parity.py"), "deterministic"),
-        Gate("state_v03_runtime_binding", (py, "scripts/verify_rust_state_v03_runtime_binding.py"), "deterministic"),
-        Gate("state_v04_parity", (py, "scripts/verify_rust_state_v04_parity.py"), "deterministic"),
-        Gate("research_kernel_parity", (py, "scripts/verify_rust_research_kernel_parity.py"), "deterministic"),
+        Gate(
+            "shadow_v01_parity",
+            (py, "scripts/verify_rust_shadow_v01_parity.py", "--data-root", str(data_root)),
+            "real_data",
+        ),
+        Gate(
+            "paper_ab_parity",
+            (py, "scripts/verify_rust_paper_ab_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_v02_parity",
+            (py, "scripts/verify_rust_state_v02_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_kernel_parity",
+            (py, "scripts/verify_rust_state_kernel_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_v03_config_parity",
+            (py, "scripts/verify_rust_state_v03_config_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_v03_freeze_parity",
+            (py, "scripts/verify_rust_state_v03_freeze_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_v03_runtime_binding",
+            (py, "scripts/verify_rust_state_v03_runtime_binding.py"),
+            "deterministic",
+        ),
+        Gate(
+            "state_v04_parity",
+            (py, "scripts/verify_rust_state_v04_parity.py"),
+            "deterministic",
+        ),
+        Gate(
+            "research_kernel_parity",
+            (py, "scripts/verify_rust_research_kernel_parity.py"),
+            "deterministic",
+        ),
     ]
     if not args.skip_live:
         gates.extend(
@@ -370,9 +429,24 @@ def main() -> int:
             "ok": False,
             "required": True,
             "full_component_set": False,
-            "reason": "rerun with --post-cutover after unified daemon cutover and soak",
+            "reason": "rerun with --post-cutover after full unified daemon cutover and soak",
         }
     )
+    production_runtime = (
+        _parse_json_command(
+            [py, "scripts/verify_rust_production_runtime.py", "--data-root", str(data_root)],
+            env,
+        )
+        if args.post_cutover and not build_failed
+        else {
+            "ok": False,
+            "required": True,
+            "reason": "full installed-runtime audit runs only with --post-cutover",
+        }
+    )
+    runtime_value = production_runtime.get("value", {})
+    runtime_integrity = runtime_value.get("integrity", {})
+
     running = set(post_cutover.get("components") or [])
     obs_retire = (
         daemon_cutover_allowed
@@ -399,15 +473,37 @@ def main() -> int:
         and production_state.get("v04", {}).get("ok") is True
         and "StateV04" in running
     )
-    python_retirement_allowed = all(
-        (
-            obs_retire,
-            materializer_retire,
-            state_v02_retire,
-            state_v03_retire,
-            state_v04_retire,
+    installed_runtime_green = production_runtime.get("ok") is True and runtime_value.get("ok") is True
+    paper_retire = (
+        installed_runtime_green
+        and runtime_integrity.get("paper", {}).get("ok") is True
+    )
+    state_ab_retire = (
+        installed_runtime_green
+        and runtime_integrity.get("state_ab", {}).get("ok") is True
+    )
+    outcome_retire = (
+        installed_runtime_green
+        and runtime_integrity.get("outcome", {}).get("ok") is True
+    )
+
+    python_retirement_allowed = (
+        all(
+            (
+                obs_retire,
+                materializer_retire,
+                state_v02_retire,
+                state_v03_retire,
+                state_v04_retire,
+                paper_retire,
+                state_ab_retire,
+                outcome_retire,
+            )
         )
-    ) and post_cutover.get("full_component_set") is True
+        and post_cutover.get("full_component_set") is True
+        and installed_runtime_green
+        and runtime_value.get("python_production_writer_detected") is False
+    )
 
     report = {
         "schema_version": 1,
@@ -417,13 +513,14 @@ def main() -> int:
         "data_root": str(data_root),
         "local_first": True,
         "changes_production_services": False,
-        "freezes_state": False,
+        "creates_legacy_freezes": False,
         "skip_live": args.skip_live,
         "gates": results,
         "cargo_lock": lock_gate,
         "git_clean": clean_gate,
         "production_state_integrity": production_state,
         "post_cutover_soak": post_cutover,
+        "production_runtime_audit": production_runtime,
         "daemon_cutover_allowed": daemon_cutover_allowed,
         "python_retirement_allowed": python_retirement_allowed,
         "subsystems": {
@@ -432,6 +529,9 @@ def main() -> int:
             "state_v02_python_retirement_allowed": state_v02_retire,
             "state_v03_python_retirement_allowed": state_v03_retire,
             "state_v04_python_retirement_allowed": state_v04_retire,
+            "paper_python_retirement_allowed": paper_retire,
+            "state_ab_python_retirement_allowed": state_ab_retire,
+            "outcome_linkage_python_retirement_allowed": outcome_retire,
             "research_python_runtime_required_for_production": (
                 False if python_retirement_allowed else None
             ),
