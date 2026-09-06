@@ -4,29 +4,31 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-if [[ -f .venv/bin/activate ]]; then
-  # shellcheck disable=SC1091
-  source .venv/bin/activate
-fi
+cargo build --workspace --release
+PAPER="$REPO_DIR/target/release/crossalpha-paper-rs"
+AB="$REPO_DIR/target/release/crossalpha-ab-rs"
+[[ -x "$PAPER" ]] || { echo "Missing native Paper binary: $PAPER" >&2; exit 2; }
+[[ -x "$AB" ]] || { echo "Missing native A/B binary: $AB" >&2; exit 2; }
 
-# Standalone installs still self-bootstrap. The milestone finalizer already runs
-# one editable install, so do not repeat it when the new A/B entry point exists.
-if [[ "${CROSSALPHA_SKIP_EDITABLE_INSTALL:-0}" != "1" ]] \
-  && ! command -v crossalpha-state-ab-freeze >/dev/null 2>&1; then
-  python -m pip install -e ".[dev]"
-fi
-
-# A must be frozen first; the B experiment freeze references A's immutable hash.
-crossalpha-free-paper-freeze --historical-start 2010-06-01 --historical-end 2026-09-01
-crossalpha-state-ab-freeze
-crossalpha-state-ab-integrity
+# Migration never rewrites the already-frozen V0.1 experiments. The Rust
+# sidecar bindings must be valid before any production timer can be installed.
+"$PAPER" integrity || {
+  echo "Frozen B3 native binding/integrity is not green." >&2
+  echo "Run scripts/bind_native_state_runtime.sh --activate after R7 pre-cutover acceptance." >&2
+  exit 2
+}
+"$AB" integrity || {
+  echo "State A/B native binding/integrity is not green." >&2
+  echo "Run scripts/bind_native_state_runtime.sh --activate after R7 pre-cutover acceptance." >&2
+  exit 2
+}
 
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
 
 cat > "$UNIT_DIR/crossalpha-free-paper-daily.service" <<EOF
 [Unit]
-Description=CrossAlpha frozen B3 + State A/B daily prospective marks
+Description=CrossAlpha Rust frozen B3 + State A/B daily prospective marks
 After=network-online.target
 Wants=network-online.target
 
@@ -34,16 +36,18 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=$REPO_DIR
 ExecStart=/usr/bin/env bash $REPO_DIR/scripts/run_free_paper_daily.sh
+TimeoutStartSec=20min
 EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-daily.timer" <<'EOF'
 [Unit]
-Description=Run CrossAlpha Frozen B3 + State A/B marks Tue-Sun
+Description=Run CrossAlpha Rust Frozen B3 + State A/B marks Tue-Sun
 
 [Timer]
 OnCalendar=Tue..Sun *-*-* 04:00:00 UTC
 Persistent=true
 AccuracySec=1min
+Unit=crossalpha-free-paper-daily.service
 
 [Install]
 WantedBy=timers.target
@@ -51,7 +55,7 @@ EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-weekly.service" <<EOF
 [Unit]
-Description=CrossAlpha frozen B3 + State A/B Monday prospective snapshots
+Description=CrossAlpha Rust frozen B3 + State A/B Monday prospective snapshots
 After=network-online.target
 Wants=network-online.target
 
@@ -59,16 +63,18 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=$REPO_DIR
 ExecStart=/usr/bin/env bash $REPO_DIR/scripts/run_free_paper_weekly.sh
+TimeoutStartSec=20min
 EOF
 
 cat > "$UNIT_DIR/crossalpha-free-paper-weekly.timer" <<'EOF'
 [Unit]
-Description=Run CrossAlpha Frozen B3 + State A/B snapshot every Monday
+Description=Run CrossAlpha Rust Frozen B3 + State A/B snapshot every Monday
 
 [Timer]
 OnCalendar=Mon *-*-* 00:20:00 UTC
 Persistent=true
 AccuracySec=1min
+Unit=crossalpha-free-paper-weekly.service
 
 [Install]
 WantedBy=timers.target
@@ -79,9 +85,8 @@ systemctl --user enable --now crossalpha-free-paper-daily.timer
 systemctl --user enable --now crossalpha-free-paper-weekly.timer
 
 echo
-echo "CrossAlpha frozen B3 + prospective State A/B engine installed."
+echo "CrossAlpha Rust frozen B3 + prospective State A/B engine installed."
 echo "Daily timer:  systemctl --user status crossalpha-free-paper-daily.timer --no-pager"
 echo "Weekly timer: systemctl --user status crossalpha-free-paper-weekly.timer --no-pager"
-echo "Timers:       systemctl --user list-timers --all | grep crossalpha-free-paper"
-echo "A status:     crossalpha-free-paper-status"
-echo "A/B status:   crossalpha-state-ab-status"
+echo "A status:     $PAPER status"
+echo "A/B status:   $AB status"
