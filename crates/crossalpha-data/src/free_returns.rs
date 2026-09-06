@@ -10,7 +10,7 @@ use arrow_array::{
     TimestampSecondArray,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
