@@ -13,6 +13,8 @@ pub mod v03_network;
 pub mod v03_preflight;
 #[path = "v03/runtime_binding.rs"]
 pub mod v03_runtime_binding;
+#[path = "v03/watchlist.rs"]
+pub mod v03_watchlist;
 
 use anyhow::Result;
 use async_trait::async_trait;
