@@ -4,7 +4,7 @@ use crate::paper::{
 };
 use anyhow::{Context, Result, bail};
 use chrono::{Datelike, DateTime, Duration, NaiveDate, Utc};
-use crossalpha_data::{FreeCoreRange, read_asset_returns};
+use crossalpha_data::read_asset_returns;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
