@@ -1,4 +1,6 @@
 pub mod v03;
+#[path = "v03/artifacts.rs"]
+pub mod v03_artifacts;
 #[path = "v03/census.rs"]
 pub mod v03_census;
 #[path = "v03/engine.rs"]
