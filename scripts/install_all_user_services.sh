@@ -3,6 +3,13 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing split-service install: crossalpha-daemon.service already owns production writers." >&2
+  echo "Use the guarded unified-daemon cutover/rollback workflow instead." >&2
+  exit 2
+fi
+
 bash "$REPO_DIR/scripts/install_user_service.sh"
 bash "$REPO_DIR/scripts/install_materializer_timer.sh"
 bash "$REPO_DIR/scripts/install_free_paper_user_services.sh"
