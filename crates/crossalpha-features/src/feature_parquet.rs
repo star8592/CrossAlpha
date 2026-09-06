@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, bail};
 use arrow_array::builder::{BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
-use arrow_array::{ArrayRef, NullArray, RecordBatch};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use arrow_array::{ArrayRef, NullArray, RecordBatch, TimestampNanosecondArray};
+use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use chrono::{DateTime, Utc};
 use parquet::arrow::ArrowWriter;
 use serde::Serialize;
 use serde_json::Value;
@@ -28,11 +29,51 @@ pub fn write_struct_rows<T: Serialize>(rows: &[T], columns: &[&str], path: &Path
                     .with_context(|| format!("feature row missing column {name}"))
             })
             .collect::<Result<_>>()?;
-        push_values(&mut fields, &mut arrays, name, &values)?;
+        if matches!(*name, "observed_at" | "known_at") {
+            push_timestamp_values(&mut fields, &mut arrays, name, &values)?;
+        } else {
+            push_values(&mut fields, &mut arrays, name, &values)?;
+        }
     }
     let schema: SchemaRef = Arc::new(Schema::new(fields));
     let batch = RecordBatch::try_new(schema.clone(), arrays)?;
     write_batch_atomic(path, schema, batch)
+}
+
+fn push_timestamp_values(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    values: &[&Value],
+) -> Result<()> {
+    let nanos = values
+        .iter()
+        .map(|value| {
+            if value.is_null() {
+                return Ok(None);
+            }
+            let text = value
+                .as_str()
+                .with_context(|| format!("timestamp feature {name} must be RFC3339 text"))?;
+            let parsed = DateTime::parse_from_rfc3339(text)
+                .with_context(|| format!("invalid RFC3339 timestamp in feature column {name}"))?
+                .with_timezone(&Utc);
+            let value = parsed
+                .timestamp_micros()
+                .checked_mul(1_000)
+                .with_context(|| format!("timestamp feature {name} is outside nanosecond range"))?;
+            Ok(Some(value))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    fields.push(Field::new(
+        name,
+        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
+        true,
+    ));
+    arrays.push(Arc::new(
+        TimestampNanosecondArray::from(nanos).with_timezone_utc(),
+    ));
+    Ok(())
 }
 
 fn push_values(
@@ -41,7 +82,11 @@ fn push_values(
     name: &str,
     values: &[&Value],
 ) -> Result<()> {
-    let non_null: Vec<&Value> = values.iter().copied().filter(|value| !value.is_null()).collect();
+    let non_null: Vec<&Value> = values
+        .iter()
+        .copied()
+        .filter(|value| !value.is_null())
+        .collect();
     if non_null.is_empty() {
         fields.push(Field::new(name, DataType::Null, true));
         arrays.push(Arc::new(NullArray::new(values.len())));
