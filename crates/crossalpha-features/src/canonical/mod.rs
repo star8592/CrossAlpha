@@ -1,4 +1,5 @@
 pub mod hyperliquid;
+pub mod materialize;
 pub mod stablecoins;
 
 use anyhow::{Context, Result, bail};
