@@ -1,3 +1,4 @@
+pub mod shadow_v01;
 pub mod v02;
 pub mod v03;
 pub mod v04;
