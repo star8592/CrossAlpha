@@ -22,6 +22,7 @@ arrow-schema = "56"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
 flate2 = "1"
 fs2 = "0.4"
 hex = "0.4"
