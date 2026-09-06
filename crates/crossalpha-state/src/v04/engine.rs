@@ -1,6 +1,7 @@
 use crate::v04::{NativeStateV04, PROTOCOL};
 use crate::v04_cycle;
 use crate::v04_freeze::{freeze_path, verify_freeze_file, write_freeze};
+use crate::v04_prospective::prospective_integrity;
 use crate::v04_runtime_binding::{runtime_binding_path, verify_runtime_binding_file, write_runtime_binding};
 use crate::{StateConfigReport, StateRuntimeContext, StateSpec};
 use anyhow::{Result, bail};
@@ -66,14 +67,27 @@ impl StateSpec for NativeStateV04Engine {
         let binding = runtime_binding_path(data_root);
         let freeze_ok = verify_freeze_file(&freeze)?;
         let binding_ok = verify_runtime_binding_file(&binding)?;
+        let prospective = if freeze_ok && binding_ok {
+            prospective_integrity(data_root)?
+        } else {
+            json!({
+                "protocol": crate::v04_freeze::PROSPECTIVE_PROTOCOL,
+                "ok": false,
+                "error": "freeze_or_runtime_binding_invalid"
+            })
+        };
+        let prospective_ok = prospective.get("ok").and_then(Value::as_bool) == Some(true);
+        let cycle_enabled = freeze_ok && binding_ok && prospective_ok;
         Ok(json!({
             "protocol": "CROSSALPHA_STATE_V0_4_NATIVE_INTEGRITY",
-            "ok": freeze_ok && binding_ok,
+            "ok": cycle_enabled,
             "legacy_freeze_present": freeze.is_file(),
             "legacy_freeze_ok": freeze_ok,
             "runtime_binding_present": binding.is_file(),
             "runtime_binding_ok": binding_ok,
-            "cycle_enabled": freeze_ok && binding_ok,
+            "prospective_ok": prospective_ok,
+            "prospective": prospective,
+            "cycle_enabled": cycle_enabled,
             "python_event_loop_required": false,
             "no_composite_stress_score": true,
         }))
