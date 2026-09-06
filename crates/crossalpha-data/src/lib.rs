@@ -5,6 +5,7 @@ pub use free_core::{
     CashRateRow, FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FRED_CASH_SERIES,
     FreeCoreProvider, FreeCoreRange, ProxyDailyRow, parse_binance_payload, parse_fred_payload,
     parse_tiingo_payload, validate_fred_key, validate_tiingo_token,
+    write_free_core_fixture_canonical,
 };
 pub use free_returns::{AssetReturnRow, build_free_core_returns, canonical_paths, read_asset_returns};
 
