@@ -42,6 +42,10 @@ name = "crossalpha-raw-envelope-fixture-rs"
 path = "src/bin/raw_envelope_fixture.rs"
 
 [[bin]]
+name = "crossalpha-free-core-fixture-rs"
+path = "src/bin/free_core_fixture.rs"
+
+[[bin]]
 name = "crossalpha-state-v02-kernel-rs"
 path = "src/bin/state_v02_kernel.rs"
 
