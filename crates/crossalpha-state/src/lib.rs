@@ -1,4 +1,6 @@
 pub mod v03;
+#[path = "v03/preflight.rs"]
+pub mod v03_preflight;
 
 use anyhow::Result;
 use async_trait::async_trait;
