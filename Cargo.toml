@@ -26,6 +26,8 @@ dotenvy = "0.15"
 flate2 = "1"
 fs2 = "0.4"
 hex = "0.4"
+num-bigint = "0.4"
+num-traits = "0.2"
 parquet = { version = "56", features = ["arrow"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
