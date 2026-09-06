@@ -1,6 +1,7 @@
 pub mod canonical;
 pub mod market_state;
 pub mod parquet;
+pub mod recent_features;
 pub mod stablecoin_state;
 
 pub use canonical::hyperliquid::{HyperliquidAssetContextRow, parse_meta_and_asset_contexts};
@@ -18,6 +19,9 @@ pub use market_state::{
     compute_hyperliquid_market_state,
 };
 pub use parquet::{write_hyperliquid_parquet, write_stablecoin_parquet};
+pub use recent_features::{
+    compute_recent_hyperliquid_market_state, compute_recent_stablecoin_state,
+};
 pub use stablecoin_state::{
     STABLECOIN_FEATURE_SCHEMA_VERSION, StablecoinChainStateRow, StablecoinSystemStateRow,
     compute_stablecoin_system_state,
