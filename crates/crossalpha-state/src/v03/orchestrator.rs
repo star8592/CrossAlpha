@@ -11,8 +11,10 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub async fn freeze_native(context: &StateRuntimeContext) -> Result<Value> {
+    ensure_tracked_lockfile()?;
     let config_path = repo_root().join("config/state_v03.yaml");
     let config = StateV03::strict_config_report(&config_path)?;
     if !config.ok {
@@ -89,6 +91,25 @@ pub fn native_integrity(data_root: &Path) -> Result<Value> {
         "cycle_enabled": freeze_ok && binding_ok,
         "python_event_loop_required": false,
     }))
+}
+
+fn ensure_tracked_lockfile() -> Result<()> {
+    let root = repo_root();
+    let lock = root.join("Cargo.lock");
+    if !lock.is_file() {
+        bail!("native State freeze refused before mutation: Cargo.lock is missing");
+    }
+    let tracked = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["ls-files", "--error-unmatch", "Cargo.lock"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !tracked {
+        bail!("native State freeze refused before mutation: Cargo.lock is not tracked by git");
+    }
+    Ok(())
 }
 
 fn repo_root() -> PathBuf {
