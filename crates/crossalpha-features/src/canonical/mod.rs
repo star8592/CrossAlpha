@@ -1,3 +1,4 @@
+pub mod aave;
 pub mod hyperliquid;
 pub mod materialize;
 pub mod stablecoins;
