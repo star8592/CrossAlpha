@@ -4,16 +4,19 @@ mod recent;
 pub use parity::{ManifestParityReport, verify_manifest_parity};
 pub use recent::{RecentManifestLoad, load_recent_daily_manifests};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
 use flate2::{Compression, write::GzEncoder};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+
+pub const RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ObservationEnvelope {
@@ -64,6 +67,77 @@ fn default_schema_version() -> u32 {
     1
 }
 
+pub fn raw_envelope_bytes(envelope: &ObservationEnvelope) -> Result<Vec<u8>> {
+    match envelope.schema_version {
+        1 => Ok(serde_json::to_vec(envelope)?),
+        RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION => canonical_envelope_v2_bytes(envelope),
+        other => bail!("unsupported raw ObservationEnvelope schema_version: {other}"),
+    }
+}
+
+fn canonical_envelope_v2_bytes(envelope: &ObservationEnvelope) -> Result<Vec<u8>> {
+    let mut fields = BTreeMap::<String, Value>::new();
+    fields.insert(
+        "schema_version".to_owned(),
+        Value::Number(envelope.schema_version.into()),
+    );
+    fields.insert(
+        "event_time".to_owned(),
+        envelope
+            .event_time
+            .map(canonical_datetime_value)
+            .unwrap_or(Value::Null),
+    );
+    fields.insert(
+        "observed_at".to_owned(),
+        canonical_datetime_value(envelope.observed_at),
+    );
+    fields.insert(
+        "known_at".to_owned(),
+        canonical_datetime_value(envelope.known_at),
+    );
+    fields.insert(
+        "source_type".to_owned(),
+        Value::String(envelope.source_type.clone()),
+    );
+    fields.insert(
+        "source_id".to_owned(),
+        Value::String(envelope.source_id.clone()),
+    );
+    fields.insert(
+        "observation_type".to_owned(),
+        Value::String(envelope.observation_type.clone()),
+    );
+    fields.insert("payload".to_owned(), canonicalize_json(&envelope.payload));
+    fields.insert(
+        "metadata".to_owned(),
+        canonicalize_json(&Value::Object(envelope.metadata.clone())),
+    );
+    Ok(serde_json::to_vec(&fields)?)
+}
+
+fn canonical_datetime_value(value: DateTime<Utc>) -> Value {
+    Value::String(value.to_rfc3339_opts(SecondsFormat::Micros, true))
+}
+
+fn canonicalize_json(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let sorted = object
+                .iter()
+                .map(|(key, value)| (key.clone(), canonicalize_json(value)))
+                .collect::<BTreeMap<_, _>>();
+            let mut result = serde_json::Map::new();
+            for (key, value) in sorted {
+                result.insert(key, value);
+            }
+            Value::Object(result)
+        }
+        Value::Array(values) => Value::Array(values.iter().map(canonicalize_json).collect()),
+        _ => value.clone(),
+    }
+}
+
 pub struct ManifestLock {
     file: File,
 }
@@ -109,7 +183,7 @@ impl RawSnapshotStore {
         let directory = self.root.join("raw").join(rel_dir);
         fs::create_dir_all(&directory)?;
 
-        let payload = serde_json::to_vec(envelope)?;
+        let payload = raw_envelope_bytes(envelope)?;
         let digest = hex::encode(Sha256::digest(&payload));
         let stamp = format!(
             "{:04}{:02}{:02}T{:02}{:02}{:02}.{:06}Z",
@@ -269,7 +343,7 @@ pub fn rebuild_manifest_indexes(data_root: &Path) -> Result<usize> {
             .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
         records.push(record);
     }
-    records.sort_by_key(|r| r.observed_at);
+    records.sort_by_key(|record| record.observed_at);
 
     let daily_root = data_root.join("manifests").join("daily");
     let series_root = data_root.join("manifests").join("series");
@@ -339,6 +413,7 @@ pub fn isoformat(dt: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Map, json};
 
     #[test]
     fn safe_component_matches_python_contract() {
@@ -367,5 +442,36 @@ mod tests {
         let first: DateTime<Utc> = "2026-09-05T12:34:56.000001Z".parse().unwrap();
         let second: DateTime<Utc> = "2026-09-05T12:34:57.123457Z".parse().unwrap();
         assert_eq!(duration_seconds(second - first), 1.123456);
+    }
+
+    #[test]
+    fn v2_canonical_bytes_ignore_object_insertion_order() {
+        let mut first_metadata = Map::new();
+        first_metadata.insert("z".to_owned(), json!({"b":2,"a":1}));
+        first_metadata.insert("a".to_owned(), json!(true));
+        let mut second_metadata = Map::new();
+        second_metadata.insert("a".to_owned(), json!(true));
+        second_metadata.insert("z".to_owned(), json!({"a":1,"b":2}));
+        let observed: DateTime<Utc> = "2026-09-06T12:34:56.123456Z".parse().unwrap();
+        let base = ObservationEnvelope {
+            schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
+            event_time: None,
+            observed_at: observed,
+            known_at: observed,
+            source_type: "EXCHANGE".to_owned(),
+            source_id: "fixture".to_owned(),
+            observation_type: "canonical".to_owned(),
+            payload: json!({"outer":{"z":2,"a":1},"array":[{"b":2,"a":1}]}),
+            metadata: first_metadata,
+        };
+        let mut reordered = base.clone();
+        reordered.payload = json!({"array":[{"a":1,"b":2}],"outer":{"a":1,"z":2}});
+        reordered.metadata = second_metadata;
+        let first = raw_envelope_bytes(&base).unwrap();
+        let second = raw_envelope_bytes(&reordered).unwrap();
+        assert_eq!(first, second);
+        let text = String::from_utf8(first).unwrap();
+        assert!(text.contains("2026-09-06T12:34:56.123456Z"));
+        assert!(text.contains("\"schema_version\":2"));
     }
 }
