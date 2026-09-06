@@ -1,3 +1,13 @@
+pub mod free_core;
+pub mod free_returns;
+
+pub use free_core::{
+    CashRateRow, FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FRED_CASH_SERIES,
+    FreeCoreProvider, FreeCoreRange, ProxyDailyRow, parse_binance_payload, parse_fred_payload,
+    parse_tiingo_payload, validate_fred_key, validate_tiingo_token,
+};
+pub use free_returns::{AssetReturnRow, build_free_core_returns, canonical_paths, read_asset_returns};
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -118,21 +128,14 @@ pub fn assert_stable_expiration(rows: &[NormalizedFutureBar]) -> Result<()> {
         if let Some(previous) = expirations.insert(&row.contract, row.expiration_date)
             && previous != row.expiration_date
         {
-            bail!(
-                "contract {} has changing expiration metadata",
-                row.contract
-            );
+            bail!("contract {} has changing expiration metadata", row.contract);
         }
     }
     Ok(())
 }
 
 fn class_code(value: &str) -> &str {
-    if value.ends_with(".FUTURE") {
-        "F"
-    } else {
-        value
-    }
+    if value.ends_with(".FUTURE") { "F" } else { value }
 }
 
 #[cfg(test)]
