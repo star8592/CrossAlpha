@@ -5,6 +5,8 @@ pub mod v03_census;
 pub mod v03_engine;
 #[path = "v03/freeze.rs"]
 pub mod v03_freeze;
+#[path = "v03/network.rs"]
+pub mod v03_network;
 #[path = "v03/preflight.rs"]
 pub mod v03_preflight;
 #[path = "v03/runtime_binding.rs"]
