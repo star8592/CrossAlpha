@@ -22,8 +22,20 @@ pub mod v03_prospective;
 pub mod v03_runtime_binding;
 #[path = "v03/watchlist.rs"]
 pub mod v03_watchlist;
+#[path = "v04/artifacts.rs"]
+pub mod v04_artifacts;
+#[path = "v04/cycle.rs"]
+pub mod v04_cycle;
+#[path = "v04/engine.rs"]
+pub mod v04_engine;
+#[path = "v04/freeze.rs"]
+pub mod v04_freeze;
 #[path = "v04/provider.rs"]
 pub mod v04_provider;
+#[path = "v04/prospective.rs"]
+pub mod v04_prospective;
+#[path = "v04/runtime_binding.rs"]
+pub mod v04_runtime_binding;
 
 use anyhow::Result;
 use async_trait::async_trait;
