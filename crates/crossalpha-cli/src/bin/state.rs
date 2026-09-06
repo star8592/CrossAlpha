@@ -18,9 +18,14 @@ struct Args {
     version: Version,
     #[command(subcommand)]
     command: Command,
-    #[arg(long, env = "CROSSALPHA_DATA_DIR", default_value = "./data")]
+    #[arg(long, env = "CROSSALPHA_DATA_DIR", default_value = "./data", global = true)]
     data_root: PathBuf,
-    #[arg(long, env = "CROSSALPHA_HTTP_TIMEOUT", default_value_t = 30.0)]
+    #[arg(
+        long,
+        env = "CROSSALPHA_HTTP_TIMEOUT",
+        default_value_t = 30.0,
+        global = true
+    )]
     http_timeout: f64,
 }
 
