@@ -297,8 +297,7 @@ pub fn mark(data_root: &Path, end: NaiveDate, now: DateTime<Utc>) -> Result<Valu
     }
     let active = snapshots
         .iter()
-        .filter(|row| parse_date(row.get("effective_date")).is_ok_and(|day| day <= target))
-        .last()
+        .rfind(|row| parse_date(row.get("effective_date")).is_ok_and(|day| day <= target))
         .context("no eligible State A/B snapshot for mark")?;
     if active.get("a_snapshot_effective_date") != a_mark.get("active_snapshot_effective_date") {
         bail!("STATE_AB_SNAPSHOT_GAP: Frozen B3 changed snapshot without matching A/B decision");
