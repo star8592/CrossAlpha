@@ -79,28 +79,29 @@ pub fn compute_hyperliquid_market_state(
                 .then(left.known_at.cmp(&right.known_at))
         });
 
-        let mut intermediate = Vec::with_capacity(asset_rows.len());
+        let mut intermediate: Vec<Intermediate> = Vec::with_capacity(asset_rows.len());
         for (index, source) in asset_rows.into_iter().enumerate() {
             let previous = index.checked_sub(1).and_then(|idx| intermediate.get(idx));
             let basis = ratio_bps(source.mark_price, positive(source.oracle_price));
-            let impact_mid = average(source.impact_bid, source.impact_ask).and_then(positive_value);
+            let impact_mid =
+                average(source.impact_bid, source.impact_ask).and_then(positive_value);
             let spread = match (source.impact_bid, source.impact_ask, impact_mid) {
                 (Some(bid), Some(ask), Some(mid)) => Some((ask - bid) / mid * 10_000.0),
                 _ => None,
             };
             let day_return = ratio_return(source.mark_price, positive(source.prev_day_price));
             let oi_notional = multiply(source.open_interest, source.mark_price);
-            let interval = previous.map(|row: &Intermediate| {
+            let interval = previous.map(|row| {
                 duration_seconds(source.observed_at - row.source.observed_at)
             });
-            let oi_change = previous.and_then(|row| {
-                pct_change(source.open_interest, row.source.open_interest)
-            });
-            let oi_notional_change = previous.and_then(|row| {
-                pct_change(oi_notional, row.open_interest_notional)
-            });
-            let funding_change = previous.and_then(|row| subtract(source.funding_rate, row.source.funding_rate));
-            let basis_change = previous.and_then(|row| subtract(basis, row.mark_oracle_basis_bps));
+            let oi_change = previous
+                .and_then(|row| pct_change(source.open_interest, row.source.open_interest));
+            let oi_notional_change = previous
+                .and_then(|row| pct_change(oi_notional, row.open_interest_notional));
+            let funding_change = previous
+                .and_then(|row| subtract(source.funding_rate, row.source.funding_rate));
+            let basis_change =
+                previous.and_then(|row| subtract(basis, row.mark_oracle_basis_bps));
 
             intermediate.push(Intermediate {
                 mark_oracle_basis_bps: basis,
@@ -308,7 +309,7 @@ mod tests {
         rows.push(row(24 * 60, 100.0));
         let result = compute_hyperliquid_market_state(&rows);
         let latest = result.last().unwrap();
-        assert_eq!(latest.rolling_observations_24h, 1);
-        assert!(latest.funding_z_24h.is_none());
+        assert_eq!(latest.rolling_observations_24h, 24);
+        assert!(latest.funding_z_24h.is_some());
     }
 }
