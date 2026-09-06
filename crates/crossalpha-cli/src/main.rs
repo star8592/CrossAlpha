@@ -105,6 +105,19 @@ enum Command {
         #[arg(long)]
         source: String,
     },
+    /// Materialize bounded recent-day canonical partitions with explicit output ownership.
+    CanonicalMaterialize {
+        data_root: PathBuf,
+        /// Destination root. Production requires this to equal data_root plus --allow-production-write.
+        #[arg(long)]
+        output_root: PathBuf,
+        /// Number of most recent daily manifest partitions to process.
+        #[arg(long, default_value_t = 2)]
+        recent_days: usize,
+        /// Explicitly allow writes when output_root is the production data_root.
+        #[arg(long)]
+        allow_production_write: bool,
+    },
     /// Show migration status for the Rust rewrite.
     MigrationStatus,
 }
@@ -336,9 +349,30 @@ async fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
+        Command::CanonicalMaterialize {
+            data_root,
+            output_root,
+            recent_days,
+            allow_production_write,
+        } => {
+            if recent_days == 0 {
+                anyhow::bail!("--recent-days must be >= 1");
+            }
+            if output_root == data_root && !allow_production_write {
+                anyhow::bail!(
+                    "refusing production canonical write without --allow-production-write"
+                );
+            }
+            let report = crossalpha_features::materialize_recent_canonical(
+                &data_root,
+                &output_root,
+                recent_days,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Command::MigrationStatus => {
             println!(
-                "phase=R3.2 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=production-compatible canonical_parity_gate=passed parquet_writer=implemented parquet_writer_gate=required production_canonical_write=false python_compat=true"
+                "phase=R3.3 r2_observatory=production-native systemd_cutover=true storage=production-compatible observatory_health=production-compatible canonical_parsers=production-compatible canonical_parity_gate=passed parquet_writer=implemented parquet_writer_gate=required canonical_materializer=implemented canonical_materializer_gate=required production_canonical_write=false python_compat=true"
             );
         }
     }
