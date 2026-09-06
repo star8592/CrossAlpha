@@ -4,11 +4,8 @@ use crossalpha_storage::{ObservationEnvelope, RawSnapshotManifest};
 use serde::Serialize;
 use serde_json::Value;
 
-pub const AAVE_CANONICAL_SCHEMA_VERSION: u32 = 1;
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AaveMarketRow {
-    pub canonical_schema_version: u32,
     pub observed_at: DateTime<Utc>,
     pub known_at: DateTime<Utc>,
     pub chain_id: Option<i64>,
@@ -30,7 +27,6 @@ pub struct AaveMarketRow {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AaveLiquidationRow {
-    pub canonical_schema_version: u32,
     pub event_time: Option<DateTime<Utc>>,
     pub observed_at: DateTime<Utc>,
     pub known_at: DateTime<Utc>,
@@ -43,9 +39,9 @@ pub struct AaveLiquidationRow {
     pub collateral_asset: Option<String>,
     pub debt_asset: Option<String>,
     pub user: Option<String>,
-    /// Decimal uint256 text. V0.2 never treats raw token units as a float.
+    /// Decimal uint256 text. State V0.2 never treats raw token units as floating point.
     pub debt_to_cover_raw: Option<String>,
-    /// Decimal uint256 text. V0.2 never treats raw token units as a float.
+    /// Decimal uint256 text. State V0.2 never treats raw token units as floating point.
     pub liquidated_collateral_amount_raw: Option<String>,
     pub liquidator: Option<String>,
     pub receive_atoken: Option<bool>,
@@ -70,6 +66,7 @@ pub fn parse_aave_markets(
     if markets.is_empty() {
         bail!("Aave markets payload has no markets");
     }
+
     let chain_id = envelope.metadata.get("chain_id").and_then(value_i64);
     let mut rows = Vec::new();
     for market in markets {
@@ -85,9 +82,7 @@ pub fn parse_aave_markets(
             let Some(reserve) = reserve.as_object() else {
                 continue;
             };
-            let token = reserve
-                .get("underlyingToken")
-                .and_then(Value::as_object);
+            let token = reserve.get("underlyingToken").and_then(Value::as_object);
             let supply = reserve.get("supplyInfo").and_then(Value::as_object);
             let borrow = reserve.get("borrowInfo").and_then(Value::as_object);
             let supply_apy = supply
@@ -111,8 +106,8 @@ pub fn parse_aave_markets(
             let usd = available
                 .and_then(|value| value.get("usd"))
                 .and_then(to_float);
+
             rows.push(AaveMarketRow {
-                canonical_schema_version: AAVE_CANONICAL_SCHEMA_VERSION,
                 observed_at: envelope.observed_at,
                 known_at: envelope.known_at,
                 chain_id,
@@ -199,7 +194,6 @@ pub fn parse_aave_liquidations(
                 .and_then(parse_datetime)
         };
         rows.push(AaveLiquidationRow {
-            canonical_schema_version: AAVE_CANONICAL_SCHEMA_VERSION,
             event_time,
             observed_at: envelope.observed_at,
             known_at: envelope.known_at,
@@ -219,9 +213,17 @@ pub fn parse_aave_liquidations(
             debt_asset: topic_address(topics.get(2)),
             user: topic_address(topics.get(3)),
             debt_to_cover_raw: words.first().and_then(|word| hex_uint_decimal(word)),
-            liquidated_collateral_amount_raw: words.get(1).and_then(|word| hex_uint_decimal(word)),
-            liquidator: words.get(2).map(|word| format!("0x{}", &word[word.len().saturating_sub(40)..]).to_ascii_lowercase()),
-            receive_atoken: words.get(3).and_then(|word| u8::from_str_radix(&word[word.len().saturating_sub(2)..], 16).ok()).map(|value| value != 0),
+            liquidated_collateral_amount_raw: words
+                .get(1)
+                .and_then(|word| hex_uint_decimal(word)),
+            liquidator: words.get(2).map(|word| {
+                format!("0x{}", &word[word.len().saturating_sub(40)..]).to_ascii_lowercase()
+            }),
+            receive_atoken: words.get(3).and_then(|word| {
+                u8::from_str_radix(&word[word.len().saturating_sub(2)..], 16)
+                    .ok()
+                    .map(|value| value != 0)
+            }),
             raw_sha256: raw_record.sha256.clone(),
             raw_path: raw_record.path.clone(),
         });
@@ -296,7 +298,6 @@ mod tests {
     use chrono::TimeZone;
     use crossalpha_storage::ObservationEnvelope;
     use serde_json::json;
-    use std::collections::BTreeMap;
 
     fn record() -> RawSnapshotManifest {
         RawSnapshotManifest {
@@ -311,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_market_reserve_fields() {
+    fn parses_market_reserve_fields_without_schema_drift() {
         let at = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
         let envelope = ObservationEnvelope {
             schema_version: 1,
@@ -322,7 +323,7 @@ mod tests {
             source_id: "aave:v3:graphql".to_owned(),
             observation_type: "markets_snapshot".to_owned(),
             payload: json!({"data":{"markets":[{"address":"0xABC","name":"Core","reserves":[{"underlyingToken":{"address":"0xDEF","symbol":"WETH","decimals":18},"supplyInfo":{"apy":{"formatted":"2.0"}},"borrowInfo":{"apy":{"formatted":"5.0"},"availableLiquidity":{"amount":{"value":"12"},"usd":"100"},"borrowCapReached":false},"isFrozen":false,"isPaused":false}]}]}}),
-            metadata: BTreeMap::from([("chain_id".to_owned(), json!(1))]),
+            metadata: serde_json::Map::from_iter([("chain_id".to_owned(), json!(1))]),
         };
         let rows = parse_aave_markets(&envelope, &record()).unwrap();
         assert_eq!(rows.len(), 1);
