@@ -116,9 +116,18 @@ fn native_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
         ("state_v04", "crates/crossalpha-state/src/v04.rs"),
         ("state_v04_artifacts", "crates/crossalpha-state/src/v04/artifacts.rs"),
         ("state_v04_cycle", "crates/crossalpha-state/src/v04/cycle.rs"),
+        ("state_v04_engine", "crates/crossalpha-state/src/v04/engine.rs"),
         ("state_v04_freeze", "crates/crossalpha-state/src/v04/freeze.rs"),
         ("state_v04_provider", "crates/crossalpha-state/src/v04/provider.rs"),
+        ("state_v04_prospective", "crates/crossalpha-state/src/v04/prospective.rs"),
         ("state_v04_runtime_binding", "crates/crossalpha-state/src/v04/runtime_binding.rs"),
+        ("cli_cargo", "crates/crossalpha-cli/Cargo.toml"),
+        ("cli_state", "crates/crossalpha-cli/src/bin/state.rs"),
+        ("cli_daemon", "crates/crossalpha-cli/src/bin/daemon.rs"),
+        ("cli_v04_config", "crates/crossalpha-cli/src/bin/state_v04_config_check.rs"),
+        ("cli_v04_preflight", "crates/crossalpha-cli/src/bin/state_v04_preflight.rs"),
+        ("cli_v04_parse", "crates/crossalpha-cli/src/bin/state_v04_parse.rs"),
+        ("cli_v04_mechanics", "crates/crossalpha-cli/src/bin/state_v04_mechanics.rs"),
         ("config", "config/state_v04.yaml"),
     ];
     let mut result = BTreeMap::new();
