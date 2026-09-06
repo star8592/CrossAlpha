@@ -9,6 +9,10 @@ name = "crossalpha-rs"
 path = "src/main.rs"
 
 [[bin]]
+name = "crossalpha-state-rs"
+path = "src/bin/state.rs"
+
+[[bin]]
 name = "crossalpha-state-v03-config-check-rs"
 path = "src/bin/state_v03_config_check.rs"
 
