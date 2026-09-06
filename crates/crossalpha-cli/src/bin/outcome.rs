@@ -28,7 +28,7 @@ enum Command {
 fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let args = Args::parse();
-    let require_ok = matches!(args.command, Command::Integrity);
+    let require_ok = matches!(&args.command, Command::Integrity);
     let now = Utc::now();
     let output = match args.command {
         Command::Bind => write_runtime_binding(&args.data_root, now)?,
