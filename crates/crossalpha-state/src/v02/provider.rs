@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use chrono::{TimeZone, Utc};
-use crossalpha_storage::ObservationEnvelope;
+use crossalpha_storage::{ObservationEnvelope, RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION};
 use reqwest::Client;
 use serde_json::{Map, Value, json};
 use std::time::Duration;
@@ -70,7 +70,10 @@ impl AaveV02Client {
 
         let now = Utc::now();
         let mut metadata = Map::new();
-        metadata.insert("endpoint".to_owned(), Value::String(AAVE_V3_GRAPHQL.to_owned()));
+        metadata.insert(
+            "endpoint".to_owned(),
+            Value::String(AAVE_V3_GRAPHQL.to_owned()),
+        );
         metadata.insert("chain_id".to_owned(), json!(AAVE_V3_ETHEREUM_CHAIN_ID));
         metadata.insert("market_address".to_owned(), Value::String(pool));
         metadata.insert("data_cost_usd".to_owned(), json!(0));
@@ -81,7 +84,7 @@ impl AaveV02Client {
             ),
         );
         Ok(ObservationEnvelope {
-            schema_version: 1,
+            schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
             event_time: None,
             observed_at: now,
             known_at: now,
@@ -143,10 +146,14 @@ impl AaveV02Client {
                     timestamp
                 };
                 if let Some(raw_timestamp) = timestamp
-                    && let Ok(seconds) = u64::from_str_radix(raw_timestamp.trim_start_matches("0x"), 16)
+                    && let Ok(seconds) =
+                        u64::from_str_radix(raw_timestamp.trim_start_matches("0x"), 16)
                     && let Some(dt) = Utc.timestamp_opt(seconds as i64, 0).single()
                 {
-                    row.insert("blockTimestamp".to_owned(), Value::String(dt.to_rfc3339()));
+                    row.insert(
+                        "blockTimestamp".to_owned(),
+                        Value::String(dt.to_rfc3339()),
+                    );
                 }
             }
             enriched.push(Value::Object(row));
@@ -164,7 +171,7 @@ impl AaveV02Client {
         metadata.insert("lookback_blocks".to_owned(), json!(lookback_blocks));
         metadata.insert("data_cost_usd".to_owned(), json!(0));
         Ok(ObservationEnvelope {
-            schema_version: 1,
+            schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
             event_time: None,
             observed_at: now,
             known_at: now,
