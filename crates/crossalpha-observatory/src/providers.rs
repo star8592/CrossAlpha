@@ -3,6 +3,7 @@ use anyhow::Result;
 use anyhow::bail;
 use chrono::Utc;
 use crossalpha_storage::ObservationEnvelope;
+use crossalpha_storage::RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION;
 use crossalpha_storage::RawSnapshotManifest;
 use crossalpha_storage::RawSnapshotStore;
 use reqwest::Client;
@@ -109,8 +110,6 @@ impl ProviderClient {
     }
 
     async fn collect_hyperliquid(&self) -> Result<Vec<ObservationEnvelope>> {
-        // Match the Python provider contract: both Hyperliquid observations from one
-        // collection round share the same observed_at/known_at timestamp.
         let now = Utc::now();
         let requests = [
             ("metaAndAssetCtxs", json!({"type": "metaAndAssetCtxs"})),
@@ -127,7 +126,7 @@ impl ProviderClient {
                 Value::String(HYPERLIQUID_URL.to_owned()),
             );
             output.push(ObservationEnvelope {
-                schema_version: 1,
+                schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
                 event_time: None,
                 observed_at: now,
                 known_at: now,
@@ -143,7 +142,6 @@ impl ProviderClient {
 
     async fn collect_defillama(&self) -> Result<Vec<ObservationEnvelope>> {
         let payload = self.get_json_with_retry(DEFILLAMA_STABLECOINS_URL).await?;
-        // Match Python: DefiLlama timestamps are captured after the request succeeds.
         let now = Utc::now();
         let mut metadata = Map::new();
         metadata.insert(
@@ -151,7 +149,7 @@ impl ProviderClient {
             Value::String(DEFILLAMA_STABLECOINS_URL.to_owned()),
         );
         Ok(vec![ObservationEnvelope {
-            schema_version: 1,
+            schema_version: RAW_ENVELOPE_CANONICAL_SCHEMA_VERSION,
             event_time: None,
             observed_at: now,
             known_at: now,
