@@ -1,4 +1,6 @@
 pub mod canonical;
+pub mod feature_materialize;
+pub mod feature_parquet;
 pub mod market_state;
 pub mod parquet;
 pub mod recent_features;
@@ -14,6 +16,7 @@ pub use canonical::stablecoins::{
     StablecoinChainSupplyRow, parse_stablecoin_snapshot,
 };
 pub use canonical::{CanonicalSource, latest_record_for_source, load_envelope};
+pub use feature_materialize::{FeatureMaterializeReport, materialize_recent_features};
 pub use market_state::{
     FEATURE_SCHEMA_VERSION, HyperliquidMarketStateRow, ROLLING_MIN_PERIODS,
     compute_hyperliquid_market_state,
