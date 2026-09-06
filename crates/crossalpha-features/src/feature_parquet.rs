@@ -170,3 +170,46 @@ fn temp_path(path: &Path) -> PathBuf {
     value.push(".tmp");
     PathBuf::from(value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    #[derive(Serialize)]
+    struct TimestampFixture {
+        observed_at: DateTime<Utc>,
+        known_at: DateTime<Utc>,
+        value: f64,
+    }
+
+    #[test]
+    fn feature_time_columns_are_timestamp_ns_utc() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("feature.parquet");
+        let rows = vec![TimestampFixture {
+            observed_at: Utc.with_ymd_and_hms(2026, 9, 7, 1, 2, 3).unwrap(),
+            known_at: Utc.with_ymd_and_hms(2026, 9, 7, 1, 2, 4).unwrap(),
+            value: 1.0,
+        }];
+        write_struct_rows(&rows, &["observed_at", "known_at", "value"], &path).unwrap();
+
+        let file = File::open(path).unwrap();
+        let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        let batch = reader.next().unwrap().unwrap();
+        let schema = batch.schema();
+        let expected = DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()));
+        assert_eq!(
+            schema.field_with_name("observed_at").unwrap().data_type(),
+            &expected
+        );
+        assert_eq!(
+            schema.field_with_name("known_at").unwrap().data_type(),
+            &expected
+        );
+    }
+}
