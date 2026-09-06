@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use crossalpha_state::v02_engine::NativeStateV02;
 use crossalpha_state::v03_engine::NativeStateV03;
 use crossalpha_state::v04_engine::NativeStateV04Engine;
 use crossalpha_state::{StateRuntimeContext, StateSpec};
@@ -8,6 +9,7 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Version {
+    V02,
     V03,
     V04,
 }
@@ -50,6 +52,7 @@ async fn main() -> Result<()> {
         anyhow::bail!("--http-timeout must be a finite positive number");
     }
     let state: Box<dyn StateSpec> = match args.version {
+        Version::V02 => Box::new(NativeStateV02),
         Version::V03 => Box::new(NativeStateV03),
         Version::V04 => Box::new(NativeStateV04Engine),
     };
@@ -61,6 +64,7 @@ async fn main() -> Result<()> {
     let output = match args.command {
         Command::ConfigCheck { config } => {
             let config = config.unwrap_or_else(|| match args.version {
+                Version::V02 => PathBuf::from("config/state_v02.yaml"),
                 Version::V03 => PathBuf::from("config/state_v03.yaml"),
                 Version::V04 => PathBuf::from("config/state_v04.yaml"),
             });
