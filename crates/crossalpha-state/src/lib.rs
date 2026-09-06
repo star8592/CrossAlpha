@@ -11,6 +11,8 @@ pub mod v03_engine;
 pub mod v03_freeze;
 #[path = "v03/network.rs"]
 pub mod v03_network;
+#[path = "v03/orchestrator.rs"]
+pub mod v03_orchestrator;
 #[path = "v03/preflight.rs"]
 pub mod v03_preflight;
 #[path = "v03/prospective.rs"]
