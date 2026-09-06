@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     if !args.http_timeout.is_finite() || args.http_timeout <= 0.0 {
         bail!("--http-timeout must be a finite positive number");
     }
-    let require_ok = matches!(args.command, Command::Integrity);
+    let require_ok = matches!(&args.command, Command::Integrity);
     let now = Utc::now();
     let output = match args.command {
         Command::Bind => write_runtime_binding(&args.data_root, now)?,
