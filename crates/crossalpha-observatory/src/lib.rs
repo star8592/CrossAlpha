@@ -19,4 +19,5 @@ pub use providers::ProviderSource;
 pub use providers::parse_sources;
 pub use report::write_json_report;
 pub use supervisor::SupervisorConfig;
+pub use supervisor::run_supervisor;
 pub use supervisor::run_supervisor_until_shutdown;
