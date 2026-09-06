@@ -1,7 +1,7 @@
 use crate::v02::{ACTIONABILITY, PROSPECTIVE_PROTOCOL, PROTOCOL};
 use crate::v02_freeze::{freeze_path, payload_hash, sha256_file, verify_seal};
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use chrono::{DateTime, Datelike, Duration, SecondsFormat, Timelike, Utc};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -85,6 +85,11 @@ pub fn write_live_observation(
     let path = observation_path(data_root, generated);
     if path.exists() {
         let existing: Value = serde_json::from_reader(File::open(&path)?)?;
+        let expected = existing.get("record_sha256").and_then(Value::as_str);
+        let computed = payload_hash(&existing)?;
+        if expected != Some(computed.as_str()) {
+            bail!("existing State V0.2 prospective record failed seal verification");
+        }
         return Ok(existing);
     }
     write_atomic(&path, &payload)?;
@@ -116,8 +121,8 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let mut seen = BTreeSet::new();
     let mut times = Vec::new();
     for row in &rows {
-        observation_seals &= row.get("record_sha256").and_then(Value::as_str)
-            == Some(payload_hash(row)?.as_str());
+        let computed = payload_hash(row)?;
+        observation_seals &= row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
         freeze_links &= row.get("freeze_record_sha256") == freeze.get("record_sha256");
         let ts = parse_time(row.get("generated_at"))?;
         times.push(ts);
@@ -166,10 +171,16 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
 fn observation_path(data_root: &Path, generated: DateTime<Utc>) -> PathBuf {
     data_root
         .join("research/state_v02/prospective")
-        .join(format!("year={:04}", generated.format("%Y")))
-        .join(format!("month={:02}", generated.format("%m")))
-        .join(format!("day={:02}", generated.format("%d")))
-        .join(format!("state_at={}.json", generated.format("%H%M%S%6f")))
+        .join(format!("year={:04}", generated.year()))
+        .join(format!("month={:02}", generated.month()))
+        .join(format!("day={:02}", generated.day()))
+        .join(format!(
+            "state_at={:02}{:02}{:02}{:06}.json",
+            generated.hour(),
+            generated.minute(),
+            generated.second(),
+            generated.timestamp_subsec_micros()
+        ))
 }
 
 fn load_observations(data_root: &Path) -> Result<Vec<Value>> {
@@ -180,13 +191,19 @@ fn load_observations(data_root: &Path) -> Result<Vec<Value>> {
     let mut result = Vec::new();
     for year in fs::read_dir(&root)? {
         let year = year?.path();
-        if !year.is_dir() { continue; }
+        if !year.is_dir() {
+            continue;
+        }
         for month in fs::read_dir(year)? {
             let month = month?.path();
-            if !month.is_dir() { continue; }
+            if !month.is_dir() {
+                continue;
+            }
             for day in fs::read_dir(month)? {
                 let day = day?.path();
-                if !day.is_dir() { continue; }
+                if !day.is_dir() {
+                    continue;
+                }
                 for file in fs::read_dir(day)? {
                     let path = file?.path();
                     if path.extension().and_then(|value| value.to_str()) == Some("json") {
@@ -205,7 +222,9 @@ fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
 }
 
 fn write_atomic(path: &Path, value: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension("json.tmp");
     {
         let mut file = File::create(&tmp)?;
@@ -214,6 +233,8 @@ fn write_atomic(path: &Path, value: &Value) -> Result<()> {
         file.sync_all()?;
     }
     fs::rename(&tmp, path)?;
-    if let Some(parent) = path.parent() { File::open(parent)?.sync_all()?; }
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
