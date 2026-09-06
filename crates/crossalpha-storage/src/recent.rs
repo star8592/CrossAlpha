@@ -112,7 +112,7 @@ fn sorted_dirs(root: &Path, prefix: &str) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::{Datelike, TimeZone, Utc};
     use std::fs;
 
     fn record(day: u32, source: &str) -> RawSnapshotManifest {
@@ -137,8 +137,11 @@ mod tests {
                 .join(format!("day={day:02}"))
                 .join("raw_snapshots.jsonl");
             fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(&path, format!("{}\n", serde_json::to_string(&record(day, "x")).unwrap()))
-                .unwrap();
+            fs::write(
+                &path,
+                format!("{}\n", serde_json::to_string(&record(day, "x")).unwrap()),
+            )
+            .unwrap();
         }
 
         let loaded = load_recent_daily_manifests(root, 2).unwrap();
