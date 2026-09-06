@@ -60,18 +60,20 @@ impl StateSpec for NativeStateV02 {
 
     fn integrity(&self, data_root: &Path) -> Result<Value> {
         let prospective = crate::v02_prospective::integrity_report(data_root)?;
+        let prospective_ok = prospective.get("ok").and_then(Value::as_bool).unwrap_or(false);
         let freeze_ok = crate::v02_freeze::verify_freeze_file(&crate::v02_freeze::freeze_path(data_root))?;
         let binding_ok = crate::v02_runtime_binding::verify_runtime_binding_file(
             &crate::v02_runtime_binding::runtime_binding_path(data_root),
         )?;
-        let cycle_enabled = freeze_ok && binding_ok;
+        let cycle_enabled = freeze_ok && binding_ok && prospective_ok;
         Ok(json!({
             "protocol":"CROSSALPHA_STATE_V0_2_NATIVE_INTEGRITY",
-            "ok":cycle_enabled && prospective.get("ok").and_then(Value::as_bool).unwrap_or(true),
+            "ok":cycle_enabled,
             "legacy_freeze_present":crate::v02_freeze::freeze_path(data_root).is_file(),
             "legacy_freeze_ok":freeze_ok,
             "runtime_binding_present":crate::v02_runtime_binding::runtime_binding_path(data_root).is_file(),
             "runtime_binding_ok":binding_ok,
+            "prospective_ok":prospective_ok,
             "cycle_enabled":cycle_enabled,
             "python_event_loop_required":false,
             "prospective":prospective,
