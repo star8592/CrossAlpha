@@ -24,6 +24,20 @@ source "$META"
 
 systemctl --user disable --now crossalpha-daemon.service >/dev/null 2>&1 || true
 
+restore_timer() {
+  local unit="$1"
+  local enabled="$2"
+  local active="$3"
+  if [[ "$enabled" == true ]]; then
+    systemctl --user enable "$unit" >/dev/null
+  else
+    systemctl --user disable "$unit" >/dev/null 2>&1 || true
+  fi
+  if [[ "$active" == true ]]; then
+    systemctl --user start "$unit"
+  fi
+}
+
 if [[ "${observatory_enabled:-false}" == true ]]; then
   systemctl --user enable crossalpha-observatory.service >/dev/null
 else
@@ -33,19 +47,25 @@ if [[ "${observatory_active:-false}" == true ]]; then
   systemctl --user start crossalpha-observatory.service
 fi
 
-if [[ "${materializer_enabled:-false}" == true ]]; then
-  systemctl --user enable crossalpha-materializer.timer >/dev/null
-else
-  systemctl --user disable crossalpha-materializer.timer >/dev/null 2>&1 || true
-fi
-if [[ "${materializer_active:-false}" == true ]]; then
-  systemctl --user start crossalpha-materializer.timer
-fi
+restore_timer \
+  crossalpha-materializer.timer \
+  "${materializer_enabled:-false}" \
+  "${materializer_active:-false}"
+restore_timer \
+  crossalpha-state-v03.timer \
+  "${state_v03_enabled:-false}" \
+  "${state_v03_active:-false}"
+restore_timer \
+  crossalpha-state-v04.timer \
+  "${state_v04_enabled:-false}" \
+  "${state_v04_active:-false}"
 
 systemctl --user daemon-reload
 
 echo "Unified Rust daemon stopped and previous service state restored."
 echo "observatory_active=${observatory_active:-false} observatory_enabled=${observatory_enabled:-false}"
 echo "materializer_active=${materializer_active:-false} materializer_enabled=${materializer_enabled:-false}"
+echo "state_v03_active=${state_v03_active:-false} state_v03_enabled=${state_v03_enabled:-false}"
+echo "state_v04_active=${state_v04_active:-false} state_v04_enabled=${state_v04_enabled:-false}"
 echo "data_root=${data_root:-unknown}"
 echo "repo_dir=$REPO_DIR"
