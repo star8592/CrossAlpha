@@ -9,6 +9,13 @@ UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_DST="$UNIT_DIR/crossalpha-observatory.service"
 UNIT_BACKUP="$UNIT_DIR/crossalpha-observatory.service.pre-rust"
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing legacy Observatory rollback while unified Rust daemon owns production writers." >&2
+  echo "Use scripts/rollback_unified_rust_daemon.sh so writer ownership is restored atomically." >&2
+  exit 2
+fi
+
 if [[ ! -f "$UNIT_BACKUP" ]]; then
   echo "Rollback backup missing: $UNIT_BACKUP" >&2
   exit 2
