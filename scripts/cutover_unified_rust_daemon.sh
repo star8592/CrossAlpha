@@ -108,6 +108,13 @@ systemctl --user disable --now crossalpha-materializer.timer >/dev/null 2>&1 || 
 systemctl --user stop crossalpha-materializer.service >/dev/null 2>&1 || true
 systemctl --user disable --now crossalpha-observatory.service >/dev/null 2>&1 || true
 
+# Freeze the immutable audit-ledger baseline only after old writers are stopped and
+# before the new daemon can append anything.
+AUDIT="$DATA_ROOT/manifests/raw_snapshots.jsonl"
+BEFORE=0
+[[ -f "$AUDIT" ]] && BEFORE="$(wc -l < "$AUDIT")"
+AFTER="$BEFORE"
+
 mkdir -p "$UNIT_DIR"
 sed \
   -e "s|@REPO_DIR@|$REPO_DIR|g" \
@@ -118,10 +125,6 @@ sed \
 systemctl --user daemon-reload
 systemctl --user enable --now crossalpha-daemon.service
 
-AUDIT="$DATA_ROOT/manifests/raw_snapshots.jsonl"
-BEFORE=0
-[[ -f "$AUDIT" ]] && BEFORE="$(wc -l < "$AUDIT")"
-AFTER="$BEFORE"
 for _ in $(seq 1 80); do
   systemctl --user is-active --quiet crossalpha-daemon.service || {
     systemctl --user status crossalpha-daemon.service --no-pager >&2 || true
