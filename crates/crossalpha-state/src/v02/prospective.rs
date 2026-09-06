@@ -22,11 +22,16 @@ pub fn write_live_observation(
     if !verify_seal(&freeze)? {
         bail!("State V0.2 freeze seal invalid");
     }
-    if !crate::v02_runtime_binding::verify_runtime_binding_file(
-        &crate::v02_runtime_binding::runtime_binding_path(data_root),
-    )? {
+    let binding_path = crate::v02_runtime_binding::runtime_binding_path(data_root);
+    if !crate::v02_runtime_binding::verify_runtime_binding_file(&binding_path)? {
         bail!("State V0.2 Rust runtime binding missing, invalid, or stale");
     }
+    let binding: Value = serde_json::from_reader(File::open(&binding_path)?)?;
+    let binding_file_sha = sha256_file(&binding_path)?;
+    let binding_record_sha = binding
+        .get("record_sha256")
+        .cloned()
+        .context("State V0.2 Rust runtime binding record_sha256 missing")?;
     if snapshot.get("protocol").and_then(Value::as_str) != Some(PROTOCOL)
         || snapshot.get("actionability").and_then(Value::as_str) != Some(ACTIONABILITY)
         || !snapshot.get("risk_multiplier").is_some_and(Value::is_null)
@@ -55,6 +60,9 @@ pub fn write_live_observation(
         "protocol": PROSPECTIVE_PROTOCOL,
         "state_protocol": PROTOCOL,
         "freeze_record_sha256": freeze.get("record_sha256").cloned().unwrap_or(Value::Null),
+        "rust_runtime_binding_path": binding_path.to_string_lossy(),
+        "rust_runtime_binding_file_sha256": binding_file_sha,
+        "rust_runtime_binding_record_sha256": binding_record_sha,
         "known_at": now.to_rfc3339_opts(SecondsFormat::Micros, false),
         "as_of": snapshot.get("as_of").cloned().unwrap_or(Value::Null),
         "generated_at": generated.to_rfc3339_opts(SecondsFormat::Micros, false),
@@ -90,6 +98,16 @@ pub fn write_live_observation(
         if expected != Some(computed.as_str()) {
             bail!("existing State V0.2 prospective record failed seal verification");
         }
+        for key in [
+            "derived_state_sha256",
+            "freeze_record_sha256",
+            "rust_runtime_binding_file_sha256",
+            "rust_runtime_binding_record_sha256",
+        ] {
+            if existing.get(key) != payload.get(key) {
+                bail!("STATE_V02_TIMESTAMP_COLLISION: {key} differs for the same generated_at");
+            }
+        }
         return Ok(existing);
     }
     write_atomic(&path, &payload)?;
@@ -103,9 +121,15 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     }
     let freeze: Value = serde_json::from_reader(File::open(&freeze_file)?)?;
     let freeze_ok = verify_seal(&freeze)?;
-    let binding_ok = crate::v02_runtime_binding::verify_runtime_binding_file(
-        &crate::v02_runtime_binding::runtime_binding_path(data_root),
-    )?;
+    let binding_path = crate::v02_runtime_binding::runtime_binding_path(data_root);
+    let binding_ok = crate::v02_runtime_binding::verify_runtime_binding_file(&binding_path)?;
+    let binding = binding_ok
+        .then(|| serde_json::from_reader::<_, Value>(File::open(&binding_path)?))
+        .transpose()?;
+    let binding_file_sha = binding_ok.then(|| sha256_file(&binding_path)).transpose()?;
+    let binding_record_sha = binding
+        .as_ref()
+        .and_then(|value| value.get("record_sha256"));
     let first_eligible = parse_time(freeze.get("first_eligible_observed_at"))?;
     let mut rows = load_observations(data_root)?;
     rows.sort_by_key(|row| parse_time(row.get("generated_at")).ok());
@@ -114,6 +138,8 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     checks.insert("rust_runtime_binding".to_owned(), Value::Bool(binding_ok));
     let mut observation_seals = true;
     let mut freeze_links = true;
+    let mut runtime_binding_links = true;
+    let mut native_binding_linked_count = 0_usize;
     let mut no_pre_freeze = true;
     let mut descriptive_only = true;
     let mut derived_links = true;
@@ -124,6 +150,14 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
         let computed = payload_hash(row)?;
         observation_seals &= row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
         freeze_links &= row.get("freeze_record_sha256") == freeze.get("record_sha256");
+        if row.get("rust_runtime_binding_record_sha256").is_some() {
+            native_binding_linked_count += 1;
+            runtime_binding_links &= row.get("rust_runtime_binding_record_sha256") == binding_record_sha;
+            runtime_binding_links &= row
+                .get("rust_runtime_binding_file_sha256")
+                .and_then(Value::as_str)
+                == binding_file_sha.as_deref();
+        }
         let ts = parse_time(row.get("generated_at"))?;
         times.push(ts);
         no_pre_freeze &= ts >= first_eligible;
@@ -138,6 +172,7 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let monotonic = times.windows(2).all(|pair| pair[0] <= pair[1]);
     checks.insert("observation_seals".to_owned(), Value::Bool(observation_seals));
     checks.insert("freeze_links".to_owned(), Value::Bool(freeze_links));
+    checks.insert("rust_runtime_binding_links".to_owned(), Value::Bool(runtime_binding_links));
     checks.insert("no_pre_freeze_observations".to_owned(), Value::Bool(no_pre_freeze));
     checks.insert("descriptive_only".to_owned(), Value::Bool(descriptive_only));
     checks.insert("derived_state_hash_links".to_owned(), Value::Bool(derived_links));
@@ -159,6 +194,7 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
         "ok": ok,
         "audit_level": "STRICT_NON_MUTATING_HASH_GRAPH_RUST_BOUND",
         "observation_count": rows.len(),
+        "native_binding_linked_count": native_binding_linked_count,
         "first_observation_at": times.first().map(DateTime::<Utc>::to_rfc3339),
         "last_observation_at": times.last().map(DateTime::<Utc>::to_rfc3339),
         "gap_count": gap_count,
