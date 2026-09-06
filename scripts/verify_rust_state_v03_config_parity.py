@@ -17,7 +17,7 @@ from verify_rust_canonical_parser_parity import _diff, _normalize  # noqa: E402
 
 def _run_rust(binary: Path, config: Path) -> dict[str, Any]:
     completed = subprocess.run(
-        [str(binary), "state-v03-config-check", str(config)],
+        [str(binary), str(config)],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
@@ -25,7 +25,7 @@ def _run_rust(binary: Path, config: Path) -> dict[str, Any]:
     )
     if completed.returncode not in (0, 2):
         raise RuntimeError(
-            "Rust state-v03-config-check failed unexpectedly: "
+            "Rust State V0.3 config audit failed unexpectedly: "
             + (completed.stderr.strip() or completed.stdout.strip())
         )
     try:
@@ -48,25 +48,17 @@ def main() -> int:
     parser.add_argument(
         "--rust-binary",
         type=Path,
-        default=REPO_ROOT / "target" / "debug" / "crossalpha-rs",
+        default=(
+            REPO_ROOT
+            / "target"
+            / "debug"
+            / "crossalpha-state-v03-config-check-rs"
+        ),
     )
     args = parser.parse_args()
 
     if not args.rust_binary.exists():
         print(f"ok=false mismatches=1 error=Rust binary missing: {args.rust_binary}")
-        return 1
-    help_result = subprocess.run(
-        [str(args.rust_binary), "--help"],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if "state-v03-config-check" not in help_result.stdout:
-        print(
-            "ok=false mismatches=1 error=Rust binary is stale and lacks "
-            "state-v03-config-check; run cargo build -p crossalpha-cli"
-        )
         return 1
 
     expected = _normalize(strict_v03_config_report(args.config))
