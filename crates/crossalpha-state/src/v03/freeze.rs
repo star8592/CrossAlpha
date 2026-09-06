@@ -4,11 +4,15 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const FREEZE_SCHEMA_VERSION: u32 = 1;
+
+pub fn freeze_path(data_root: &Path) -> PathBuf {
+    data_root.join("research/state_v03/freeze.json")
+}
 
 pub fn legacy_v1_freeze_preview(
     data_root: &Path,
@@ -56,6 +60,45 @@ pub fn legacy_v1_freeze_preview(
     seal(payload)
 }
 
+pub fn write_legacy_v1_freeze(
+    data_root: &Path,
+    minimum_eligible_block: u64,
+    frozen_at: DateTime<Utc>,
+) -> Result<Value> {
+    let path = freeze_path(data_root);
+    if path.exists() {
+        let existing: Value = serde_json::from_reader(File::open(&path)?)?;
+        if !verify_legacy_v1_seal(&existing)? {
+            bail!("existing State V0.3 freeze failed seal verification");
+        }
+        return Ok(existing);
+    }
+    let payload = legacy_v1_freeze_preview(data_root, minimum_eligible_block, frozen_at)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut file = File::create(&tmp)?;
+        serde_json::to_writer_pretty(&mut file, &payload)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    fs::rename(&tmp, &path)?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(payload)
+}
+
+pub fn verify_legacy_v1_freeze_file(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let value: Value = serde_json::from_reader(File::open(path)?)?;
+    verify_legacy_v1_seal(&value)
+}
+
 pub fn verify_legacy_v1_seal(value: &Value) -> Result<bool> {
     let expected = value
         .get("record_sha256")
@@ -84,8 +127,6 @@ fn seal(mut payload: Value) -> Result<Value> {
 }
 
 fn canonical_json_bytes(value: &Value) -> Result<Vec<u8>> {
-    // serde_json::Map is key-sorted without the preserve_order feature. Rebuild every
-    // object recursively to make the Python sort_keys=True contract explicit.
     let sorted = sort_json(value);
     Ok(serde_json::to_vec(&sorted)?)
 }
