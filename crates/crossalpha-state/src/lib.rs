@@ -3,6 +3,8 @@ pub mod v03;
 pub mod v03_artifacts;
 #[path = "v03/census.rs"]
 pub mod v03_census;
+#[path = "v03/cycle.rs"]
+pub mod v03_cycle;
 #[path = "v03/engine.rs"]
 pub mod v03_engine;
 #[path = "v03/freeze.rs"]
@@ -11,6 +13,8 @@ pub mod v03_freeze;
 pub mod v03_network;
 #[path = "v03/preflight.rs"]
 pub mod v03_preflight;
+#[path = "v03/prospective.rs"]
+pub mod v03_prospective;
 #[path = "v03/runtime_binding.rs"]
 pub mod v03_runtime_binding;
 #[path = "v03/watchlist.rs"]
