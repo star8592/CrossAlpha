@@ -8,6 +8,12 @@ UNIT_DST="$UNIT_DIR/crossalpha-observatory.service"
 BINARY="$REPO_DIR/target/release/crossalpha-rs"
 DATA_ROOT="${CROSSALPHA_DATA_DIR:-}"
 
+if systemctl --user is-active --quiet crossalpha-daemon.service \
+  || systemctl --user is-enabled --quiet crossalpha-daemon.service; then
+  echo "Refusing standalone Observatory install: unified Rust daemon already owns Observatory." >&2
+  exit 2
+fi
+
 if [[ -z "$DATA_ROOT" && -f "$REPO_DIR/.env" ]]; then
   line="$(grep -E '^[[:space:]]*CROSSALPHA_DATA_DIR[[:space:]]*=' "$REPO_DIR/.env" | tail -n 1 || true)"
   if [[ -n "$line" ]]; then
