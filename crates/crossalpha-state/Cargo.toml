@@ -23,6 +23,7 @@ sha2.workspace = true
 tokio.workspace = true
 crossalpha-config = { path = "../crossalpha-config" }
 crossalpha-features = { path = "../crossalpha-features" }
+crossalpha-research = { path = "../crossalpha-research" }
 crossalpha-storage = { path = "../crossalpha-storage" }
 
 [dev-dependencies]
