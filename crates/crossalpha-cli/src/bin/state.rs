@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     if !args.http_timeout.is_finite() || args.http_timeout <= 0.0 {
         anyhow::bail!("--http-timeout must be a finite positive number");
     }
-    let require_cycle_enabled = matches!(&args.command, Command::Integrity);
+    let require_integrity = matches!(&args.command, Command::Integrity);
     let state: Box<dyn StateSpec> = match args.version {
         Version::V02 => Box::new(NativeStateV02),
         Version::V03 => Box::new(NativeStateV03),
@@ -80,13 +80,17 @@ async fn main() -> Result<()> {
         Command::Status => state.status(&args.data_root)?,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
-    if require_cycle_enabled
-        && output
+    if require_integrity {
+        let ok = output.get("ok").and_then(serde_json::Value::as_bool) == Some(true);
+        let cycle_enabled = output
             .get("cycle_enabled")
             .and_then(serde_json::Value::as_bool)
-            != Some(true)
-    {
-        anyhow::bail!("native State integrity failed: cycle_enabled is not true");
+            == Some(true);
+        if !ok || !cycle_enabled {
+            anyhow::bail!(
+                "native State integrity failed: ok={ok} cycle_enabled={cycle_enabled}"
+            );
+        }
     }
     Ok(())
 }
