@@ -28,6 +28,7 @@ pub use market_state::{
 pub use parquet::{write_hyperliquid_parquet, write_stablecoin_parquet};
 pub use recent_features::{
     compute_recent_hyperliquid_market_state, compute_recent_stablecoin_state,
+    load_latest_stablecoin_chain_composition, load_recent_aave_canonical,
 };
 pub use stablecoin_state::{
     STABLECOIN_FEATURE_SCHEMA_VERSION, StablecoinChainStateRow, StablecoinSystemStateRow,
