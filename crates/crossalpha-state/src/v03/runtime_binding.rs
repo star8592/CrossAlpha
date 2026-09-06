@@ -5,13 +5,17 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const RUNTIME_BINDING_PROTOCOL: &str = "CROSSALPHA_STATE_V0_3_RUST_RUNTIME_BINDING";
 pub const RUNTIME_BINDING_SCHEMA_VERSION: u32 = 1;
+
+pub fn runtime_binding_path(data_root: &Path) -> PathBuf {
+    data_root.join("research/state_v03/rust_runtime_binding.json")
+}
 
 pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Result<Value> {
     let legacy_path = data_root.join("research/state_v03/freeze.json");
@@ -64,6 +68,39 @@ pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Res
     Ok(payload)
 }
 
+pub fn write_runtime_binding(data_root: &Path, bound_at: DateTime<Utc>) -> Result<Value> {
+    let path = runtime_binding_path(data_root);
+    if path.exists() {
+        if !verify_runtime_binding_file(&path)? {
+            bail!("existing State V0.3 Rust runtime binding is invalid or stale");
+        }
+        return Ok(serde_json::from_reader(File::open(path)?)?);
+    }
+    let payload = runtime_binding_preview(data_root, bound_at)?;
+    if payload
+        .get("production_binding_eligible")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        bail!("State V0.3 Rust runtime binding refused: Cargo.lock must exist and be tracked");
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut file = File::create(&tmp)?;
+        serde_json::to_writer_pretty(&mut file, &payload)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    fs::rename(&tmp, &path)?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(payload)
+}
+
 pub fn verify_runtime_binding(value: &Value) -> Result<bool> {
     let expected = value
         .get("record_sha256")
@@ -72,19 +109,53 @@ pub fn verify_runtime_binding(value: &Value) -> Result<bool> {
     Ok(expected == payload_hash(value)?)
 }
 
+pub fn verify_runtime_binding_file(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let value: Value = serde_json::from_reader(File::open(path)?)?;
+    if !verify_runtime_binding(&value)? {
+        return Ok(false);
+    }
+    if value
+        .get("production_binding_eligible")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Ok(false);
+    }
+    let bound_at = value
+        .get("bound_at")
+        .and_then(Value::as_str)
+        .context("runtime binding bound_at missing")?;
+    let bound_at = DateTime::parse_from_rfc3339(bound_at)?.with_timezone(&Utc);
+    let data_root = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .context("runtime binding path is not under <data_root>/research/state_v03")?;
+    let expected = runtime_binding_preview(data_root, bound_at)?;
+    Ok(expected == value)
+}
+
 fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
     let files = [
         ("workspace_cargo", "Cargo.toml"),
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("state_lib", "crates/crossalpha-state/src/lib.rs"),
         ("state_v03", "crates/crossalpha-state/src/v03.rs"),
+        ("state_v03_artifacts", "crates/crossalpha-state/src/v03/artifacts.rs"),
+        ("state_v03_census", "crates/crossalpha-state/src/v03/census.rs"),
+        ("state_v03_cycle", "crates/crossalpha-state/src/v03/cycle.rs"),
         ("state_v03_engine", "crates/crossalpha-state/src/v03/engine.rs"),
+        ("state_v03_network", "crates/crossalpha-state/src/v03/network.rs"),
         ("state_v03_preflight", "crates/crossalpha-state/src/v03/preflight.rs"),
         ("state_v03_freeze", "crates/crossalpha-state/src/v03/freeze.rs"),
         (
             "state_v03_runtime_binding",
             "crates/crossalpha-state/src/v03/runtime_binding.rs",
         ),
+        ("state_v03_watchlist", "crates/crossalpha-state/src/v03/watchlist.rs"),
         ("cli_cargo", "crates/crossalpha-cli/Cargo.toml"),
         (
             "cli_v03_config",
