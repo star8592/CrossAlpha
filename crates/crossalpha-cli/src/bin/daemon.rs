@@ -376,6 +376,7 @@ fn acquire_daemon_lock(data_root: &Path) -> Result<File> {
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(&path)
         .with_context(|| format!("open daemon lock {}", path.display()))?;
     file.try_lock_exclusive()
