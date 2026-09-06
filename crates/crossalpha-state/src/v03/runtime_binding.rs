@@ -78,6 +78,7 @@ fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("state_lib", "crates/crossalpha-state/src/lib.rs"),
         ("state_v03", "crates/crossalpha-state/src/v03.rs"),
+        ("state_v03_engine", "crates/crossalpha-state/src/v03/engine.rs"),
         ("state_v03_preflight", "crates/crossalpha-state/src/v03/preflight.rs"),
         ("state_v03_freeze", "crates/crossalpha-state/src/v03/freeze.rs"),
         (
@@ -96,6 +97,10 @@ fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         (
             "cli_v03_freeze_preview",
             "crates/crossalpha-cli/src/bin/state_v03_freeze_preview.rs",
+        ),
+        (
+            "cli_v03_runtime_binding_preview",
+            "crates/crossalpha-cli/src/bin/state_v03_runtime_binding_preview.rs",
         ),
         ("config", "config/state_v03.yaml"),
     ];
