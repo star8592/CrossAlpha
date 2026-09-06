@@ -2,21 +2,25 @@
 
 ## Objective
 
-Move CrossAlpha from a Python-first research/runtime stack to a Rust-first production architecture without invalidating existing research artifacts, point-in-time semantics, manifests, Parquet files, YAML configs, or CLI contracts.
+Move CrossAlpha from a Python-first research/runtime stack to a Rust-first production architecture without invalidating existing research artifacts, point-in-time semantics, manifests, Parquet files, YAML configs, freeze evidence, or prospective ledgers.
 
-The migration is intentionally incremental. Python remains the reference implementation until parity tests prove a Rust component equivalent.
+Python remains a parity/reference implementation until the final local acceptance and production-soak gates pass. It must not share production-writer ownership with Rust.
 
 ## Non-negotiable invariants
 
 1. Point-in-time correctness must not change.
-2. Raw Observatory snapshots and audit manifests remain immutable.
-3. Existing YAML configuration remains readable during migration.
-4. Parquet/JSONL output schemas are versioned; Rust must not silently rewrite old artifacts.
-5. Research results must pass fixture/golden parity tests before Python implementations are retired.
-6. Required V0.1 market-data cost remains USD 0.
-7. GitHub is source/version control; research/backtests/large computation remain local-first.
+2. Raw snapshots and audit manifests remain immutable.
+3. Historical Raw Envelope V1 records remain readable and are never rewritten.
+4. New Rust raw writers use the Raw Envelope V2 canonical-byte contract.
+5. Existing YAML remains readable during migration.
+6. Parquet/JSONL schemas are explicit; no silent coercion or rewrite is allowed.
+7. Research/state kernels must pass deterministic and real-data parity gates before retirement.
+8. Required V0.1 market-data cost remains USD 0.
+9. GitHub is source/version control; tests, research, backtests and heavy compute remain local-first.
+10. Python and Rust production writers must never run concurrently.
+11. Runtime bindings are fail-closed and bind production source, Cargo.lock and predecessor freeze evidence.
 
-## Target workspace
+## Rust workspace
 
 ```text
 crates/
@@ -31,124 +35,192 @@ crates/
   crossalpha-research/
   crossalpha-market/
   crossalpha-cli/
-  crossalpha-py/
 ```
+
+## Raw Envelope V2
+
+Historical V1 serialization depended on Python/provider object insertion order and cannot be made byte-identical for arbitrary nested JSON across languages. V1 remains immutable and readable.
+
+Rust-native producers use schema V2:
+
+- recursively lexicographically sorted object keys;
+- array order preserved;
+- UTC timestamps with six microseconds and `Z`;
+- compact UTF-8 JSON;
+- SHA256 and filename derived from those canonical bytes.
+
+The cross-language gate is `scripts/verify_rust_raw_envelope_v2.py`.
 
 ## Migration phases
 
 ### R0 - Foundation
 
-Status: complete.
+Status: source complete; earlier local gates passed.
 
 ### R1 - Storage and manifests
 
-Status: complete and production-compatible.
+Status: source complete and previously proven against real data.
 
-Real-data Python/Rust rebuild parity passed with zero mismatches. Raw snapshot, SHA256, gzip, immutable audit, daily index and series-state contracts are owned by Rust.
+Earlier Python/Rust manifest rebuild parity completed with zero mismatches. Rust owns raw snapshot persistence, gzip/SHA, immutable audit, daily indexes and series state.
 
-### R2 - Observatory collectors
+### R2 - Observatory
 
-Status: complete and production-native Rust.
+Status: production-native Rust path implemented and previously cut over successfully.
 
-The production `crossalpha-observatory.service` now runs the release Rust binary and retains the Python unit/script as an explicit rollback path. Hyperliquid and DefiLlama provider dry-run, shadow-write, full-health and live-health parity gates all passed before cutover.
+Rust owns Hyperliquid and DefiLlama collection, live/full health, supervision and storage. Standalone Observatory remains available only as a guarded rollback/compatibility path. Unified-daemon ownership blocks standalone installers/cutover/rollback from creating duplicate writers.
 
 ### R3 - Canonicalization and causal features
 
-Status: in progress.
+Status: source complete; final workspace/parity acceptance still required on the current head.
 
-R3.1 canonical parser parity is complete:
+Implemented:
 
-- Hyperliquid `metaAndAssetCtxs`: 233 real rows matched Python.
-- DefiLlama stablecoin assets: 423 real rows matched Python.
-- DefiLlama stablecoin chain supply: 1637 real rows matched Python.
-- full row-level semantic parity: `mismatches=0`.
+- Hyperliquid canonical parser;
+- DefiLlama stablecoin canonical parser;
+- Aave V3 canonical parser;
+- Arrow/Parquet canonical writers;
+- bounded recent-day raw manifest loader;
+- bounded canonical materializer;
+- Hyperliquid causal market-state features;
+- stablecoin system/chain features;
+- bounded raw-to-feature production materializer;
+- `crossalpha-materialize-rs` with explicit production-write authorization.
 
-R3.2 is the isolated Parquet compatibility gate:
+Earlier canonical parser real-data parity passed with zero mismatches. The final acceptance reruns canonical Parquet/materializer/feature parity on the current source.
 
-- Rust uses native Arrow `RecordBatch` + Parquet `ArrowWriter`.
-- output is restricted to an explicit preview directory; production `canonical/` is not touched.
-- compare column order, Arrow field types/nullability, row counts, null behavior and all values against pandas/pyarrow output from the exact same frozen real snapshots.
-- byte-for-byte file identity is intentionally not required because writer metadata/compression may differ without changing the data contract.
-
-Exit gate for R3.2:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build -p crossalpha-cli
-.venv/bin/python scripts/verify_rust_canonical_parquet_parity.py \
-  --data-root /mnt/disk2/CrossAlphaData
-```
-
-After Parquet parity passes, enable bounded recent-day canonical materialization, then port causal Hyperliquid and stablecoin features.
-
-Critical rule: rolling features are causal and must preserve null/min-observation behavior exactly. No future leakage can be introduced during vectorization.
+Feature Parquet preserves Python-compatible `timestamp[ns, UTC]` for `observed_at` and `known_at`; a native test locks this schema contract.
 
 ### R4 - State engine
 
-Replace the Python state package with a versioned Rust engine:
+Status: V02/V03/V04 native source complete; final compile/parity/live acceptance and runtime binding activation remain gated.
+
+The shared `StateSpec` control plane provides:
 
 ```text
-StateSpec trait
-  validate_config()
-  preflight()
-  freeze()
-  cycle()
-  integrity()
-  status()
+validate_config()
+preflight()
+freeze()
+cycle()
+integrity()
+status()
 ```
 
-V02/V03/V04 become implementations sharing common capability probes, artifact metadata, freeze semantics and integrity machinery instead of duplicating command orchestration.
+Native implementations:
 
-This phase should eliminate nested Python `asyncio.run()`/event-loop ownership from state commands. Async ownership belongs to one Tokio runtime at the CLI/service boundary.
+- V02: Aave market/liquidation evidence plus stablecoin/Hyperliquid descriptive state;
+- V03: borrower census, adaptive Borrow-log acquisition, watchlist and borrower-risk evidence;
+- V04: BTC/ETH × Binance/OKX/Bybit multi-venue mechanics.
 
-### R5 - Research engine
+`crossalpha-state-rs integrity` is a process-level fail-closed gate: exit status is non-zero unless `cycle_enabled=true`.
 
-Port performance-critical research kernels only after storage/state parity is stable.
+V02/V03/V04 runtime bindings include the production CLI/daemon, storage contract and all state source modules. V02 additionally binds its transitive canonical/feature kernels. Source drift therefore invalidates the prior runtime binding.
+
+### R5 - Research, Paper, A/B and Outcomes
+
+Status: native source complete; final local parity acceptance remains.
+
+Implemented:
+
+- point-in-time futures-definition normalization;
+- previous-volume futures roll selection and same-contract MTM returns;
+- Frozen B3 baseline/risk target kernels;
+- zero-cost Free Core provider: Tiingo ETF proxies, Binance BTC/ETH, FRED DGS3MO;
+- Free Core quality and derived return builder;
+- Frozen B3 Paper snapshots/marks/runtime binding;
+- State Shadow V0.1;
+- State A/B snapshots/marks/runtime binding;
+- Outcome Linkage anchors, horizons, metrics and runtime binding;
+- descriptive market-routing research kernel.
+
+Free Core deterministic parity covers provider parsing, six TradFi assets, BTC/ETH, FRED, canonical Parquet schema/rows, quality JSON, derived returns and strict-prior FRED CASH semantics.
+
+State A/B runtime binding includes the transitive storage and feature kernels used by Shadow V0.1, so changes to those kernels invalidate old bindings.
 
 ### R6 - Unified daemon and operations
 
-Converge production entrypoints on the native binary with graceful shutdown, single-instance protection, health JSON, structured logs and explicit exit codes.
+Status: source complete; production cutover remains acceptance-gated.
 
-### R7 - Python retirement
+`crossalpha-daemon-rs` owns one Tokio runtime and supports:
 
-Remove a Python subsystem only when golden fixtures match, historical replay passes, result deltas are accepted, operational soak passes and rollback is documented.
+- single-instance file lock;
+- graceful SIGTERM/Ctrl-C shutdown;
+- component failure counters and structured health JSON;
+- Observatory cadence: 300 seconds;
+- Materializer cadence: 900 seconds;
+- State V02 cadence: 900 seconds;
+- State V03 cadence: 900 seconds;
+- State V04 cadence: 300 seconds;
+- no automatic State freeze;
+- State cycles only when runtime binding integrity is valid.
 
-## Recommended Rust stack
+Standalone Observatory/Materializer/State installers and the legacy Observatory cutover/rollback refuse to run when `crossalpha-daemon.service` is active or enabled. This prevents writer ownership from silently splitting again after cutover.
 
-- async/runtime: `tokio`
-- HTTP: `reqwest`
-- serialization: `serde`, `serde_json`, `serde_yaml`
-- errors: `thiserror`, `anyhow` at app boundary
-- CLI: `clap`
-- logging: `tracing`, `tracing-subscriber`
-- time: `chrono`
-- Arrow/Parquet: Apache Arrow Rust + `parquet`
-- hashing: `sha2` where compatibility requires SHA256
-- tests: native unit/integration + golden fixture comparisons
-- Python bridge: `pyo3`/`maturin`, optional and isolated
+Paper daily/weekly and Outcome Linkage remain separate Rust systemd timers because their schedules are calendar-oriented rather than daemon polling loops.
 
-## Architecture rules
+### R7 - Acceptance and Python retirement
 
-- Domain crates do not depend on network/storage implementations.
-- Config structs are versioned and validated at the boundary.
-- Collectors emit typed observations; storage owns persistence and artifact atomicity.
-- Feature/state engines are pure or side-effect-minimized and fixture-testable.
-- CLI/service layer owns Tokio runtime and cancellation.
-- No silent schema coercion or future leakage.
-- No global mutable singleton state.
+Status: acceptance framework implemented; retirement has **not** yet been authorized on the current head.
 
-## Immediate implementation order
+Primary runner:
 
-1. R3.2 Parquet schema/value parity.
-2. bounded recent-day canonical materializer.
-3. Hyperliquid basis/spread/OI and 24h causal rolling features.
-4. stablecoin state features.
-5. V03 capability-probed preflight/freeze.
-6. V04 state engine and shared state trait.
-7. free Core adapters and research kernels.
+```bash
+.venv/bin/python scripts/run_rust_migration_acceptance.py \
+  --data-root /mnt/disk2/CrossAlphaData
+```
+
+Protocol: `CROSSALPHA_RUST_MIGRATION_ACCEPTANCE_V2`.
+
+The runner covers:
+
+- `cargo fmt --check`;
+- workspace `clippy -D warnings`;
+- workspace tests;
+- debug and release builds;
+- Raw Envelope V2 byte parity;
+- Free Core end-to-end parity;
+- canonical/parser/Parquet/materializer/feature parity;
+- research/Paper/A-B/Shadow parity;
+- V02/V03/V04 deterministic parity and live preflights;
+- Cargo.lock presence and git tracking;
+- clean worktree;
+- runtime binding integrity;
+- production systemd writer audit;
+- post-cutover soak.
+
+Python retirement is allowed only when all eight production lines are native and healthy:
+
+1. Observatory
+2. Materializer
+3. State V02
+4. State V03
+5. State V04
+6. Frozen B3 Paper
+7. State A/B
+8. Outcome Linkage
+
+The final machine-readable condition is:
+
+```json
+{"python_retirement_allowed": true}
+```
+
+Until that condition is produced after cutover and soak, Python source remains in the repository as reference/rollback evidence and must not be deleted.
+
+## Safe activation sequence
+
+1. Pull the final migration branch.
+2. Run rustfmt/clippy/tests/debug+release builds locally.
+3. Commit the real Cargo-generated `Cargo.lock` and rerun acceptance.
+4. Run deterministic, real-data and live gates through the acceptance runner.
+5. Activate native runtime bindings only after pre-cutover acceptance is green.
+6. Rerun State/Paper/A-B/Outcome integrity.
+7. Use `scripts/cutover_unified_rust_daemon.sh` for daemon writer ownership transfer.
+8. Install/verify Rust Paper and Outcome timers.
+9. Confirm all legacy split writers are inactive and disabled.
+10. Complete production soak.
+11. Rerun acceptance in post-cutover mode.
+12. Retire Python production ownership only when `python_retirement_allowed=true`.
 
 ## Definition of done
 
-CrossAlpha is Rust-first when the native binary can collect, canonicalize, build features, run state cycles, run research, audit integrity and produce the same accepted artifacts without requiring a Python runtime. Python then becomes optional analysis/notebook tooling rather than the production engine.
+CrossAlpha is Rust-first only when the accepted Rust binaries collect data, canonicalize, build features, run V02/V03/V04, operate Paper/A-B/Outcome ledgers, audit integrity and reproduce the accepted evidence without a Python production runtime, while the production writer audit proves there are no concurrent legacy writers.
