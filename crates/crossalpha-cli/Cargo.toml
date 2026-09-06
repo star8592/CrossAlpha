@@ -20,6 +20,10 @@ path = "src/bin/state_v03_preflight.rs"
 name = "crossalpha-state-v03-freeze-preview-rs"
 path = "src/bin/state_v03_freeze_preview.rs"
 
+[[bin]]
+name = "crossalpha-state-v03-runtime-binding-preview-rs"
+path = "src/bin/state_v03_runtime_binding_preview.rs"
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
