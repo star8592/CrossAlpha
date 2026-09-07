@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,9 @@ class BorrowLogResultLimit(RuntimeError):
 class BorrowLogPolicy:
     timeout_seconds: float = 30.0
     max_results: int = BLOCKSCOUT_MAX_LOG_RESULTS
+    transient_retries: int = 6
+    retry_base_seconds: float = 1.0
+    retry_max_seconds: float = 20.0
 
 
 def resolve_state_rpc_candidates(configured: str | None) -> list[tuple[str, str]]:
@@ -77,6 +81,25 @@ class BlockscoutBorrowLogProvider:
         self.api_url = api_url.rstrip("?")
         self.policy = policy or BorrowLogPolicy()
 
+    @staticmethod
+    def _retryable_status(status_code: int) -> bool:
+        return status_code == 429 or 500 <= status_code <= 599
+
+    def _retry_delay(self, attempt: int, response: httpx.Response | None = None) -> float:
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    value = float(retry_after)
+                except ValueError:
+                    value = 0.0
+                if value > 0:
+                    return min(value, self.policy.retry_max_seconds)
+        return min(
+            self.policy.retry_base_seconds * (2**attempt),
+            self.policy.retry_max_seconds,
+        )
+
     async def _query_once(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         params = {
             "module": "logs",
@@ -87,10 +110,28 @@ class BlockscoutBorrowLogProvider:
             "topic0": BORROW_EVENT_TOPIC0,
         }
         async with httpx.AsyncClient(timeout=self.policy.timeout_seconds) as client:
-            response = await client.get(self.api_url, params=params)
-            response.raise_for_status()
-            body = response.json()
-        return parse_blockscout_logs(body, max_results=self.policy.max_results)
+            last_error: Exception | None = None
+            for attempt in range(self.policy.transient_retries + 1):
+                response: httpx.Response | None = None
+                try:
+                    response = await client.get(self.api_url, params=params)
+                    if self._retryable_status(response.status_code):
+                        response.raise_for_status()
+                    response.raise_for_status()
+                    body = response.json()
+                    return parse_blockscout_logs(body, max_results=self.policy.max_results)
+                except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                    last_error = exc
+                except httpx.HTTPStatusError as exc:
+                    if not self._retryable_status(exc.response.status_code):
+                        raise
+                    last_error = exc
+                    response = exc.response
+                if attempt >= self.policy.transient_retries:
+                    assert last_error is not None
+                    raise last_error
+                await asyncio.sleep(self._retry_delay(attempt, response))
+        raise RuntimeError("Blockscout indexed-log query exhausted retries")
 
     async def borrow_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         """Return a complete range or fail closed; provider result caps split to one block."""
