@@ -114,11 +114,16 @@ pub fn compute_stablecoin_system_state(
             .iter()
             .map(|item| item.row.market_value_usd.unwrap_or(0.0))
             .sum::<f64>();
-        let total_supply_native = part
+        // pandas Series.sum() delegates float64 reduction to NumPy, which uses
+        // pairwise summation for sufficiently large contiguous vectors. Preserve the
+        // frozen formula (chain total - asset total), but mirror that reduction order.
+        let supply_values: Vec<f64> = part
             .iter()
             .map(|item| item.row.circulating_native.unwrap_or(0.0))
-            .sum::<f64>();
-        let chain_sum_native = part.iter().map(|item| item.chain_sum_native).sum::<f64>();
+            .collect();
+        let chain_values: Vec<f64> = part.iter().map(|item| item.chain_sum_native).collect();
+        let total_supply_native = numpy_pairwise_sum(&supply_values);
+        let chain_sum_native = numpy_pairwise_sum(&chain_values);
         let residual_native = chain_sum_native - total_supply_native;
         let abs_residual_native = part
             .iter()
@@ -262,7 +267,20 @@ fn value_key(value: &Value) -> String {
 }
 
 fn sum_min_count_one(values: &[Option<f64>]) -> Option<f64> {
-    known_sum(values.iter().copied())
+    // pandas groupby.sum() uses compensated accumulation for float64 groups.
+    // Match that behavior so large stablecoin supplies retain the same tiny
+    // accounting residuals instead of drifting by one or two ULPs.
+    let mut count = 0_usize;
+    let mut total = 0.0_f64;
+    let mut compensation = 0.0_f64;
+    for value in values.iter().copied().flatten() {
+        count += 1;
+        let y = value - compensation;
+        let t = total + y;
+        compensation = (t - total) - y;
+        total = t;
+    }
+    (count > 0).then_some(total)
 }
 
 fn add_min_count_one(current: Option<f64>, value: Option<f64>) -> Option<f64> {
@@ -272,6 +290,39 @@ fn add_min_count_one(current: Option<f64>, value: Option<f64>) -> Option<f64> {
         (None, Some(value)) => Some(value),
         (None, None) => None,
     }
+}
+
+// NumPy's float64 pairwise_sum contract: vectors of at least eight values
+// are accumulated in eight independent lanes, then tree-combined. Larger vectors
+// split on an 8-value boundary before applying the same block reduction.
+fn numpy_pairwise_sum(values: &[f64]) -> f64 {
+    const BLOCK: usize = 128;
+    let n = values.len();
+    if n < 8 {
+        return values.iter().copied().sum();
+    }
+    if n <= BLOCK {
+        let mut lanes = [
+            values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7],
+        ];
+        let mut i = 8;
+        while i + 7 < n {
+            for lane in 0..8 {
+                lanes[lane] += values[i + lane];
+            }
+            i += 8;
+        }
+        let mut result = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+            + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+        while i < n {
+            result += values[i];
+            i += 1;
+        }
+        return result;
+    }
+    let mut midpoint = n / 2;
+    midpoint -= midpoint % 8;
+    numpy_pairwise_sum(&values[..midpoint]) + numpy_pairwise_sum(&values[midpoint..])
 }
 
 fn known_sum<I>(values: I) -> Option<f64>

@@ -164,6 +164,11 @@ impl Drop for ManifestLock {
     }
 }
 
+fn truncate_to_microseconds(value: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp_micros(value.timestamp_micros())
+        .expect("DateTime microsecond timestamp remains in range")
+}
+
 pub struct RawSnapshotStore {
     root: PathBuf,
 }
@@ -174,7 +179,7 @@ impl RawSnapshotStore {
     }
 
     pub fn write(&self, envelope: &ObservationEnvelope) -> Result<RawSnapshotManifest> {
-        let observed = envelope.observed_at;
+        let observed = truncate_to_microseconds(envelope.observed_at);
         let rel_dir = PathBuf::from(&envelope.source_id)
             .join(&envelope.observation_type)
             .join(format!("year={:04}", observed.year()))
@@ -339,8 +344,12 @@ pub fn rebuild_manifest_indexes(data_root: &Path) -> Result<usize> {
         if line.trim().is_empty() {
             continue;
         }
-        let record: RawSnapshotManifest = serde_json::from_str(&line)
+        let mut record: RawSnapshotManifest = serde_json::from_str(&line)
             .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
+        // Python datetime.fromisoformat() and the frozen manifest filenames carry
+        // microsecond precision. Normalize audit entries before rebuilding indexes so
+        // daily and series manifests are byte-semantically equivalent.
+        record.observed_at = truncate_to_microseconds(record.observed_at);
         records.push(record);
     }
     records.sort_by_key(|record| record.observed_at);

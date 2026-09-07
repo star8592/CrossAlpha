@@ -198,6 +198,12 @@ where
         return None;
     }
     let current = current?;
+    // pandas rolling.std(ddof=0) returns NaN for an exactly constant window.
+    // Detect that contract before floating-point mean cancellation can manufacture
+    // a tiny non-zero variance and a spurious z-score of +/-1.
+    if values.windows(2).all(|pair| pair[0] == pair[1]) {
+        return None;
+    }
     let mean = values.iter().sum::<f64>() / values.len() as f64;
     let variance = values
         .iter()

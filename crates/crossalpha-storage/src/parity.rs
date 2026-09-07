@@ -124,14 +124,18 @@ fn compare_daily_manifests(
                 .iter()
                 .zip(&actual)
                 .position(|(left, right)| left != right);
+            let detail = first_difference
+                .map(|index| format!(" python={:?} rust={:?}", expected[index], actual[index]))
+                .unwrap_or_default();
             mismatches.push(format!(
-                "daily content mismatch: {} python_records={} rust_records={} first_difference={}",
+                "daily content mismatch: {} python_records={} rust_records={} first_difference={}{}",
                 relative.display(),
                 expected.len(),
                 actual.len(),
                 first_difference
                     .map(|index| (index + 1).to_string())
-                    .unwrap_or_else(|| "length-only".to_string())
+                    .unwrap_or_else(|| "length-only".to_string()),
+                detail,
             ));
         }
     }
@@ -155,7 +159,12 @@ fn compare_series_states(
         let expected = normalized_series_state(&reference.join(relative))?;
         let actual = normalized_series_state(&generated.join(relative))?;
         if expected != actual {
-            mismatches.push(format!("series content mismatch: {}", relative.display()));
+            mismatches.push(format!(
+                "series content mismatch: {} python={} rust={}",
+                relative.display(),
+                expected,
+                actual,
+            ));
         }
     }
 
