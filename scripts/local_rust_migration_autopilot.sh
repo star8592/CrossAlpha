@@ -98,6 +98,7 @@ fi
 [[ -n "$DATA_ROOT" ]] || { echo "CROSSALPHA_DATA_DIR is not set; pass --data-root" >&2; exit 2; }
 [[ "$DATA_ROOT" == /* ]] || DATA_ROOT="$REPO_DIR/$DATA_ROOT"
 DATA_ROOT="$(realpath -m "$DATA_ROOT")"
+export CROSSALPHA_DATA_DIR="$DATA_ROOT"
 
 PY="$REPO_DIR/.venv/bin/python"
 [[ -x "$PY" ]] || { echo "Python venv missing: $PY" >&2; exit 2; }
@@ -192,11 +193,6 @@ run_step() {
     return "$rc"
   fi
   echo "<== $name ok"
-}
-
-run_shell_step() {
-  local name="$1" command="$2"
-  run_step "$name" bash -lc "cd '$REPO_DIR' && $command"
 }
 
 acceptance_value() {
