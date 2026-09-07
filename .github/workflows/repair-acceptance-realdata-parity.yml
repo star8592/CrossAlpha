@@ -64,12 +64,18 @@ jobs:
           python scripts/verify_rust_shadow_v01_parity.py --data-root /mnt/disk2/CrossAlphaData
 
       - name: Diagnose manifest parity
+        if: always()
         continue-on-error: true
         shell: bash
         run: |
-          target/debug/crossalpha-rs manifest-parity /mnt/disk2/CrossAlphaData
+          if [[ -x target/debug/crossalpha-rs ]]; then
+            target/debug/crossalpha-rs manifest-parity /mnt/disk2/CrossAlphaData
+          else
+            echo 'manifest diagnostic unavailable: Rust binary was not built'
+          fi
 
       - name: Commit verified repairs
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
