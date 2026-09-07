@@ -52,13 +52,13 @@ pub struct NormalizedVenueRow {
     pub funding_rate_8h: Option<f64>,
     pub open_interest_usd: Option<f64>,
     pub data_cost_usd: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection_error: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_sha256: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_compressed_file_sha256: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_path: Option<String>,
 }
 
@@ -254,6 +254,7 @@ pub fn compute_market_mechanics(
     maximum_age_seconds: i64,
 ) -> Value {
     let mut latest: BTreeMap<(String, String), &NormalizedVenueRow> = BTreeMap::new();
+    let mut eligible_before_age = false;
     for row in rows {
         let venue = row.venue.to_ascii_lowercase();
         let asset = row.asset.to_ascii_uppercase();
@@ -263,6 +264,7 @@ pub fn compute_market_mechanics(
         if row.known_at > generated_at || row.observed_at > generated_at {
             continue;
         }
+        eligible_before_age = true;
         let age = generated_at - row.observed_at;
         if age < Duration::zero() || age > Duration::seconds(maximum_age_seconds) {
             continue;
@@ -276,7 +278,7 @@ pub fn compute_market_mechanics(
             latest.insert(key, row);
         }
     }
-    if latest.is_empty() {
+    if latest.is_empty() && !eligible_before_age {
         return json!({
             "protocol": PROTOCOL,
             "mode": MODE,
