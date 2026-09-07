@@ -1,1 +1,1 @@
-Owner-triggered full Acceptance V2 after verified functional parity repairs. Exact parent head: ea2e3eedccb8688a93686316199a39772e9994d2. No production service or writer changes.
+Owner-triggered full Acceptance V2 after verified immutable V02 Python-to-Rust ledger handoff. Exact verified repair head includes e5ed69cf0. No production service or writer changes.
