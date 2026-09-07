@@ -16,7 +16,7 @@ Python remains a parity/reference implementation until the final local acceptanc
 6. Parquet/JSONL schemas are explicit; no silent coercion or rewrite is allowed.
 7. Research/state kernels must pass deterministic and real-data parity gates before retirement.
 8. Required V0.1 market-data cost remains USD 0.
-9. GitHub is source/version control; tests, research, backtests and heavy compute remain local-first.
+9. GitHub is the source/control plane. Repository qualification runs only on the dedicated CrossAlpha self-hosted runner; production data, live production state, binding activation, cutover and soak remain explicit local operations.
 10. Python and Rust production writers must never run concurrently.
 11. Runtime bindings are fail-closed and bind production source, Cargo.lock and predecessor freeze evidence.
 
@@ -37,40 +37,50 @@ crates/
   crossalpha-cli/
 ```
 
-## Local migration autopilot
+## Automation control plane
 
-The preferred local operator entrypoint is:
+The sole repository qualification workflow is `.github/workflows/rust-ci.yml`.
 
-```bash
-bash scripts/local_rust_migration_autopilot.sh \
-  --data-root /mnt/disk2/CrossAlphaData \
-  --push
+It targets only the dedicated runner label set:
+
+```text
+[self-hosted, linux, x64, crossalpha]
 ```
 
-It is local-first and performs the full code qualification/push workflow without GitHub Actions compute:
-
-1. fetch/rebase the migration branch with `--autostash`;
-2. run `cargo fmt`;
-3. run the non-live R7 suite while local source/Cargo.lock may still be dirty;
-4. run git diff checks;
-5. stage and create a local commit when changes exist;
-6. rerun R7 on the exact clean commit, including live gates unless `--skip-live` is explicit;
-7. push only after the clean-head gate passes;
-8. verify that the remote branch head equals the local validated commit.
-
-Every step streams to the terminal and is written under the ignored `.local-runs/<run-id>/` directory. On failure the runner prints the failing step, log path, final 160 log lines and current `git status`. The complete run has a `summary.txt` file.
-
-Production activation is deliberately a separate explicit mode:
+The runner can be installed with:
 
 ```bash
-bash scripts/local_rust_migration_autopilot.sh \
-  --data-root /mnt/disk2/CrossAlphaData \
-  --push \
-  --activate-production \
-  --soak-seconds 1800
+bash scripts/install_github_self_hosted_runner.sh
 ```
 
-That mode is accepted only after clean-head live R7 authorization. It then binds native runtimes, reruns R7, transfers Observatory/Materializer/State V02/V03/V04 writer ownership to the unified daemon, installs Rust Paper/Outcome timers, monitors the daemon during the soak, captures local journal/systemd status, and runs post-cutover R7. It does not delete Python source. If post-cutover retirement is not authorized, the daemon is left observable for diagnosis and rollback remains explicit.
+The workflow owns repeatable source qualification only:
+
+1. checkout the exact PR/branch commit;
+2. Rustfmt gate;
+3. workspace Clippy with `-D warnings`;
+4. Rust workspace tests;
+5. Python reference tests;
+6. debug build;
+7. deterministic Python/Rust parity;
+8. release build.
+
+GitHub Actions is therefore the development/test feedback channel. ChatGPT reads workflow/job logs through the GitHub connector, updates `feat/rust-core-v01` when a failure has a clear safe source fix, and the self-hosted runner validates the next commit.
+
+The former local autopilot/report control plane has been retired and removed. Issue #2 is archived and is no longer an automation channel.
+
+CI must not:
+
+- use GitHub-hosted compute for CrossAlpha qualification;
+- run fork-controlled code on the CrossAlpha self-hosted machine;
+- consume production credentials unnecessarily;
+- use `/mnt/disk2/CrossAlphaData` as a CI data root;
+- mutate production manifests or freezes;
+- activate runtime bindings;
+- perform production cutover or rollback;
+- start production writers;
+- decide Python production retirement.
+
+Those operations remain explicit local promotion gates after the exact commit is CI-green.
 
 ## Raw Envelope V2
 
@@ -154,7 +164,7 @@ New Rust prospective records bind the exact native runtime-binding file/record h
 
 ### R5 - Research, Paper, A/B and Outcomes
 
-Status: native source complete; final local parity acceptance remains.
+Status: native source complete; final parity acceptance remains.
 
 Implemented:
 
@@ -198,7 +208,7 @@ Paper daily/weekly and Outcome Linkage remain separate Rust systemd timers becau
 
 Status: acceptance framework implemented; retirement has **not** yet been authorized on the current head.
 
-Primary runner:
+The production-data acceptance runner is:
 
 ```bash
 .venv/bin/python scripts/run_rust_migration_acceptance.py \
@@ -207,7 +217,9 @@ Primary runner:
 
 Protocol: `CROSSALPHA_RUST_MIGRATION_ACCEPTANCE_V2`.
 
-The runner covers:
+Repository-safe parts are exercised continuously by the self-hosted CI workflow. Final local acceptance additionally covers real production data, live preflights, tracked `Cargo.lock`, clean worktree, runtime binding integrity, installed systemd writer ownership and post-cutover soak.
+
+The complete acceptance surface includes:
 
 - `cargo fmt --check`;
 - workspace `clippy -D warnings`;
@@ -243,23 +255,25 @@ The final machine-readable condition is:
 
 Until that condition is produced after cutover and soak, Python source remains in the repository as reference/rollback evidence and must not be deleted.
 
-## Safe activation sequence
+## Safe promotion sequence
 
-The local autopilot implements this sequence automatically. The explicit underlying order is:
+The development/test loop is automated by GitHub Actions on the dedicated self-hosted runner. Production promotion remains deliberately separate and explicit:
 
-1. sync the migration branch;
-2. run rustfmt/clippy/tests/debug+release builds locally;
-3. generate and commit the real Cargo resolver `Cargo.lock` when needed;
-4. rerun deterministic, real-data and live gates on a clean local commit;
-5. push only that validated commit;
-6. activate native runtime bindings;
+1. require the exact branch/PR commit to be CI-green;
+2. sync that exact commit into `/mnt/disk2/CrossAlpha`;
+3. run the full R7 acceptance against `/mnt/disk2/CrossAlphaData`;
+4. generate and commit the real Cargo resolver `Cargo.lock` if the current workspace requires a new lockfile;
+5. rerun R7 on a clean tracked commit and require `daemon_cutover_allowed=true`;
+6. activate native runtime bindings with `scripts/bind_native_state_runtime.sh --activate`;
 7. rerun State/Paper/A-B/Outcome integrity;
-8. transfer daemon writer ownership;
+8. transfer Observatory/Materializer/State V02/V03/V04 writer ownership with `scripts/cutover_unified_rust_daemon.sh --activate`;
 9. install/verify Rust Paper and Outcome timers;
 10. confirm all legacy split writers are inactive and disabled;
-11. complete production soak while monitoring daemon health;
+11. complete the required production soak while monitoring daemon health;
 12. rerun post-cutover acceptance;
 13. retire Python production ownership only when `python_retirement_allowed=true`.
+
+Rollback remains explicit through the guarded rollback scripts. CI never performs promotion or rollback automatically.
 
 ## Definition of done
 
