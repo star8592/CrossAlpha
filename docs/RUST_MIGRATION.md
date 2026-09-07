@@ -37,6 +37,41 @@ crates/
   crossalpha-cli/
 ```
 
+## Local migration autopilot
+
+The preferred local operator entrypoint is:
+
+```bash
+bash scripts/local_rust_migration_autopilot.sh \
+  --data-root /mnt/disk2/CrossAlphaData \
+  --push
+```
+
+It is local-first and performs the full code qualification/push workflow without GitHub Actions compute:
+
+1. fetch/rebase the migration branch with `--autostash`;
+2. run `cargo fmt`;
+3. run the non-live R7 suite while local source/Cargo.lock may still be dirty;
+4. run git diff checks;
+5. stage and create a local commit when changes exist;
+6. rerun R7 on the exact clean commit, including live gates unless `--skip-live` is explicit;
+7. push only after the clean-head gate passes;
+8. verify that the remote branch head equals the local validated commit.
+
+Every step streams to the terminal and is written under the ignored `.local-runs/<run-id>/` directory. On failure the runner prints the failing step, log path, final 160 log lines and current `git status`. The complete run has a `summary.txt` file.
+
+Production activation is deliberately a separate explicit mode:
+
+```bash
+bash scripts/local_rust_migration_autopilot.sh \
+  --data-root /mnt/disk2/CrossAlphaData \
+  --push \
+  --activate-production \
+  --soak-seconds 1800
+```
+
+That mode is accepted only after clean-head live R7 authorization. It then binds native runtimes, reruns R7, transfers Observatory/Materializer/State V02/V03/V04 writer ownership to the unified daemon, installs Rust Paper/Outcome timers, monitors the daemon during the soak, captures local journal/systemd status, and runs post-cutover R7. It does not delete Python source. If post-cutover retirement is not authorized, the daemon is left observable for diagnosis and rollback remains explicit.
+
 ## Raw Envelope V2
 
 Historical V1 serialization depended on Python/provider object insertion order and cannot be made byte-identical for arbitrary nested JSON across languages. V1 remains immutable and readable.
@@ -111,9 +146,11 @@ Native implementations:
 - V03: borrower census, adaptive Borrow-log acquisition, watchlist and borrower-risk evidence;
 - V04: BTC/ETH × Binance/OKX/Bybit multi-venue mechanics.
 
-`crossalpha-state-rs integrity` is a process-level fail-closed gate: exit status is non-zero unless `cycle_enabled=true`.
+`crossalpha-state-rs integrity` is a process-level fail-closed gate: exit status is non-zero unless `ok=true` and `cycle_enabled=true`.
 
 V02/V03/V04 runtime bindings include the production CLI/daemon, storage contract and all state source modules. V02 additionally binds its transitive canonical/feature kernels. Source drift therefore invalidates the prior runtime binding.
+
+New Rust prospective records bind the exact native runtime-binding file/record hash. V02/V03/V04 cycle enablement also depends on prospective-ledger integrity, so a broken historical evidence chain prevents additional writes.
 
 ### R5 - Research, Paper, A/B and Outcomes
 
@@ -151,7 +188,7 @@ Status: source complete; production cutover remains acceptance-gated.
 - State V03 cadence: 900 seconds;
 - State V04 cadence: 300 seconds;
 - no automatic State freeze;
-- State cycles only when runtime binding integrity is valid.
+- State cycles only when runtime binding and prospective-ledger integrity are valid.
 
 Standalone Observatory/Materializer/State installers and the legacy Observatory cutover/rollback refuse to run when `crossalpha-daemon.service` is active or enabled. This prevents writer ownership from silently splitting again after cutover.
 
@@ -208,18 +245,21 @@ Until that condition is produced after cutover and soak, Python source remains i
 
 ## Safe activation sequence
 
-1. Pull the final migration branch.
-2. Run rustfmt/clippy/tests/debug+release builds locally.
-3. Commit the real Cargo-generated `Cargo.lock` and rerun acceptance.
-4. Run deterministic, real-data and live gates through the acceptance runner.
-5. Activate native runtime bindings only after pre-cutover acceptance is green.
-6. Rerun State/Paper/A-B/Outcome integrity.
-7. Use `scripts/cutover_unified_rust_daemon.sh` for daemon writer ownership transfer.
-8. Install/verify Rust Paper and Outcome timers.
-9. Confirm all legacy split writers are inactive and disabled.
-10. Complete production soak.
-11. Rerun acceptance in post-cutover mode.
-12. Retire Python production ownership only when `python_retirement_allowed=true`.
+The local autopilot implements this sequence automatically. The explicit underlying order is:
+
+1. sync the migration branch;
+2. run rustfmt/clippy/tests/debug+release builds locally;
+3. generate and commit the real Cargo resolver `Cargo.lock` when needed;
+4. rerun deterministic, real-data and live gates on a clean local commit;
+5. push only that validated commit;
+6. activate native runtime bindings;
+7. rerun State/Paper/A-B/Outcome integrity;
+8. transfer daemon writer ownership;
+9. install/verify Rust Paper and Outcome timers;
+10. confirm all legacy split writers are inactive and disabled;
+11. complete production soak while monitoring daemon health;
+12. rerun post-cutover acceptance;
+13. retire Python production ownership only when `python_retirement_allowed=true`.
 
 ## Definition of done
 
