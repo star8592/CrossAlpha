@@ -2,7 +2,7 @@ use crate::StateRuntimeContext;
 use crate::v03::{
     AAVE_V3_ETHEREUM_CORE_POOL, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, ADAPTIVE_MINIMUM_SPAN_BLOCKS,
     BLOCKSCOUT_LOG_SOURCE, BOOTSTRAP_CHUNK_BLOCKS, BORROW_EVENT_TOPIC0,
-    FULL_CENSUS_CADENCE_MINUTES, MAX_BOOTSTRAP_CHUNKS_PER_CYCLE, PROTOCOL,
+    FULL_CENSUS_CADENCE_MINUTES, MAX_BOOTSTRAP_CHUNKS_PER_CYCLE,
 };
 use crate::v03_artifacts::{read_address_set, write_account_rows, write_address_set};
 use crate::v03_census::{CensusPolicy, borrow_log_debtor, compute_borrower_census};

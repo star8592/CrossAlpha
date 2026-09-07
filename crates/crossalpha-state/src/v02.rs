@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -876,7 +876,7 @@ fn clip01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
-fn sum_option<'a, I>(values: I) -> Option<f64>
+fn sum_option<I>(values: I) -> Option<f64>
 where
     I: IntoIterator<Item = Option<f64>>,
 {

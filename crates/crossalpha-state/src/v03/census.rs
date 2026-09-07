@@ -5,7 +5,7 @@ use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 const BASE_CURRENCY_SCALE: f64 = 100_000_000.0;
 const HEALTH_FACTOR_SCALE: f64 = 1_000_000_000_000_000_000.0;

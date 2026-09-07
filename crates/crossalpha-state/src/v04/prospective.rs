@@ -319,9 +319,9 @@ struct VenueIdentityTime {
 
 fn read_venue_identity_and_times(path: &Path) -> Result<Vec<VenueIdentityTime>> {
     let file = File::open(path)?;
-    let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;
     let mut result = Vec::new();
-    while let Some(batch) = reader.next() {
+    for batch in reader {
         let batch = batch?;
         let asset = string_column(&batch, "asset")?;
         let venue = string_column(&batch, "venue")?;

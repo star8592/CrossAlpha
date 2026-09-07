@@ -15,9 +15,9 @@ pub fn read_address_set(path: &Path) -> Result<BTreeSet<String>> {
     }
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
     let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let mut reader = builder.with_batch_size(8_192).build()?;
+    let reader = builder.with_batch_size(8_192).build()?;
     let mut result = BTreeSet::new();
-    while let Some(batch) = reader.next() {
+    for batch in reader {
         let batch = batch?;
         let column = batch
             .column_by_name("address")

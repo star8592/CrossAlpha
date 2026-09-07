@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,7 +263,7 @@ pub fn parse_venue_snapshot(
             let oi_usd = number(payload.open_interest.get("openInterest"))
                 .zip(perp_mid)
                 .map(|(base, price)| base * price);
-            let source_times = [
+            let source_times: Vec<Value> = [
                 payload.premium.get("time").cloned(),
                 payload.open_interest.get("time").cloned(),
                 payload.perp_depth.get("E").cloned(),
@@ -298,7 +298,7 @@ pub fn parse_venue_snapshot(
             let (settled_rate, settled_interval, settled_time) =
                 settled_funding(&funding, "realizedRate", "fundingTime");
             let oi_usd = number(oi.get("oiUsd"));
-            let source_times = [
+            let source_times: Vec<Value> = [
                 spot.get("ts").cloned(),
                 perp.get("ts").cloned(),
                 oi.get("ts").cloned(),
@@ -333,7 +333,7 @@ pub fn parse_venue_snapshot(
             let (settled_rate, settled_interval, settled_time) =
                 settled_funding(&funding, "fundingRate", "fundingRateTimestamp");
             let oi_usd = number(perp.get("openInterestValue"));
-            let source_times = [spot_time, perp_time].into_iter().flatten().collect();
+            let source_times: Vec<Value> = [spot_time, perp_time].into_iter().flatten().collect();
             (
                 spot_bid,
                 spot_ask,
@@ -557,6 +557,7 @@ fn error_category(error: &anyhow::Error) -> String {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use serde_json::json;
 
     #[test]
     fn settled_funding_normalizes_latest_two_timestamps() {

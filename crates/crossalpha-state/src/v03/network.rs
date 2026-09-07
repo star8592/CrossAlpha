@@ -409,7 +409,7 @@ fn adaptive_borrow_logs_boxed<'a>(
         match borrow_logs_complete(http, start, end).await {
             Ok(logs) => Ok(logs),
             Err(error) => {
-                if end.saturating_sub(start) + 1 <= minimum_span.max(1) {
+                if end.saturating_sub(start) < minimum_span.max(1) {
                     return Err(error);
                 }
                 let midpoint = (start + end) / 2;
