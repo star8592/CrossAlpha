@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: crossalpha-rust-ci-${{ github.workflow }}-${{ github.ref }}
@@ -109,6 +110,7 @@ jobs:
 
       - name: Gate summary
         if: always()
+        id: gate_summary
         env:
           RUSTFMT: ${{ steps.rustfmt.outcome }}
           CLIPPY: ${{ steps.clippy.outcome }}
@@ -141,4 +143,56 @@ jobs:
               failed=1
             fi
           done
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
           exit "$failed"
+
+      - name: Publish CI status to Automation Dashboard
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUSTFMT: ${{ steps.rustfmt.outcome }}
+          CLIPPY: ${{ steps.clippy.outcome }}
+          RUST_TESTS: ${{ steps.rust_tests.outcome }}
+          PYTHON_TESTS: ${{ steps.python_tests.outcome }}
+          DEBUG_BUILD: ${{ steps.debug_build.outcome }}
+          PARITY: ${{ steps.parity.outcome }}
+          RELEASE_BUILD: ${{ steps.release_build.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          status = 'PASS' if os.environ.get('JOB_STATUS') == 'success' else 'FAILED'
+          pr = os.environ.get('PR_NUMBER') or 'n/a'
+          gates = ', '.join([
+              f"rustfmt={os.environ.get('RUSTFMT','unknown')}",
+              f"clippy={os.environ.get('CLIPPY','unknown')}",
+              f"rust_tests={os.environ.get('RUST_TESTS','unknown')}",
+              f"python_tests={os.environ.get('PYTHON_TESTS','unknown')}",
+              f"debug_build={os.environ.get('DEBUG_BUILD','unknown')}",
+              f"parity={os.environ.get('PARITY','unknown')}",
+              f"release_build={os.environ.get('RELEASE_BUILD','unknown')}",
+          ])
+          body = '\n'.join([
+              f'STATUS: {status}',
+              'PHASE: Rust migration / deterministic parity',
+              f"BRANCH/PR: {os.environ.get('REF_NAME','unknown')} / {pr} / {os.environ.get('HEAD_SHA','unknown')}",
+              f"SELF-HOSTED CI: {status} — {os.environ.get('RUN_URL','')}",
+              'LOCAL AUTOPILOT: see Issue #2 for sanitized local report',
+              f'KEY GATES: {gates}',
+              'KEY FINDING: deterministic Rust/Python CI cycle completed',
+              'BLOCKER: none' if status == 'PASS' else 'BLOCKER: one or more deterministic gates failed; inspect workflow log',
+              'NEXT: CrossAlpha Autonomous Loop evaluates failure/milestone; PR #1 remains unmerged automatically',
+              'COST: self-hosted/local compute',
+              'UPDATED: workflow completion time',
+          ])
+          url = f"https://api.github.com/repos/{os.environ['REPOSITORY']}/issues/6/comments"
+          req = urllib.request.Request(url, data=json.dumps({'body': body}).encode(), method='POST', headers={'Accept':'application/vnd.github+json','Authorization':f"Bearer {os.environ['GH_TOKEN']}",'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          with urllib.request.urlopen(req, timeout=20) as r:
+              print('dashboard HTTP', r.status)
+          PY
