@@ -232,14 +232,9 @@ pub fn parse_aave_liquidations(
 fn to_float(value: &Value) -> Option<f64> {
     let number = if let Some(number) = value.as_f64() {
         number
-    } else if let Some(text) = value.as_str() {
-        text.trim()
-            .replace('%', "")
-            .replace(',', "")
-            .parse::<f64>()
-            .ok()?
     } else {
-        return None;
+        let text = value.as_str()?;
+        text.trim().replace(['%', ','], "").parse::<f64>().ok()?
     };
     number.is_finite().then_some(number)
 }

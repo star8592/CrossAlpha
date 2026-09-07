@@ -76,7 +76,7 @@ impl MultiVenueCollector {
             "binance" => self.binance(asset).await,
             "okx" => self.okx(asset).await,
             "bybit" => self.bybit(asset).await,
-            _ => bail!("unsupported venue"),
+            _ => Err(anyhow::anyhow!("unsupported venue")),
         };
         match result {
             Ok(payload) => payload,
@@ -204,18 +204,28 @@ impl MultiVenueCollector {
         })
     }
 
-    async fn get(&self, url: &str, params: &[(&&str, &str)]) -> Result<Value> {
-        let pairs: Vec<(&str, &str)> = params.iter().map(|(key, value)| (**key, *value)).collect();
-        let response = self
-            .client
-            .get(url)
-            .query(&pairs)
-            .send()
-            .await
-            .context("VenueTransportError")?
-            .error_for_status()
-            .context("VenueHttpStatusError")?;
-        response.json().await.context("VenueJsonDecodeError")
+    fn get(
+        &self,
+        url: &str,
+        params: &[(&&str, &str)],
+    ) -> impl std::future::Future<Output = Result<Value>> + Send + 'static {
+        let client = self.client.clone();
+        let url = url.to_owned();
+        let pairs: Vec<(String, String)> = params
+            .iter()
+            .map(|(key, value)| ((**key).to_owned(), (*value).to_owned()))
+            .collect();
+        async move {
+            let response = client
+                .get(&url)
+                .query(&pairs)
+                .send()
+                .await
+                .context("VenueTransportError")?
+                .error_for_status()
+                .context("VenueHttpStatusError")?;
+            response.json().await.context("VenueJsonDecodeError")
+        }
     }
 }
 
@@ -226,83 +236,120 @@ pub fn parse_venue_snapshot(
     if !VENUES.contains(&payload.venue.as_str()) || !ASSETS.contains(&payload.asset.as_str()) {
         bail!("unsupported State V0.4 venue/asset");
     }
-    let mut spot_bid = None;
-    let mut spot_ask = None;
-    let mut perp_bid = None;
-    let mut perp_ask = None;
-    let mut mark = None;
-    let mut index = None;
-    let mut oi_usd = None;
-    let mut settled_rate = None;
-    let mut settled_interval = None;
-    let mut settled_time = None;
-    let mut source_times = Vec::new();
-
-    match payload.venue.as_str() {
+    let (
+        spot_bid,
+        spot_ask,
+        perp_bid,
+        perp_ask,
+        mark,
+        index,
+        oi_usd,
+        settled_rate,
+        settled_interval,
+        settled_time,
+        mut source_times,
+    ) = match payload.venue.as_str() {
         "binance" => {
-            spot_bid = number(payload.spot.get("bidPrice"));
-            spot_ask = number(payload.spot.get("askPrice"));
-            perp_bid = first_book_price(payload.perp_depth.get("bids"));
-            perp_ask = first_book_price(payload.perp_depth.get("asks"));
-            mark = number(payload.premium.get("markPrice"));
-            index = number(payload.premium.get("indexPrice"));
+            let spot_bid = number(payload.spot.get("bidPrice"));
+            let spot_ask = number(payload.spot.get("askPrice"));
+            let perp_bid = first_book_price(payload.perp_depth.get("bids"));
+            let perp_ask = first_book_price(payload.perp_depth.get("asks"));
+            let mark = number(payload.premium.get("markPrice"));
+            let index = number(payload.premium.get("indexPrice"));
             let funding = funding_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) =
+            let (settled_rate, settled_interval, settled_time) =
                 settled_funding(&funding, "fundingRate", "fundingTime");
             let perp_mid = mid(perp_bid, perp_ask);
-            oi_usd = number(payload.open_interest.get("openInterest"))
+            let oi_usd = number(payload.open_interest.get("openInterest"))
                 .zip(perp_mid)
                 .map(|(base, price)| base * price);
-            source_times.extend(
-                [
-                    payload.premium.get("time").cloned(),
-                    payload.open_interest.get("time").cloned(),
-                    payload.perp_depth.get("E").cloned(),
-                    payload.perp_depth.get("T").cloned(),
-                ]
-                .into_iter()
-                .flatten(),
-            );
+            let source_times = [
+                payload.premium.get("time").cloned(),
+                payload.open_interest.get("time").cloned(),
+                payload.perp_depth.get("E").cloned(),
+                payload.perp_depth.get("T").cloned(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            (
+                spot_bid,
+                spot_ask,
+                perp_bid,
+                perp_ask,
+                mark,
+                index,
+                oi_usd,
+                settled_rate,
+                settled_interval,
+                settled_time,
+                source_times,
+            )
         }
         "okx" => {
             let spot = okx_item(&payload.spot);
             let perp = okx_item(&payload.perp);
             let oi = okx_item(&payload.open_interest);
-            spot_bid = number(spot.get("bidPx"));
-            spot_ask = number(spot.get("askPx"));
-            perp_bid = number(perp.get("bidPx"));
-            perp_ask = number(perp.get("askPx"));
+            let spot_bid = number(spot.get("bidPx"));
+            let spot_ask = number(spot.get("askPx"));
+            let perp_bid = number(perp.get("bidPx"));
+            let perp_ask = number(perp.get("askPx"));
             let funding = okx_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) =
+            let (settled_rate, settled_interval, settled_time) =
                 settled_funding(&funding, "realizedRate", "fundingTime");
-            oi_usd = number(oi.get("oiUsd"));
-            source_times.extend(
-                [
-                    spot.get("ts").cloned(),
-                    perp.get("ts").cloned(),
-                    oi.get("ts").cloned(),
-                ]
-                .into_iter()
-                .flatten(),
-            );
+            let oi_usd = number(oi.get("oiUsd"));
+            let source_times = [
+                spot.get("ts").cloned(),
+                perp.get("ts").cloned(),
+                oi.get("ts").cloned(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            (
+                spot_bid,
+                spot_ask,
+                perp_bid,
+                perp_ask,
+                None,
+                None,
+                oi_usd,
+                settled_rate,
+                settled_interval,
+                settled_time,
+                source_times,
+            )
         }
         "bybit" => {
             let (spot, spot_time) = bybit_item(&payload.spot);
             let (perp, perp_time) = bybit_item(&payload.perp);
-            spot_bid = number(spot.get("bid1Price"));
-            spot_ask = number(spot.get("ask1Price"));
-            perp_bid = number(perp.get("bid1Price"));
-            perp_ask = number(perp.get("ask1Price"));
-            mark = number(perp.get("markPrice"));
-            index = number(perp.get("indexPrice"));
+            let spot_bid = number(spot.get("bid1Price"));
+            let spot_ask = number(spot.get("ask1Price"));
+            let perp_bid = number(perp.get("bid1Price"));
+            let perp_ask = number(perp.get("ask1Price"));
+            let mark = number(perp.get("markPrice"));
+            let index = number(perp.get("indexPrice"));
             let funding = bybit_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) =
+            let (settled_rate, settled_interval, settled_time) =
                 settled_funding(&funding, "fundingRate", "fundingRateTimestamp");
-            oi_usd = number(perp.get("openInterestValue"));
-            source_times.extend([spot_time, perp_time].into_iter().flatten());
+            let oi_usd = number(perp.get("openInterestValue"));
+            let source_times = [spot_time, perp_time].into_iter().flatten().collect();
+            (
+                spot_bid,
+                spot_ask,
+                perp_bid,
+                perp_ask,
+                mark,
+                index,
+                oi_usd,
+                settled_rate,
+                settled_interval,
+                settled_time,
+                source_times,
+            )
         }
         _ => unreachable!(),
-    }
+    };
     if let Some(time) = settled_time.as_deref() {
         source_times.push(Value::String(time.to_owned()));
     }

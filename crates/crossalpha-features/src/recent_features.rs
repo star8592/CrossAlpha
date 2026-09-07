@@ -119,10 +119,10 @@ pub fn load_latest_stablecoin_chain_composition(
     Ok(parse_stablecoin_snapshot(&envelope, record)?.chains)
 }
 
-fn select_records<'a>(
-    records: &'a [RawSnapshotManifest],
+fn select_records(
+    records: &[RawSnapshotManifest],
     source: CanonicalSource,
-) -> Vec<&'a RawSnapshotManifest> {
+) -> Vec<&RawSnapshotManifest> {
     records
         .iter()
         .filter(|record| {

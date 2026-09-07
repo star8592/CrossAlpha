@@ -51,6 +51,56 @@ impl Default for CensusPolicy {
     }
 }
 
+pub fn normalize_address(address: &str) -> Result<String> {
+    let raw = address
+        .strip_prefix("0x")
+        .or_else(|| address.strip_prefix("0X"))
+        .context("Ethereum address lacks 0x prefix")?;
+    if raw.len() != 40 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("Ethereum address must contain exactly 20 hex bytes");
+    }
+    Ok(format!("0x{}", raw.to_ascii_lowercase()))
+}
+
+pub fn encode_get_user_account_data(address: &str, selector: &str) -> Result<String> {
+    let address = normalize_address(address)?;
+    let selector = selector
+        .strip_prefix("0x")
+        .or_else(|| selector.strip_prefix("0X"))
+        .unwrap_or(selector);
+    if selector.len() != 8 || !selector.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("getUserAccountData selector must contain exactly 4 hex bytes");
+    }
+    Ok(format!(
+        "0x{}{:0>64}",
+        selector.to_ascii_lowercase(),
+        &address[2..]
+    ))
+}
+
+pub fn borrow_log_debtor(log: &Value, expected_topic0: &str) -> Option<String> {
+    let object = log.as_object()?;
+    let topics = object.get("topics").and_then(Value::as_array);
+    let topic0 = object
+        .get("topic0")
+        .and_then(Value::as_str)
+        .or_else(|| topics?.first()?.as_str())?;
+    if !topic0.eq_ignore_ascii_case(expected_topic0) {
+        return None;
+    }
+    let encoded = object
+        .get("topic2")
+        .and_then(Value::as_str)
+        .or_else(|| topics?.get(2)?.as_str())?;
+    let raw = encoded
+        .strip_prefix("0x")
+        .or_else(|| encoded.strip_prefix("0X"))?;
+    if raw.len() < 40 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    normalize_address(&format!("0x{}", &raw[raw.len() - 40..])).ok()
+}
+
 pub fn decode_get_user_account_data(result: &str) -> Result<AccountMetrics> {
     let raw = result
         .strip_prefix("0x")

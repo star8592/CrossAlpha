@@ -157,9 +157,13 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
     let freeze = load_freeze(data_root)?;
     let binding_path = runtime_binding_path(data_root);
     let binding_ok = verify_runtime_binding_file(&binding_path)?;
-    let binding = binding_ok
-        .then(|| serde_json::from_reader::<_, Value>(File::open(&binding_path)?))
-        .transpose()?;
+    let binding = if binding_ok {
+        Some(serde_json::from_reader::<_, Value>(File::open(
+            &binding_path,
+        )?)?)
+    } else {
+        None
+    };
     let binding_file_sha = binding_ok.then(|| sha256_file(&binding_path)).transpose()?;
     let binding_record_sha = binding
         .as_ref()
