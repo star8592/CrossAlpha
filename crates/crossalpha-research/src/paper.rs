@@ -1,5 +1,5 @@
-use crate::baseline::{BaselineConfig, apply_constraints, scale_to_target_vol};
 pub use crate::baseline::RISK_ASSETS;
+use crate::baseline::{BaselineConfig, apply_constraints, scale_to_target_vol};
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, NaiveDate};
 use crossalpha_data::AssetReturnRow;
