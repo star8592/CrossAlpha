@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/rust-core-v01
   pull_request:
     branches:
       - main
@@ -30,7 +31,6 @@ env:
 jobs:
   deterministic-gates:
     name: Rust + Python deterministic gates
-    # Never execute untrusted fork code on the private CrossAlpha machine.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, crossalpha]
     timeout-minutes: 150
@@ -108,9 +108,9 @@ jobs:
         continue-on-error: true
         run: cargo build --workspace --release
 
-      - name: Gate summary
+      - name: Report deterministic gate outcomes
         if: always()
-        id: gate_summary
+        id: gate_report
         env:
           RUSTFMT: ${{ steps.rustfmt.outcome }}
           CLIPPY: ${{ steps.clippy.outcome }}
@@ -129,22 +129,15 @@ jobs:
             debug_build "$DEBUG_BUILD" \
             parity "$PARITY" \
             release_build "$RELEASE_BUILD"
-
-          failed=0
-          for result in \
-            "$RUSTFMT" \
-            "$CLIPPY" \
-            "$RUST_TESTS" \
-            "$PYTHON_TESTS" \
-            "$DEBUG_BUILD" \
-            "$PARITY" \
-            "$RELEASE_BUILD"; do
-            if [ "$result" != "success" ]; then
-              failed=1
-            fi
-          done
-          echo "failed=$failed" >> "$GITHUB_OUTPUT"
-          exit "$failed"
+          python3 - <<'PY'
+          import os
+          names = ['RUSTFMT','CLIPPY','RUST_TESTS','PYTHON_TESTS','DEBUG_BUILD','PARITY','RELEASE_BUILD']
+          failed = [name for name in names if os.environ.get(name) != 'success']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('all_pass=' + ('true' if not failed else 'false') + '\n')
+              f.write('failed_gates=' + ','.join(failed) + '\n')
+          print('failed_gates=' + (','.join(failed) if failed else 'none'))
+          PY
 
       - name: Publish CI status to Automation Dashboard
         if: always()
@@ -155,7 +148,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           REF_NAME: ${{ github.head_ref || github.ref_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          JOB_STATUS: ${{ job.status }}
+          ALL_PASS: ${{ steps.gate_report.outputs.all_pass }}
+          FAILED_GATES: ${{ steps.gate_report.outputs.failed_gates }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUSTFMT: ${{ steps.rustfmt.outcome }}
           CLIPPY: ${{ steps.clippy.outcome }}
@@ -167,7 +161,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, urllib.request
-          status = 'PASS' if os.environ.get('JOB_STATUS') == 'success' else 'FAILED'
+          passed = os.environ.get('ALL_PASS') == 'true'
+          status = 'PASS' if passed else 'FAILED'
           pr = os.environ.get('PR_NUMBER') or 'n/a'
           gates = ', '.join([
               f"rustfmt={os.environ.get('RUSTFMT','unknown')}",
@@ -178,6 +173,7 @@ jobs:
               f"parity={os.environ.get('PARITY','unknown')}",
               f"release_build={os.environ.get('RELEASE_BUILD','unknown')}",
           ])
+          failed = os.environ.get('FAILED_GATES') or 'none'
           body = '\n'.join([
               f'STATUS: {status}',
               'PHASE: Rust migration / deterministic parity',
@@ -185,9 +181,9 @@ jobs:
               f"SELF-HOSTED CI: {status} — {os.environ.get('RUN_URL','')}",
               'LOCAL AUTOPILOT: see Issue #2 for sanitized local report',
               f'KEY GATES: {gates}',
-              'KEY FINDING: deterministic Rust/Python CI cycle completed',
-              'BLOCKER: none' if status == 'PASS' else 'BLOCKER: one or more deterministic gates failed; inspect workflow log',
-              'NEXT: CrossAlpha Autonomous Loop evaluates failure/milestone; PR #1 remains unmerged automatically',
+              f'KEY FINDING: explicit deterministic verdict; failed_gates={failed}',
+              'BLOCKER: none' if passed else f'BLOCKER: deterministic gates failed: {failed}',
+              'NEXT: autonomous loop evaluates exact failing gates; PR #1 remains unmerged automatically',
               'COST: self-hosted/local compute',
               'UPDATED: workflow completion time',
           ])
@@ -196,3 +192,10 @@ jobs:
           with urllib.request.urlopen(req, timeout=20) as r:
               print('dashboard HTTP', r.status)
           PY
+
+      - name: Enforce deterministic gate verdict
+        if: always()
+        env:
+          ALL_PASS: ${{ steps.gate_report.outputs.all_pass }}
+        run: |
+          test "$ALL_PASS" = "true"
