@@ -1,9 +1,6 @@
 name: CrossAlpha Migration Drift Repair
 
 on:
-  push:
-    branches:
-      - feat/rust-core-v01
   workflow_dispatch:
 
 permissions:
@@ -41,7 +38,7 @@ jobs:
               text = text.replace(old, new, 1)
               returns.write_text(text)
           elif new not in text:
-              raise SystemExit('unexpected previous_date source shape; refusing blind repair')
+              print('previous_date repair no longer applies; leaving source unchanged')
 
           tests = Path('tests/test_runtime_shell_scripts.py')
           text = tests.read_text()
@@ -51,7 +48,7 @@ jobs:
               text = text.replace(old, new, 1)
               tests.write_text(text)
           elif new not in text:
-              raise SystemExit('unexpected V0.3 installer contract test shape; refusing blind repair')
+              print('V0.3 installer repair no longer applies; leaving test unchanged')
 
           features = Path('crates/crossalpha-features/src/lib.rs')
           text = features.read_text()
@@ -61,7 +58,7 @@ jobs:
               text = text.replace(stale, fixed, 1)
               features.write_text(text)
           elif fixed not in text:
-              raise SystemExit('unexpected Aave re-export shape; refusing blind repair')
+              print('Aave export repair no longer applies; leaving source unchanged')
 
           core = Path('crates/crossalpha-data/src/free_core.rs')
           text = core.read_text()
@@ -71,7 +68,7 @@ jobs:
               text = text.replace(stale, fixed, 1)
               core.write_text(text)
           elif fixed not in text:
-              raise SystemExit('unexpected free_core numeric sanitizer shape; refusing blind repair')
+              print('numeric sanitizer repair no longer applies; leaving source unchanged')
           PY
 
           cargo fmt --all
@@ -110,4 +107,5 @@ jobs:
         if: always()
         run: |
           echo "changed=${{ steps.repair.outputs.changed }}"
+          echo 'Legacy deterministic repair is manual-only; unknown CI failures should be delegated to Codex once the repo environment is configured.'
           echo 'No production data was accessed or modified.'
