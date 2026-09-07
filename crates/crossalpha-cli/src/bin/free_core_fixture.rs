@@ -46,6 +46,11 @@ fn main() -> Result<()> {
             tiingo.get("payload").context("tiingo payload missing")?,
         )?);
     }
+    tiingo_rows.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then(left.economic_asset.cmp(&right.economic_asset))
+    });
 
     let mut binance_rows = Vec::new();
     for binance in fixture_entries(fixture.get("binance").context("binance fixture missing")?)? {
@@ -65,6 +70,11 @@ fn main() -> Result<()> {
             payload,
         )?);
     }
+    binance_rows.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then(left.economic_asset.cmp(&right.economic_asset))
+    });
 
     let fred = fixture.get("fred").context("fred fixture missing")?;
     let fred_rows = parse_fred_payload(

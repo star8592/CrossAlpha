@@ -71,7 +71,7 @@ fn push_timestamp_values(
         true,
     ));
     arrays.push(Arc::new(
-        TimestampNanosecondArray::from(nanos).with_timezone_utc(),
+        TimestampNanosecondArray::from(nanos).with_timezone("UTC"),
     ));
     Ok(())
 }

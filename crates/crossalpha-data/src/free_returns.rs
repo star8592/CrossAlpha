@@ -3,10 +3,11 @@ use crate::free_core::{
     ProxyDailyRow,
 };
 use anyhow::{Context, Result, bail};
-use arrow_array::builder::{Float64Builder, StringBuilder};
+use arrow_array::builder::{Float64Builder, LargeStringBuilder};
 use arrow_array::{
-    Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
-    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
+    Array, ArrayRef, Float64Array, Int64Array, LargeStringArray, RecordBatch, StringArray,
+    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use chrono::{DateTime, Duration, TimeZone, Utc};
@@ -415,7 +416,7 @@ where
                 after += 1;
             }
             if let Some(previous) = previous_date {
-                let gap = (row.date - previous).num_seconds() as f64 / 86_400.0;
+                let gap = row.date.signed_duration_since(previous).num_seconds() as f64 / 86_400.0;
                 max_gap = Some(max_gap.map_or(gap, |current| current.max(gap)));
             }
             previous_date = Some(row.date);
@@ -586,6 +587,9 @@ fn string_at(array: &dyn Array, index: usize) -> Result<Option<String>> {
     if let Some(values) = array.as_any().downcast_ref::<StringArray>() {
         return Ok(Some(values.value(index).to_owned()));
     }
+    if let Some(values) = array.as_any().downcast_ref::<LargeStringArray>() {
+        return Ok(Some(values.value(index).to_owned()));
+    }
     bail!("unsupported string parquet type: {:?}", array.data_type())
 }
 
@@ -681,16 +685,13 @@ fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &
 where
     I: Iterator<Item = DateTime<Utc>>,
 {
-    fields.push(Field::new(
-        name,
-        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
-        true,
-    ));
+    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));
+    fields.push(Field::new(name, data_type.clone(), true));
     let values = values
-        .map(|value| value.timestamp_micros().saturating_mul(1_000))
+        .map(|value| value.timestamp_micros())
         .collect::<Vec<_>>();
     arrays.push(Arc::new(
-        TimestampNanosecondArray::from(values).with_timezone_utc(),
+        TimestampMicrosecondArray::from(values).with_data_type(data_type),
     ));
 }
 
@@ -698,8 +699,8 @@ fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str
 where
     I: Iterator<Item = Option<String>>,
 {
-    fields.push(Field::new(name, DataType::Utf8, true));
-    let mut builder = StringBuilder::new();
+    fields.push(Field::new(name, DataType::LargeUtf8, true));
+    let mut builder = LargeStringBuilder::new();
     for value in values {
         builder.append_option(value.as_deref());
     }

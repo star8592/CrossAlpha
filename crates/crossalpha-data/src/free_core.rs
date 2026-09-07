@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
-use arrow_array::builder::{Float64Builder, Int64Builder, StringBuilder};
-use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray};
+use arrow_array::builder::{Float64Builder, Int64Builder, LargeStringBuilder};
+use arrow_array::{ArrayRef, RecordBatch, TimestampMicrosecondArray, TimestampMillisecondArray};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use parquet::arrow::ArrowWriter;
@@ -491,7 +491,7 @@ pub fn write_free_core_fixture_canonical(
 fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(
+    timestamp_us_col(
         &mut fields,
         &mut arrays,
         "date",
@@ -593,7 +593,7 @@ fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
 fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(
+    timestamp_ms_col(
         &mut fields,
         &mut arrays,
         "date",
@@ -677,7 +677,7 @@ fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
 fn write_cash_parquet(path: &Path, rows: &[CashRateRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(
+    timestamp_us_col(
         &mut fields,
         &mut arrays,
         "date",
@@ -771,20 +771,31 @@ fn ensure_unique_dates(rows: &[ProxyDailyRow], symbol: &str) -> Result<()> {
     Ok(())
 }
 
-fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+fn timestamp_us_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
 where
     I: Iterator<Item = DateTime<Utc>>,
 {
-    fields.push(Field::new(
-        name,
-        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
-        true,
-    ));
+    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));
+    fields.push(Field::new(name, data_type.clone(), true));
     let values = values
-        .map(|value| value.timestamp_micros().saturating_mul(1_000))
+        .map(|value| value.timestamp_micros())
         .collect::<Vec<_>>();
     arrays.push(Arc::new(
-        TimestampNanosecondArray::from(values).with_timezone_utc(),
+        TimestampMicrosecondArray::from(values).with_data_type(data_type),
+    ));
+}
+
+fn timestamp_ms_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
+    I: Iterator<Item = DateTime<Utc>>,
+{
+    let data_type = DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()));
+    fields.push(Field::new(name, data_type.clone(), true));
+    let values = values
+        .map(|value| value.timestamp_millis())
+        .collect::<Vec<_>>();
+    arrays.push(Arc::new(
+        TimestampMillisecondArray::from(values).with_data_type(data_type),
     ));
 }
 
@@ -792,8 +803,8 @@ fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str
 where
     I: Iterator<Item = Option<String>>,
 {
-    fields.push(Field::new(name, DataType::Utf8, true));
-    let mut builder = StringBuilder::new();
+    fields.push(Field::new(name, DataType::LargeUtf8, true));
+    let mut builder = LargeStringBuilder::new();
     for value in values {
         builder.append_option(value.as_deref());
     }
