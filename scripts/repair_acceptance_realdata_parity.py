@@ -27,6 +27,7 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 def main() -> int:
     parquet = ROOT / "crates/crossalpha-features/src/parquet.rs"
     market_state = ROOT / "crates/crossalpha-features/src/market_state.rs"
+    stablecoin_state = ROOT / "crates/crossalpha-features/src/stablecoin_state.rs"
     freeze_verify = ROOT / "scripts/verify_rust_state_v03_freeze_parity.py"
     manifest_parity = ROOT / "crates/crossalpha-storage/src/parity.rs"
 
@@ -99,6 +100,30 @@ def main() -> int:
     let mean = values.iter().sum::<f64>() / values.len() as f64;
 """,
         "feature-constant-window-zscore",
+    )
+
+    replace_once(
+        stablecoin_state,
+        """fn sum_min_count_one(values: &[Option<f64>]) -> Option<f64> {
+    known_sum(values.iter().copied())
+}""",
+        """fn sum_min_count_one(values: &[Option<f64>]) -> Option<f64> {
+    // pandas groupby.sum() uses compensated accumulation for float64 groups.
+    // Match that behavior so large stablecoin supplies retain the same tiny
+    // accounting residuals instead of drifting by one or two ULPs.
+    let mut count = 0_usize;
+    let mut total = 0.0_f64;
+    let mut compensation = 0.0_f64;
+    for value in values.iter().copied().flatten() {
+        count += 1;
+        let y = value - compensation;
+        let t = total + y;
+        compensation = (t - total) - y;
+        total = t;
+    }
+    (count > 0).then_some(total)
+}""",
+        "stablecoin-pandas-group-sum",
     )
 
     replace_once(
