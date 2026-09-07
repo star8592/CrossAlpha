@@ -55,7 +55,16 @@ jobs:
               settings=Settings()
               start=AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
               spans=(1, 16, 256)
-              for url, source in resolve_borrow_log_rpc_candidates(settings.evm_rpc_url):
+              candidates=list(resolve_borrow_log_rpc_candidates(settings.evm_rpc_url))
+              candidates.extend([
+                  ('https://public.1rpc.io/eth', 'ONE_RPC_PUBLIC_ETH_GETLOGS'),
+                  ('https://rpc.ankr.com/eth', 'ANKR_PUBLIC_ETH_GETLOGS'),
+              ])
+              seen=set()
+              for url, source in candidates:
+                  if url in seen:
+                      continue
+                  seen.add(url)
                   rpc=AaveBorrowerRpc(url, policy=RpcPolicy(timeout_seconds=settings.crossalpha_http_timeout))
                   for span in spans:
                       try:
