@@ -1,0 +1,93 @@
+name: CrossAlpha Migration Drift Repair
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: crossalpha-migration-drift-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 0
+
+      - name: Apply evidence-backed migration fixes
+        id: repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          returns = Path('crates/crossalpha-data/src/free_returns.rs')
+          text = returns.read_text()
+          old = '        let mut previous_date = None;\n'
+          new = '        let mut previous_date: Option<DateTime<Utc>> = None;\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+              returns.write_text(text)
+          elif new not in text:
+              raise SystemExit('unexpected previous_date source shape; refusing blind repair')
+
+          tests = Path('tests/test_runtime_shell_scripts.py')
+          text = tests.read_text()
+          old = '    assert "resolve_rpc_candidates" in v03\n'
+          new = '    assert "v03 integrity --data-root" in v03\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+              tests.write_text(text)
+          elif new not in text:
+              raise SystemExit('unexpected V0.3 installer contract test shape; refusing blind repair')
+          PY
+
+          cargo fmt --all
+
+          if git diff --quiet --; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'repair=noop'
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            git diff --check
+            git status --short
+          fi
+
+      - name: Commit repair
+        if: steps.repair.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates tests
+          git commit -m 'fix: resolve Rust migration gate regressions'
+          git push origin HEAD:feat/rust-core-v01
+          echo "repair_commit=$(git rev-parse HEAD)"
+
+      - name: Trigger exact-head deterministic CI
+        if: steps.repair.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run rust-ci.yml --ref feat/rust-core-v01
+
+      - name: Repair summary
+        if: always()
+        run: |
+          echo "changed=${{ steps.repair.outputs.changed }}"
+          echo 'No production data was accessed or modified.'
