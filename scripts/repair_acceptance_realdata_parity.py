@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,12 +38,17 @@ def main() -> int:
     )
 
     text = parquet.read_text(encoding="utf-8")
-    old_builder_count = text.count("StringBuilder::new()")
+    # Replace only a bare StringBuilder token. A plain str.replace would also match
+    # the suffix inside LargeStringBuilder and produce LargeLargeStringBuilder.
+    bare_builder_pattern = re.compile(r"(?<![A-Za-z0-9_])StringBuilder::new\(\)")
+    old_builder_count = len(bare_builder_pattern.findall(text))
     old_type_count = text.count("DataType::Utf8")
     if old_builder_count:
-        text = text.replace("StringBuilder::new()", "LargeStringBuilder::new()")
+        text = bare_builder_pattern.sub("LargeStringBuilder::new()", text)
     if old_type_count:
         text = text.replace("DataType::Utf8", "DataType::LargeUtf8")
+    if "LargeLargeStringBuilder" in text:
+        raise SystemExit("repair drift: invalid LargeLargeStringBuilder token detected")
     if old_builder_count == 0 and text.count("LargeStringBuilder::new()") < 2:
         raise SystemExit("repair drift for canonical LargeStringBuilder calls")
     if old_type_count == 0 and text.count("DataType::LargeUtf8") < 2:
