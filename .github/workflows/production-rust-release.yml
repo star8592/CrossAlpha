@@ -17,7 +17,7 @@ jobs:
   release:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[production-release]')
     runs-on: [self-hosted, linux, x64, crossalpha]
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       CANONICAL_REPO: /mnt/disk2/CrossAlpha
       DATA_ROOT: /mnt/disk2/CrossAlphaData
@@ -95,26 +95,56 @@ jobs:
           done
           echo 'legacy_state_writers_quiesced=true'
 
-      - name: Create legitimate V03 and V04 legacy freezes
+      - name: Complete legitimate V03 bootstrap and V04 freeze
         shell: bash
         run: |
           set -euo pipefail
           cd "$CANONICAL_REPO"
           export CROSSALPHA_DATA_DIR="$DATA_ROOT"
 
-          # V03: only create the research freeze through its strict live gate.
+          .venv/bin/crossalpha-state-v03-config-check
+          .venv/bin/crossalpha-state-v03-preflight
           if [[ ! -f "$DATA_ROOT/research/state_v03/freeze.json" ]]; then
-            .venv/bin/crossalpha-state-v03-config-check
-            .venv/bin/crossalpha-state-v03-preflight
             .venv/bin/crossalpha-state-v03-freeze
-            .venv/bin/crossalpha-state-v03-cycle
           fi
+
+          # A previously written freeze does not prove that the historical borrower
+          # bootstrap completed. Resume bounded cycles until the persisted cursor
+          # explicitly says bootstrap_complete=true. Never infer completion from a
+          # freeze file alone.
+          BOOTSTRAP_STATE="$DATA_ROOT/research/state_v03/bootstrap_state.json"
+          for attempt in $(seq 1 48); do
+            if .venv/bin/python - "$BOOTSTRAP_STATE" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          if not p.exists():
+              raise SystemExit(1)
+          v=json.loads(p.read_text(encoding='utf-8'))
+          raise SystemExit(0 if v.get('bootstrap_complete') is True else 1)
+          PY
+            then
+              echo "v03_bootstrap_complete=true attempt=$attempt"
+              break
+            fi
+            echo "v03_bootstrap_cycle=$attempt"
+            .venv/bin/crossalpha-state-v03-cycle
+          done
+          .venv/bin/python - "$BOOTSTRAP_STATE" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          assert p.exists(), 'V03 bootstrap state missing after bounded cycles'
+          v=json.loads(p.read_text(encoding='utf-8'))
+          assert v.get('bootstrap_complete') is True, v
+          print('v03_bootstrap_complete=true')
+          PY
           .venv/bin/crossalpha-state-v03-integrity
 
-          # V04: predecessor V03 must already be frozen + healthy.
+          # V04 freeze itself verifies that V03 is both frozen and strict-integrity healthy.
+          .venv/bin/crossalpha-state-v04-config-check
+          .venv/bin/crossalpha-state-v04-preflight
           if [[ ! -f "$DATA_ROOT/research/state_v04/freeze.json" ]]; then
-            .venv/bin/crossalpha-state-v04-config-check
-            .venv/bin/crossalpha-state-v04-preflight
             .venv/bin/crossalpha-state-v04-freeze
             .venv/bin/crossalpha-state-v04-cycle
           fi
@@ -227,6 +257,30 @@ jobs:
           PY
           install -m 0644 "$REPORT" "$DATA_ROOT/manifests/rust_migration_acceptance.json"
 
+      - name: Guarded rollback of V02 writer after pre-cutover failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Once Rust owns production, never resurrect a Python writer. Before Rust
+          # ownership, restore only the already-proven V02 legacy timer so a failed
+          # freeze/bootstrap/binding attempt cannot leave State V02 unwritten.
+          if systemctl --user is-active --quiet crossalpha-daemon.service; then
+            echo 'rust_daemon_active=true; legacy V02 rollback refused to prevent dual-write'
+            exit 0
+          fi
+          if systemctl --user list-unit-files crossalpha-state-v02.timer --no-legend | grep -q '^crossalpha-state-v02.timer'; then
+            systemctl --user enable --now crossalpha-state-v02.timer
+            systemctl --user is-active --quiet crossalpha-state-v02.timer
+            systemctl --user is-enabled --quiet crossalpha-state-v02.timer
+            echo 'v02_legacy_writer_restored_after_failure=true'
+          else
+            echo 'V02 legacy timer is unavailable; no replacement was invented' >&2
+            exit 2
+          fi
+          ! systemctl --user is-active --quiet crossalpha-state-v03.timer
+          ! systemctl --user is-active --quiet crossalpha-state-v04.timer
+
       - name: Final production status
         if: always()
         shell: bash
@@ -238,7 +292,7 @@ jobs:
           systemctl --user status crossalpha-free-paper-weekly.timer --no-pager || true
           echo '=== Rust outcome timer ==='
           systemctl --user status crossalpha-outcome-linkage.timer --no-pager || true
-          echo '=== legacy standalone State timers (must be inactive) ==='
+          echo '=== legacy standalone State timers ==='
           for version in v02 v03 v04; do
             systemctl --user is-active "crossalpha-state-${version}.timer" || true
           done
