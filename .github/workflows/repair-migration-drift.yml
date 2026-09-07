@@ -25,6 +25,16 @@ jobs:
           ref: feat/rust-core-v01
           fetch-depth: 0
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deterministic Python environment
+        run: |
+          set -euo pipefail
+          python -m pip install -e '.[dev]'
+
       - name: Apply canonical UTC metadata repair
         run: |
           set -euo pipefail
