@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Exact-head owner trigger after the bot-authored State V0.4 repair commit.
+# Focused self-hosted State V0.4 deterministic parity repair.
 
 
 def replace_once(path: str, old: str, new: str, label: str) -> None:
@@ -52,6 +52,13 @@ def main() -> None:
         '''    if latest.is_empty() {\n        return json!({\n''',
         '''    if latest.is_empty() && !eligible_before_age {\n        return json!({\n''',
         "preserve Python stale-row mechanics envelope",
+    )
+
+    replace_once(
+        path,
+        '''        let valid_venues: Vec<String> = complete.iter().map(|row| row.venue.clone()).collect();\n        let valid_count = valid_venues.len();\n''',
+        '''        let mut valid_venues: Vec<String> = complete.iter().map(|row| row.venue.clone()).collect();\n        valid_venues.sort();\n        let valid_count = valid_venues.len();\n''',
+        "match Python sorted valid_venues contract",
     )
 
 
