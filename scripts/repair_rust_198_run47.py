@@ -74,6 +74,42 @@ def main() -> None:
         "    use chrono::TimeZone;\n    use serde_json::json;\n\n    #[test]\n",
         "import json macro only in v04 provider tests",
     )
+    replace_once(
+        "crates/crossalpha-state/src/v02.rs",
+        "fn sum_option<'a, I>(values: I) -> Option<f64>\n",
+        "fn sum_option<I>(values: I) -> Option<f64>\n",
+        "remove unused v02 sum_option lifetime",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v03/artifacts.rs",
+        "    let mut reader = builder.with_batch_size(8_192).build()?;\n",
+        "    let reader = builder.with_batch_size(8_192).build()?;\n",
+        "make v03 parquet reader immutable",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v03/artifacts.rs",
+        "    while let Some(batch) = reader.next() {\n",
+        "    for batch in reader {\n",
+        "iterate v03 parquet batches with for loop",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v04.rs",
+        "    if values.len() % 2 == 0 {\n",
+        "    if values.len().is_multiple_of(2) {\n",
+        "use Rust 1.98 is_multiple_of for median parity",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v04/prospective.rs",
+        "    let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;\n",
+        "    let reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;\n",
+        "make v04 prospective parquet reader immutable",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v04/prospective.rs",
+        "    while let Some(batch) = reader.next() {\n",
+        "    for batch in reader {\n",
+        "iterate v04 prospective parquet batches with for loop",
+    )
 
     provider = Path("crates/crossalpha-state/src/v04/provider.rs")
     text = provider.read_text()
