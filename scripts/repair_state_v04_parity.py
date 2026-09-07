@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Exact-head trigger marker for the focused self-hosted repair workflow.
+
 
 def replace_once(path: str, old: str, new: str, label: str) -> None:
     file = Path(path)
