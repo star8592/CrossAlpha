@@ -88,6 +88,12 @@ bind_state() {
     | grep -Eq '"cycle_enabled"[[:space:]]*:[[:space:]]*true'
 }
 
+# Prove the immutable Python-era V0.2 ledger before the Rust handoff. The
+# attestation snapshots file bytes; it never rewrites historical observations.
+PYTHON="$REPO_DIR/.venv/bin/python"
+[[ -x "$PYTHON" ]] || PYTHON=python3
+"$PYTHON" scripts/attest_state_v02_legacy_ledger.py --data-root "$DATA_ROOT"
+
 # Bind predecessor State layers first because later freezes reference them.
 bind_state v02
 bind_state v03

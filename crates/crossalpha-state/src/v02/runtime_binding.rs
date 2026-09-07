@@ -31,6 +31,8 @@ pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Res
     if freeze.get("protocol").and_then(Value::as_str) != Some(PROSPECTIVE_PROTOCOL) {
         bail!("State V0.2 freeze protocol mismatch");
     }
+    let legacy_attestation =
+        crate::v02_legacy_binding::verify_attestation_for_binding(data_root, bound_at)?;
     let root = repo_root();
     let cargo_lock = root.join("Cargo.lock");
     let lock_present = cargo_lock.is_file();
@@ -45,6 +47,7 @@ pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Res
             "file_sha256": sha256_file(&freeze_path)?,
             "record_sha256": freeze.get("record_sha256").cloned().unwrap_or(Value::Null),
         },
+        "legacy_python_integrity_attestation": legacy_attestation,
         "bound_at": bound_at.to_rfc3339_opts(SecondsFormat::Micros, false),
         "runtime": "RUST_TOKIO",
         "python_runtime_required": false,
@@ -171,6 +174,10 @@ fn native_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
         (
             "state_v02_prospective",
             "crates/crossalpha-state/src/v02/prospective.rs",
+        ),
+        (
+            "state_v02_legacy_binding",
+            "crates/crossalpha-state/src/v02/legacy_binding.rs",
         ),
         (
             "state_v02_runtime_binding",

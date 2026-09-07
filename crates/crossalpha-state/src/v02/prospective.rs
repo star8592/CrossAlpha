@@ -143,13 +143,24 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let binding_record_sha = binding
         .as_ref()
         .and_then(|value| value.get("record_sha256"));
+    let binding_bound_at = binding
+        .as_ref()
+        .and_then(|value| value.get("bound_at"))
+        .map(|value| parse_time(Some(value)))
+        .transpose()?;
+    let legacy_ledger_ok = match (binding.as_ref(), binding_bound_at) {
+        (Some(binding), Some(bound_at)) => {
+            crate::v02_legacy_binding::verify_bound_legacy_ledger(data_root, bound_at, binding)?
+        }
+        _ => false,
+    };
     let first_eligible = parse_time(freeze.get("first_eligible_observed_at"))?;
     let mut rows = load_observations(data_root)?;
     rows.sort_by_key(|row| parse_time(row.get("generated_at")).ok());
     let mut checks = serde_json::Map::new();
     checks.insert("freeze_seal".to_owned(), Value::Bool(freeze_ok));
     checks.insert("rust_runtime_binding".to_owned(), Value::Bool(binding_ok));
-    let mut observation_seals = true;
+    let mut native_observation_seals = true;
     let mut freeze_links = true;
     let mut runtime_binding_links = true;
     let mut native_binding_linked_count = 0_usize;
@@ -160,11 +171,12 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let mut seen = BTreeSet::new();
     let mut times = Vec::new();
     for row in &rows {
-        let computed = payload_hash(row)?;
-        observation_seals &=
-            row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
-        freeze_links &= row.get("freeze_record_sha256") == freeze.get("record_sha256");
-        if row.get("rust_runtime_binding_record_sha256").is_some() {
+        let ts = parse_time(row.get("generated_at"))?;
+        let native = binding_bound_at.is_some_and(|bound_at| ts >= bound_at);
+        if native {
+            let computed = payload_hash(row)?;
+            native_observation_seals &=
+                row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
             native_binding_linked_count += 1;
             runtime_binding_links &=
                 row.get("rust_runtime_binding_record_sha256") == binding_record_sha;
@@ -172,8 +184,11 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
                 .get("rust_runtime_binding_file_sha256")
                 .and_then(Value::as_str)
                 == binding_file_sha.as_deref();
+        } else {
+            runtime_binding_links &= row.get("rust_runtime_binding_record_sha256").is_none()
+                && row.get("rust_runtime_binding_file_sha256").is_none();
         }
-        let ts = parse_time(row.get("generated_at"))?;
+        freeze_links &= row.get("freeze_record_sha256") == freeze.get("record_sha256");
         times.push(ts);
         no_pre_freeze &= ts >= first_eligible;
         unique &= seen.insert(ts.to_rfc3339());
@@ -193,8 +208,16 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     }
     let monotonic = times.windows(2).all(|pair| pair[0] <= pair[1]);
     checks.insert(
+        "legacy_python_ledger_immutable".to_owned(),
+        Value::Bool(legacy_ledger_ok),
+    );
+    checks.insert(
+        "native_observation_seals".to_owned(),
+        Value::Bool(native_observation_seals),
+    );
+    checks.insert(
         "observation_seals".to_owned(),
-        Value::Bool(observation_seals),
+        Value::Bool(legacy_ledger_ok && native_observation_seals),
     );
     checks.insert("freeze_links".to_owned(), Value::Bool(freeze_links));
     checks.insert(
