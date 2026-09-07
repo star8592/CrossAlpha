@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           python -m pip install -e '.[dev]'
 
-      - name: Apply canonical UTC metadata repair
+      - name: Apply targeted deterministic parity repair
         run: |
           set -euo pipefail
           python scripts/repair_arrow_utc_metadata.py
@@ -58,6 +58,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/crossalpha-features/src/feature_parquet.rs crates/crossalpha-data/src/free_core.rs crates/crossalpha-data/src/free_returns.rs
-          git commit -m 'fix: normalize Arrow UTC timezone metadata'
+          git add crates/crossalpha-features/src/feature_parquet.rs crates/crossalpha-data/src/free_core.rs crates/crossalpha-data/src/free_returns.rs crates/crossalpha-cli/src/bin/free_core_fixture.rs
+          git commit -m 'fix: restore deterministic Free Core parity'
           git push origin HEAD:feat/rust-core-v01
