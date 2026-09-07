@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/rust-core-v01
   pull_request:
     branches:
       - main
