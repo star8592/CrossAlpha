@@ -255,8 +255,13 @@ fn pct_change(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
 
 fn duration_seconds(duration: chrono::Duration) -> f64 {
     duration
-        .num_microseconds()
-        .map(|value| value as f64 / 1_000_000.0)
+        .num_nanoseconds()
+        .map(|value| value as f64 / 1_000_000_000.0)
+        .or_else(|| {
+            duration
+                .num_microseconds()
+                .map(|value| value as f64 / 1_000_000.0)
+        })
         .unwrap_or_else(|| duration.num_milliseconds() as f64 / 1_000.0)
 }
 

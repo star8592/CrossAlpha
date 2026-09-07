@@ -89,10 +89,10 @@ def main() -> int:
             minimum_eligible_block=MINIMUM_BLOCK,
             now=FIXED_NOW,
         )
-        if not verify_seal(python):
-            raise RuntimeError("Python fixture freeze seal failed")
         expected = dict(python)
         expected.pop("status", None)
+        if not verify_seal(expected):
+            raise RuntimeError("Python fixture freeze seal failed")
         actual = _run_rust(args.rust_binary, data_root)
         mismatches = _diff(
             _normalize(expected),

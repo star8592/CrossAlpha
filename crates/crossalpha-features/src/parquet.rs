@@ -1,6 +1,6 @@
 use crate::{HyperliquidAssetContextRow, StablecoinCanonicalSnapshot};
 use anyhow::{Result, bail};
-use arrow_array::builder::{BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
+use arrow_array::builder::{BooleanBuilder, Float64Builder, Int64Builder, LargeStringBuilder};
 use arrow_array::{ArrayRef, NullArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use chrono::SecondsFormat;
@@ -460,14 +460,14 @@ fn push_string_column<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, na
 where
     I: IntoIterator<Item = Option<String>>,
 {
-    let mut builder = StringBuilder::new();
+    let mut builder = LargeStringBuilder::new();
     for value in values {
         match value {
             Some(value) => builder.append_value(value),
             None => builder.append_null(),
         }
     }
-    fields.push(Field::new(name, DataType::Utf8, true));
+    fields.push(Field::new(name, DataType::LargeUtf8, true));
     arrays.push(Arc::new(builder.finish()));
 }
 
@@ -579,7 +579,7 @@ where
     }
 
     if non_null.iter().all(|value| value.is_string()) {
-        let mut builder = StringBuilder::new();
+        let mut builder = LargeStringBuilder::new();
         for value in values {
             match value.as_str() {
                 Some(value) => builder.append_value(value),
@@ -587,7 +587,7 @@ where
                 None => bail!("mixed value types in canonical column {name}"),
             }
         }
-        fields.push(Field::new(name, DataType::Utf8, true));
+        fields.push(Field::new(name, DataType::LargeUtf8, true));
         arrays.push(Arc::new(builder.finish()));
         return Ok(());
     }
