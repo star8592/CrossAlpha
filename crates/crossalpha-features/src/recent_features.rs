@@ -74,16 +74,14 @@ pub fn load_recent_aave_canonical(
         .records
         .iter()
         .filter(|record| {
-            record.source_id == "aave:v3:graphql"
-                && record.observation_type == "markets_snapshot"
+            record.source_id == "aave:v3:graphql" && record.observation_type == "markets_snapshot"
         })
         .collect();
     let mut liquidation_records: Vec<&RawSnapshotManifest> = loaded
         .records
         .iter()
         .filter(|record| {
-            record.source_id == "aave:v3:ethereum"
-                && record.observation_type == "liquidation_logs"
+            record.source_id == "aave:v3:ethereum" && record.observation_type == "liquidation_logs"
         })
         .collect();
     market_records.sort_by_key(|record| record.observed_at);

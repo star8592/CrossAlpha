@@ -55,7 +55,10 @@ pub fn build_previous_volume_roll_map(
     }
     let mut meta = BTreeMap::new();
     for row in metadata {
-        if meta.insert(row.contract.clone(), row.expiration_date).is_some() {
+        if meta
+            .insert(row.contract.clone(), row.expiration_date)
+            .is_some()
+        {
             bail!("contract_metadata contains duplicate contracts");
         }
     }
@@ -88,10 +91,8 @@ pub fn build_previous_volume_roll_map(
         let previous_date = pair[0];
         let current_date = pair[1];
         let previous = &by_date[&previous_date];
-        let current_available: BTreeSet<&str> = by_date[&current_date]
-            .keys()
-            .map(String::as_str)
-            .collect();
+        let current_available: BTreeSet<&str> =
+            by_date[&current_date].keys().map(String::as_str).collect();
         let cutoff = current_date + Duration::days(safety_days);
         let mut eligible: Vec<(&str, f64, DateTime<Utc>)> = previous
             .iter()
@@ -140,7 +141,9 @@ pub fn build_previous_volume_roll_map(
                 };
             }
         }
-        let rolled = held_contract.as_ref().is_some_and(|held| held != &candidate);
+        let rolled = held_contract
+            .as_ref()
+            .is_some_and(|held| held != &candidate);
         result.push(RollSelection {
             date: current_date,
             contract: candidate.clone(),
@@ -172,7 +175,10 @@ pub fn build_roll_mtm_returns(
         if !row.close.is_finite() || row.close <= 0.0 {
             bail!("bars close prices must be positive and non-null");
         }
-        if prices.insert((row.date, row.contract.clone()), row.close).is_some() {
+        if prices
+            .insert((row.date, row.contract.clone()), row.close)
+            .is_some()
+        {
             bail!("bars contain duplicate date/contract rows");
         }
     }
@@ -248,14 +254,40 @@ mod tests {
     #[test]
     fn roll_decision_uses_previous_day_volume() {
         let metadata = vec![
-            ContractMeta { contract: "F1".into(), expiration_date: day(20) },
-            ContractMeta { contract: "F2".into(), expiration_date: day(30) },
+            ContractMeta {
+                contract: "F1".into(),
+                expiration_date: day(20),
+            },
+            ContractMeta {
+                contract: "F2".into(),
+                expiration_date: day(30),
+            },
         ];
         let bars = vec![
-            FuturesBar { date: day(1), contract: "F1".into(), close: 100.0, volume: 10.0 },
-            FuturesBar { date: day(1), contract: "F2".into(), close: 110.0, volume: 20.0 },
-            FuturesBar { date: day(2), contract: "F1".into(), close: 101.0, volume: 1000.0 },
-            FuturesBar { date: day(2), contract: "F2".into(), close: 111.0, volume: 1.0 },
+            FuturesBar {
+                date: day(1),
+                contract: "F1".into(),
+                close: 100.0,
+                volume: 10.0,
+            },
+            FuturesBar {
+                date: day(1),
+                contract: "F2".into(),
+                close: 110.0,
+                volume: 20.0,
+            },
+            FuturesBar {
+                date: day(2),
+                contract: "F1".into(),
+                close: 101.0,
+                volume: 1000.0,
+            },
+            FuturesBar {
+                date: day(2),
+                contract: "F2".into(),
+                close: 111.0,
+                volume: 1.0,
+            },
         ];
         let map = build_previous_volume_roll_map(&bars, &metadata, 5).unwrap();
         assert_eq!(map[0].contract, "F2");
@@ -264,15 +296,56 @@ mod tests {
     #[test]
     fn roll_mtm_never_uses_cross_contract_gap_as_return() {
         let bars = vec![
-            FuturesBar { date: day(1), contract: "F1".into(), close: 100.0, volume: 1.0 },
-            FuturesBar { date: day(1), contract: "F2".into(), close: 200.0, volume: 1.0 },
-            FuturesBar { date: day(2), contract: "F1".into(), close: 101.0, volume: 1.0 },
-            FuturesBar { date: day(2), contract: "F2".into(), close: 202.0, volume: 1.0 },
-            FuturesBar { date: day(3), contract: "F2".into(), close: 204.0, volume: 1.0 },
+            FuturesBar {
+                date: day(1),
+                contract: "F1".into(),
+                close: 100.0,
+                volume: 1.0,
+            },
+            FuturesBar {
+                date: day(1),
+                contract: "F2".into(),
+                close: 200.0,
+                volume: 1.0,
+            },
+            FuturesBar {
+                date: day(2),
+                contract: "F1".into(),
+                close: 101.0,
+                volume: 1.0,
+            },
+            FuturesBar {
+                date: day(2),
+                contract: "F2".into(),
+                close: 202.0,
+                volume: 1.0,
+            },
+            FuturesBar {
+                date: day(3),
+                contract: "F2".into(),
+                close: 204.0,
+                volume: 1.0,
+            },
         ];
         let roll_map = vec![
-            RollSelection { date: day(2), contract: "F1".into(), expiration_date: day(20), decision_volume_date: day(1), rolled: false, forced_roll: false, decision_reason: "x".into() },
-            RollSelection { date: day(3), contract: "F2".into(), expiration_date: day(30), decision_volume_date: day(2), rolled: true, forced_roll: false, decision_reason: "x".into() },
+            RollSelection {
+                date: day(2),
+                contract: "F1".into(),
+                expiration_date: day(20),
+                decision_volume_date: day(1),
+                rolled: false,
+                forced_roll: false,
+                decision_reason: "x".into(),
+            },
+            RollSelection {
+                date: day(3),
+                contract: "F2".into(),
+                expiration_date: day(30),
+                decision_volume_date: day(2),
+                rolled: true,
+                forced_roll: false,
+                decision_reason: "x".into(),
+            },
         ];
         let rows = build_roll_mtm_returns(&bars, &roll_map, 0.0).unwrap();
         assert!((rows[1].excess_return.unwrap() - (204.0 / 202.0 - 1.0)).abs() < 1e-12);

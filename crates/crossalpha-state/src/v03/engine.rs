@@ -25,11 +25,9 @@ impl StateSpec for NativeStateV03 {
     }
 
     async fn preflight(&self, context: &StateRuntimeContext) -> Result<Value> {
-        let report = v03_preflight::run_preflight(
-            context.http_timeout,
-            context.evm_rpc_url.as_deref(),
-        )
-        .await?;
+        let report =
+            v03_preflight::run_preflight(context.http_timeout, context.evm_rpc_url.as_deref())
+                .await?;
         Ok(serde_json::to_value(report)?)
     }
 

@@ -48,7 +48,11 @@ impl StateV03 {
         let raw = serde_json::to_value(yaml)?;
         let mut checks = BTreeMap::new();
 
-        check(&mut checks, "protocol", string_at(&raw, "/protocol") == Some(PROTOCOL));
+        check(
+            &mut checks,
+            "protocol",
+            string_at(&raw, "/protocol") == Some(PROTOCOL),
+        );
         check(&mut checks, "mode", string_at(&raw, "/mode") == Some(MODE));
         check(
             &mut checks,
@@ -150,7 +154,12 @@ impl StateV03 {
             &mut checks,
             "state_rpc_fallback_pool",
             string_array_at(&raw, "/source/state_rpc_fallback_candidates")
-                == Some(ZERO_COST_PUBLIC_RPC_URLS.iter().map(|value| (*value).to_owned()).collect()),
+                == Some(
+                    ZERO_COST_PUBLIC_RPC_URLS
+                        .iter()
+                        .map(|value| (*value).to_owned())
+                        .collect(),
+                ),
         );
         check(
             &mut checks,
@@ -252,8 +261,7 @@ impl StateV03 {
         check(
             &mut checks,
             "finality_lag",
-            integer_at(&raw, "/borrower_universe/finality_lag_blocks")
-                == Some(FINALITY_LAG_BLOCKS),
+            integer_at(&raw, "/borrower_universe/finality_lag_blocks") == Some(FINALITY_LAG_BLOCKS),
         );
         check(
             &mut checks,
@@ -327,11 +335,7 @@ impl StateV03 {
             "hf_thresholds",
             number_array_at(&raw, "/census/thresholds") == Some(HF_THRESHOLDS.to_vec()),
         );
-        check(
-            &mut checks,
-            "hf_bands",
-            hf_bands_match(&raw),
-        );
+        check(&mut checks, "hf_bands", hf_bands_match(&raw));
         check(
             &mut checks,
             "no_liquidation_price_claim",
@@ -435,7 +439,10 @@ fn number_array_at(value: &Value, pointer: &str) -> Option<Vec<f64>> {
 }
 
 fn hf_bands_match(raw: &Value) -> bool {
-    let Some(bands) = raw.pointer("/liquidation_cliff/hf_bands").and_then(Value::as_array) else {
+    let Some(bands) = raw
+        .pointer("/liquidation_cliff/hf_bands")
+        .and_then(Value::as_array)
+    else {
         return false;
     };
     let expected: [(f64, Option<f64>); 7] = [
@@ -495,6 +502,9 @@ mod tests {
     fn prospective_gate_is_frozen() {
         let gate = expected_prospective_gate();
         assert_eq!(gate["minimum_calendar_days_before_O2_candidate"], 180);
-        assert_eq!(gate["automatic_promotion_to_actionable_modifier_allowed"], false);
+        assert_eq!(
+            gate["automatic_promotion_to_actionable_modifier_allowed"],
+            false
+        );
     }
 }

@@ -47,11 +47,7 @@ pub struct BaselineFeatures {
 
 pub fn compute_features(returns: &[f64], config: BaselineConfig) -> Result<BaselineFeatures> {
     validate_returns(returns)?;
-    let vol = rolling_sample_vol(
-        returns,
-        config.vol_window_days,
-        config.annualization_days,
-    );
+    let vol = rolling_sample_vol(returns, config.vol_window_days, config.annualization_days);
     let trend = rolling_compound(returns, config.trend_window_days)?;
     let horizon_30 = rolling_compound(returns, 30)?;
     let horizon_90 = rolling_compound(returns, 90)?;
@@ -306,10 +302,7 @@ mod tests {
             .map(|asset| ((*asset).to_owned(), 1.0))
             .collect();
         let weights = apply_constraints(&raw, BaselineConfig::default());
-        let risk = RISK_ASSETS
-            .iter()
-            .map(|asset| weights[*asset])
-            .sum::<f64>();
+        let risk = RISK_ASSETS.iter().map(|asset| weights[*asset]).sum::<f64>();
         assert!(risk <= 1.0 + 1e-12);
         assert!((risk + weights["CASH"] - 1.0).abs() < 1e-12);
         assert!(weights["BTC"] + weights["ETH"] <= 0.35 + 1e-12);
@@ -317,10 +310,7 @@ mod tests {
 
     #[test]
     fn target_vol_never_scales_up() {
-        let weights = BTreeMap::from([
-            ("US_EQUITY".to_owned(), 0.2),
-            ("CASH".to_owned(), 0.8),
-        ]);
+        let weights = BTreeMap::from([("US_EQUITY".to_owned(), 0.2), ("CASH".to_owned(), 0.8)]);
         let history = BTreeMap::from([("US_EQUITY".to_owned(), vec![0.0001; 63])]);
         let scaled = scale_to_target_vol(&weights, &history, BaselineConfig::default()).unwrap();
         assert_eq!(scaled["US_EQUITY"], 0.2);

@@ -94,9 +94,7 @@ pub fn compute_stablecoin_system_state(
                 .unwrap_or(&[]),
         )
         .unwrap_or(0.0);
-        let residual = row
-            .circulating_native
-            .map(|supply| chain_sum - supply);
+        let residual = row.circulating_native.map(|supply| chain_sum - supply);
         assets_by_time
             .entry(row.observed_at)
             .or_default()
@@ -206,7 +204,8 @@ pub fn compute_stablecoin_system_state(
             stablecoin_ids: BTreeSet::new(),
         });
         entry.known_at = entry.known_at.max(row.known_at);
-        entry.circulating_native = add_min_count_one(entry.circulating_native, row.circulating_native);
+        entry.circulating_native =
+            add_min_count_one(entry.circulating_native, row.circulating_native);
         entry.market_value_usd = add_min_count_one(entry.market_value_usd, row.market_value_usd);
         entry.stablecoin_ids.insert(value_key(&row.stablecoin_id));
     }
@@ -225,8 +224,12 @@ pub fn compute_stablecoin_system_state(
             .iter()
             .map(|(_, aggregate)| aggregate.market_value_usd.unwrap_or(0.0))
             .sum::<f64>();
-        let chain_hhi = hhi(groups.iter().map(|(_, aggregate)| aggregate.market_value_usd));
-        groups.sort_by(|left, right| descending_optional(left.1.market_value_usd, right.1.market_value_usd));
+        let chain_hhi = hhi(groups
+            .iter()
+            .map(|(_, aggregate)| aggregate.market_value_usd));
+        groups.sort_by(|left, right| {
+            descending_optional(left.1.market_value_usd, right.1.market_value_usd)
+        });
         for (chain, aggregate) in groups {
             chain_state.push(StablecoinChainStateRow {
                 observed_at,
@@ -244,9 +247,9 @@ pub fn compute_stablecoin_system_state(
 
     system_rows.sort_by_key(|row| row.observed_at);
     chain_state.sort_by(|left, right| {
-        left.observed_at.cmp(&right.observed_at).then_with(|| {
-            descending_optional(left.market_value_usd, right.market_value_usd)
-        })
+        left.observed_at
+            .cmp(&right.observed_at)
+            .then_with(|| descending_optional(left.market_value_usd, right.market_value_usd))
     });
     (system_rows, chain_state)
 }

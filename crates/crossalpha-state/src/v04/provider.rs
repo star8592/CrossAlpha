@@ -55,7 +55,11 @@ impl MultiVenueCollector {
         let rows = futures_util::future::join_all(tasks).await;
         let expected: std::collections::BTreeSet<(String, String)> = ASSETS
             .iter()
-            .flat_map(|asset| VENUES.iter().map(move |venue| ((*asset).to_owned(), (*venue).to_owned())))
+            .flat_map(|asset| {
+                VENUES
+                    .iter()
+                    .map(move |venue| ((*asset).to_owned(), (*venue).to_owned()))
+            })
             .collect();
         let actual: std::collections::BTreeSet<(String, String)> = rows
             .iter()
@@ -94,12 +98,28 @@ impl MultiVenueCollector {
 
     async fn binance(&self, asset: &str) -> Result<VenuePayload> {
         let symbol = format!("{asset}USDT");
-        let spot_f = self.get("https://api.binance.com/api/v3/ticker/bookTicker", &[(&"symbol", symbol.as_str())]);
-        let depth_f = self.get("https://fapi.binance.com/fapi/v1/depth", &[(&"symbol", symbol.as_str()), (&"limit", "5")]);
-        let premium_f = self.get("https://fapi.binance.com/fapi/v1/premiumIndex", &[(&"symbol", symbol.as_str())]);
-        let oi_f = self.get("https://fapi.binance.com/fapi/v1/openInterest", &[(&"symbol", symbol.as_str())]);
-        let funding_f = self.get("https://fapi.binance.com/fapi/v1/fundingRate", &[(&"symbol", symbol.as_str()), (&"limit", "2")]);
-        let (spot, depth, premium, oi, funding) = tokio::try_join!(spot_f, depth_f, premium_f, oi_f, funding_f)?;
+        let spot_f = self.get(
+            "https://api.binance.com/api/v3/ticker/bookTicker",
+            &[(&"symbol", symbol.as_str())],
+        );
+        let depth_f = self.get(
+            "https://fapi.binance.com/fapi/v1/depth",
+            &[(&"symbol", symbol.as_str()), (&"limit", "5")],
+        );
+        let premium_f = self.get(
+            "https://fapi.binance.com/fapi/v1/premiumIndex",
+            &[(&"symbol", symbol.as_str())],
+        );
+        let oi_f = self.get(
+            "https://fapi.binance.com/fapi/v1/openInterest",
+            &[(&"symbol", symbol.as_str())],
+        );
+        let funding_f = self.get(
+            "https://fapi.binance.com/fapi/v1/fundingRate",
+            &[(&"symbol", symbol.as_str()), (&"limit", "2")],
+        );
+        let (spot, depth, premium, oi, funding) =
+            tokio::try_join!(spot_f, depth_f, premium_f, oi_f, funding_f)?;
         Ok(VenuePayload {
             venue: "binance".to_owned(),
             asset: asset.to_owned(),
@@ -118,10 +138,22 @@ impl MultiVenueCollector {
     async fn okx(&self, asset: &str) -> Result<VenuePayload> {
         let spot_id = format!("{asset}-USDT");
         let swap_id = format!("{asset}-USDT-SWAP");
-        let spot_f = self.get("https://www.okx.com/api/v5/market/ticker", &[(&"instId", spot_id.as_str())]);
-        let perp_f = self.get("https://www.okx.com/api/v5/market/ticker", &[(&"instId", swap_id.as_str())]);
-        let funding_f = self.get("https://www.okx.com/api/v5/public/funding-rate-history", &[(&"instId", swap_id.as_str()), (&"limit", "2")]);
-        let oi_f = self.get("https://www.okx.com/api/v5/public/open-interest", &[(&"instType", "SWAP"), (&"instId", swap_id.as_str())]);
+        let spot_f = self.get(
+            "https://www.okx.com/api/v5/market/ticker",
+            &[(&"instId", spot_id.as_str())],
+        );
+        let perp_f = self.get(
+            "https://www.okx.com/api/v5/market/ticker",
+            &[(&"instId", swap_id.as_str())],
+        );
+        let funding_f = self.get(
+            "https://www.okx.com/api/v5/public/funding-rate-history",
+            &[(&"instId", swap_id.as_str()), (&"limit", "2")],
+        );
+        let oi_f = self.get(
+            "https://www.okx.com/api/v5/public/open-interest",
+            &[(&"instType", "SWAP"), (&"instId", swap_id.as_str())],
+        );
         let (spot, perp, funding, oi) = tokio::try_join!(spot_f, perp_f, funding_f, oi_f)?;
         Ok(VenuePayload {
             venue: "okx".to_owned(),
@@ -140,9 +172,22 @@ impl MultiVenueCollector {
 
     async fn bybit(&self, asset: &str) -> Result<VenuePayload> {
         let symbol = format!("{asset}USDT");
-        let spot_f = self.get("https://api.bybit.com/v5/market/tickers", &[(&"category", "spot"), (&"symbol", symbol.as_str())]);
-        let perp_f = self.get("https://api.bybit.com/v5/market/tickers", &[(&"category", "linear"), (&"symbol", symbol.as_str())]);
-        let funding_f = self.get("https://api.bybit.com/v5/market/funding/history", &[(&"category", "linear"), (&"symbol", symbol.as_str()), (&"limit", "2")]);
+        let spot_f = self.get(
+            "https://api.bybit.com/v5/market/tickers",
+            &[(&"category", "spot"), (&"symbol", symbol.as_str())],
+        );
+        let perp_f = self.get(
+            "https://api.bybit.com/v5/market/tickers",
+            &[(&"category", "linear"), (&"symbol", symbol.as_str())],
+        );
+        let funding_f = self.get(
+            "https://api.bybit.com/v5/market/funding/history",
+            &[
+                (&"category", "linear"),
+                (&"symbol", symbol.as_str()),
+                (&"limit", "2"),
+            ],
+        );
         let (spot, perp, funding) = tokio::try_join!(spot_f, perp_f, funding_f)?;
         Ok(VenuePayload {
             venue: "bybit".to_owned(),
@@ -174,7 +219,10 @@ impl MultiVenueCollector {
     }
 }
 
-pub fn parse_venue_snapshot(payload: &VenuePayload, known_at: DateTime<Utc>) -> Result<NormalizedVenueRow> {
+pub fn parse_venue_snapshot(
+    payload: &VenuePayload,
+    known_at: DateTime<Utc>,
+) -> Result<NormalizedVenueRow> {
     if !VENUES.contains(&payload.venue.as_str()) || !ASSETS.contains(&payload.asset.as_str()) {
         bail!("unsupported State V0.4 venue/asset");
     }
@@ -199,15 +247,22 @@ pub fn parse_venue_snapshot(payload: &VenuePayload, known_at: DateTime<Utc>) -> 
             mark = number(payload.premium.get("markPrice"));
             index = number(payload.premium.get("indexPrice"));
             let funding = funding_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) = settled_funding(&funding, "fundingRate", "fundingTime");
+            (settled_rate, settled_interval, settled_time) =
+                settled_funding(&funding, "fundingRate", "fundingTime");
             let perp_mid = mid(perp_bid, perp_ask);
-            oi_usd = number(payload.open_interest.get("openInterest")).zip(perp_mid).map(|(base, price)| base * price);
-            source_times.extend([
-                payload.premium.get("time").cloned(),
-                payload.open_interest.get("time").cloned(),
-                payload.perp_depth.get("E").cloned(),
-                payload.perp_depth.get("T").cloned(),
-            ].into_iter().flatten());
+            oi_usd = number(payload.open_interest.get("openInterest"))
+                .zip(perp_mid)
+                .map(|(base, price)| base * price);
+            source_times.extend(
+                [
+                    payload.premium.get("time").cloned(),
+                    payload.open_interest.get("time").cloned(),
+                    payload.perp_depth.get("E").cloned(),
+                    payload.perp_depth.get("T").cloned(),
+                ]
+                .into_iter()
+                .flatten(),
+            );
         }
         "okx" => {
             let spot = okx_item(&payload.spot);
@@ -218,9 +273,18 @@ pub fn parse_venue_snapshot(payload: &VenuePayload, known_at: DateTime<Utc>) -> 
             perp_bid = number(perp.get("bidPx"));
             perp_ask = number(perp.get("askPx"));
             let funding = okx_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) = settled_funding(&funding, "realizedRate", "fundingTime");
+            (settled_rate, settled_interval, settled_time) =
+                settled_funding(&funding, "realizedRate", "fundingTime");
             oi_usd = number(oi.get("oiUsd"));
-            source_times.extend([spot.get("ts").cloned(), perp.get("ts").cloned(), oi.get("ts").cloned()].into_iter().flatten());
+            source_times.extend(
+                [
+                    spot.get("ts").cloned(),
+                    perp.get("ts").cloned(),
+                    oi.get("ts").cloned(),
+                ]
+                .into_iter()
+                .flatten(),
+            );
         }
         "bybit" => {
             let (spot, spot_time) = bybit_item(&payload.spot);
@@ -232,7 +296,8 @@ pub fn parse_venue_snapshot(payload: &VenuePayload, known_at: DateTime<Utc>) -> 
             mark = number(perp.get("markPrice"));
             index = number(perp.get("indexPrice"));
             let funding = bybit_rows(&payload.funding_history);
-            (settled_rate, settled_interval, settled_time) = settled_funding(&funding, "fundingRate", "fundingRateTimestamp");
+            (settled_rate, settled_interval, settled_time) =
+                settled_funding(&funding, "fundingRate", "fundingRateTimestamp");
             oi_usd = number(perp.get("openInterestValue"));
             source_times.extend([spot_time, perp_time].into_iter().flatten());
         }
@@ -289,9 +354,8 @@ fn number(value: Option<&Value>) -> Option<f64> {
 }
 
 fn mid(bid: Option<f64>, ask: Option<f64>) -> Option<f64> {
-    bid.zip(ask).and_then(|(bid, ask)| {
-        (bid > 0.0 && ask > 0.0 && ask >= bid).then_some((bid + ask) / 2.0)
-    })
+    bid.zip(ask)
+        .and_then(|(bid, ask)| (bid > 0.0 && ask > 0.0 && ask >= bid).then_some((bid + ask) / 2.0))
 }
 
 fn spread_bps(bid: Option<f64>, ask: Option<f64>) -> Option<f64> {
@@ -319,7 +383,11 @@ fn funding_rows(value: &Value) -> Vec<Value> {
     value.as_array().cloned().unwrap_or_default()
 }
 
-fn settled_funding(rows: &[Value], rate_field: &str, time_field: &str) -> (Option<f64>, Option<f64>, Option<String>) {
+fn settled_funding(
+    rows: &[Value],
+    rate_field: &str,
+    time_field: &str,
+) -> (Option<f64>, Option<f64>, Option<String>) {
     let mut clean: Vec<(i64, &Value)> = rows
         .iter()
         .filter_map(|row| {
@@ -354,7 +422,9 @@ fn parse_source_time(value: &Value) -> Option<DateTime<Utc>> {
             if let Ok(milliseconds) = text.parse::<i64>() {
                 DateTime::<Utc>::from_timestamp_millis(milliseconds)
             } else {
-                DateTime::parse_from_rfc3339(text).ok().map(|value| value.with_timezone(&Utc))
+                DateTime::parse_from_rfc3339(text)
+                    .ok()
+                    .map(|value| value.with_timezone(&Utc))
             }
         }
         _ => None,
@@ -367,14 +437,23 @@ fn okx_item(value: &Value) -> &serde_json::Map<String, Value> {
     if value.get("code").and_then(Value::as_str) != Some("0") {
         return empty;
     }
-    value.get("data").and_then(Value::as_array).and_then(|rows| rows.first()).and_then(Value::as_object).unwrap_or(empty)
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .and_then(Value::as_object)
+        .unwrap_or(empty)
 }
 
 fn okx_rows(value: &Value) -> Vec<Value> {
     if value.get("code").and_then(Value::as_str) != Some("0") {
         return Vec::new();
     }
-    value.get("data").and_then(Value::as_array).cloned().unwrap_or_default()
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn bybit_item(value: &Value) -> (&serde_json::Map<String, Value>, Option<Value>) {
@@ -383,7 +462,13 @@ fn bybit_item(value: &Value) -> (&serde_json::Map<String, Value>, Option<Value>)
     if value.get("retCode").and_then(as_i64) != Some(0) {
         return (empty, None);
     }
-    let item = value.get("result").and_then(|result| result.get("list")).and_then(Value::as_array).and_then(|rows| rows.first()).and_then(Value::as_object).unwrap_or(empty);
+    let item = value
+        .get("result")
+        .and_then(|result| result.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .and_then(Value::as_object)
+        .unwrap_or(empty);
     (item, value.get("time").cloned())
 }
 
@@ -391,7 +476,12 @@ fn bybit_rows(value: &Value) -> Vec<Value> {
     if value.get("retCode").and_then(as_i64) != Some(0) {
         return Vec::new();
     }
-    value.get("result").and_then(|result| result.get("list")).and_then(Value::as_array).cloned().unwrap_or_default()
+    value
+        .get("result")
+        .and_then(|result| result.get("list"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn as_i64(value: &Value) -> Option<i64> {
@@ -404,7 +494,11 @@ fn as_i64(value: &Value) -> Option<i64> {
 
 fn error_category(error: &anyhow::Error) -> String {
     let text = format!("{error:#}");
-    for category in ["VenueTransportError", "VenueHttpStatusError", "VenueJsonDecodeError"] {
+    for category in [
+        "VenueTransportError",
+        "VenueHttpStatusError",
+        "VenueJsonDecodeError",
+    ] {
         if text.contains(category) {
             return category.to_owned();
         }

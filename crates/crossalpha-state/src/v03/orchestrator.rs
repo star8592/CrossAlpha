@@ -20,16 +20,9 @@ pub async fn freeze_native(context: &StateRuntimeContext) -> Result<Value> {
     if !config.ok {
         bail!("STATE V0.3 FREEZE REFUSED: strict config consistency failed");
     }
-    let preflight = v03_preflight::run_preflight(
-        context.http_timeout,
-        context.evm_rpc_url.as_deref(),
-    )
-    .await?;
-    let freeze = write_legacy_v1_freeze(
-        &context.data_root,
-        preflight.finalized_block,
-        Utc::now(),
-    )?;
+    let preflight =
+        v03_preflight::run_preflight(context.http_timeout, context.evm_rpc_url.as_deref()).await?;
+    let freeze = write_legacy_v1_freeze(&context.data_root, preflight.finalized_block, Utc::now())?;
     let binding = write_runtime_binding(&context.data_root, Utc::now())?;
     Ok(json!({
         "protocol": "CROSSALPHA_STATE_V0_3_NATIVE_FREEZE",

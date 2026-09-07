@@ -151,10 +151,19 @@ fn implementation_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         ("state_v03", "src/crossalpha/state/v03.py"),
         ("state_v03_rpc", "src/crossalpha/state/v03_rpc.py"),
         ("state_v03_logs", "src/crossalpha/state/v03_logs.py"),
-        ("state_v03_preflight", "src/crossalpha/state/v03_preflight.py"),
+        (
+            "state_v03_preflight",
+            "src/crossalpha/state/v03_preflight.py",
+        ),
         ("state_v03_cycle", "src/crossalpha/state/v03_cycle.py"),
-        ("state_v03_watchlist", "src/crossalpha/state/v03_watchlist.py"),
-        ("state_v03_prospective", "src/crossalpha/state/v03_prospective.py"),
+        (
+            "state_v03_watchlist",
+            "src/crossalpha/state/v03_watchlist.py",
+        ),
+        (
+            "state_v03_prospective",
+            "src/crossalpha/state/v03_prospective.py",
+        ),
         ("state_v03_config", "src/crossalpha/state/v03_config.py"),
         ("config", "config/state_v03.yaml"),
     ];

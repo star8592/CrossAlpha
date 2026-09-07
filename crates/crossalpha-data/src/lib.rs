@@ -2,12 +2,13 @@ pub mod free_core;
 pub mod free_returns;
 
 pub use free_core::{
-    CashRateRow, FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FRED_CASH_SERIES,
-    FreeCoreProvider, FreeCoreRange, ProxyDailyRow, parse_binance_payload, parse_fred_payload,
-    parse_tiingo_payload, validate_fred_key, validate_tiingo_token,
-    write_free_core_fixture_canonical,
+    CashRateRow, FRED_CASH_SERIES, FREE_CRYPTO_PROXIES, FREE_TRADFI_PROXIES, FreeCoreProvider,
+    FreeCoreRange, ProxyDailyRow, parse_binance_payload, parse_fred_payload, parse_tiingo_payload,
+    validate_fred_key, validate_tiingo_token, write_free_core_fixture_canonical,
 };
-pub use free_returns::{AssetReturnRow, build_free_core_returns, canonical_paths, read_asset_returns};
+pub use free_returns::{
+    AssetReturnRow, build_free_core_returns, canonical_paths, read_asset_returns,
+};
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -110,7 +111,11 @@ pub fn normalize_parent_futures_daily(
     if result.is_empty() {
         bail!("no outright futures remained after definition join");
     }
-    result.sort_by(|left, right| left.date.cmp(&right.date).then(left.contract.cmp(&right.contract)));
+    result.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then(left.contract.cmp(&right.contract))
+    });
     let mut normalized_seen = BTreeSet::new();
     for row in &result {
         if !normalized_seen.insert((row.date, row.contract.clone())) {
@@ -136,7 +141,11 @@ pub fn assert_stable_expiration(rows: &[NormalizedFutureBar]) -> Result<()> {
 }
 
 fn class_code(value: &str) -> &str {
-    if value.ends_with(".FUTURE") { "F" } else { value }
+    if value.ends_with(".FUTURE") {
+        "F"
+    } else {
+        value
+    }
 }
 
 #[cfg(test)]

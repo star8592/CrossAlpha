@@ -70,9 +70,16 @@ impl NativeStateV04 {
         let raw = serde_json::to_value(yaml)?;
         let mut checks = BTreeMap::new();
         let safe_provider = repo_root().join("src/crossalpha/state/v04_safe_provider.py");
-        let safe_hash = safe_provider.is_file().then(|| sha256_file(&safe_provider)).transpose()?;
+        let safe_hash = safe_provider
+            .is_file()
+            .then(|| sha256_file(&safe_provider))
+            .transpose()?;
 
-        check(&mut checks, "protocol", string_at(&raw, "/protocol") == Some(PROTOCOL));
+        check(
+            &mut checks,
+            "protocol",
+            string_at(&raw, "/protocol") == Some(PROTOCOL),
+        );
         check(&mut checks, "mode", string_at(&raw, "/mode") == Some(MODE));
         check(
             &mut checks,
@@ -138,8 +145,7 @@ impl NativeStateV04 {
         check(
             &mut checks,
             "minimum_venues",
-            integer_at(&raw, "/universe/minimum_valid_venues")
-                == Some(MINIMUM_VALID_VENUES as i64),
+            integer_at(&raw, "/universe/minimum_valid_venues") == Some(MINIMUM_VALID_VENUES as i64),
         );
         check(
             &mut checks,
@@ -195,8 +201,7 @@ impl NativeStateV04 {
             &mut checks,
             "binance_funding_fields",
             string_at(&raw, "/venues/binance/settled_rate_field") == Some("fundingRate")
-                && string_at(&raw, "/venues/binance/settlement_time_field")
-                    == Some("fundingTime"),
+                && string_at(&raw, "/venues/binance/settlement_time_field") == Some("fundingTime"),
         );
         check(
             &mut checks,
@@ -208,8 +213,7 @@ impl NativeStateV04 {
             &mut checks,
             "okx_funding_fields",
             string_at(&raw, "/venues/okx/settled_rate_field") == Some("realizedRate")
-                && string_at(&raw, "/venues/okx/settlement_time_field")
-                    == Some("fundingTime"),
+                && string_at(&raw, "/venues/okx/settlement_time_field") == Some("fundingTime"),
         );
         check(
             &mut checks,
@@ -291,7 +295,11 @@ pub fn compute_market_mechanics(
     for asset in ASSETS {
         let complete: Vec<&NormalizedVenueRow> = VENUES
             .iter()
-            .filter_map(|venue| latest.get(&(asset.to_owned(), (*venue).to_owned())).copied())
+            .filter_map(|venue| {
+                latest
+                    .get(&(asset.to_owned(), (*venue).to_owned()))
+                    .copied()
+            })
             .filter(|row| {
                 row.spot_mid.is_some_and(|value| value > 0.0)
                     && row.perp_mid.is_some_and(|value| value > 0.0)
@@ -311,7 +319,10 @@ pub fn compute_market_mechanics(
                     && row.funding_rate_8h.is_some()
             })
             .collect();
-        let oi_values: Vec<f64> = complete.iter().filter_map(|row| row.open_interest_usd).collect();
+        let oi_values: Vec<f64> = complete
+            .iter()
+            .filter_map(|row| row.open_interest_usd)
+            .collect();
         let total_oi = (!oi_values.is_empty()).then(|| oi_values.iter().sum::<f64>());
         let mut venues = Map::new();
         for row in &complete {
@@ -433,7 +444,10 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
 }
 
 fn range(values: Vec<f64>) -> Option<f64> {
-    let values: Vec<f64> = values.into_iter().filter(|value| value.is_finite()).collect();
+    let values: Vec<f64> = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect();
     if values.len() < 2 {
         return None;
     }
@@ -460,7 +474,10 @@ fn range_bps(values: Vec<f64>) -> Option<f64> {
 }
 
 fn population_std(values: Vec<f64>) -> Option<f64> {
-    let values: Vec<f64> = values.into_iter().filter(|value| value.is_finite()).collect();
+    let values: Vec<f64> = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect();
     if values.len() < 2 {
         return None;
     }

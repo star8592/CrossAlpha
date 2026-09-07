@@ -1,7 +1,7 @@
 use crate::v03::{
-    AAVE_V3_ETHEREUM_CORE_POOL, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
-    BLOCKSCOUT_ETHEREUM_API_URL, BLOCKSCOUT_MAX_LOG_RESULTS, BORROW_EVENT_TOPIC0,
-    FINALITY_LAG_BLOCKS, GET_USER_ACCOUNT_DATA_SELECTOR, ZERO_COST_PUBLIC_RPC_URLS,
+    AAVE_V3_ETHEREUM_CORE_POOL, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, BLOCKSCOUT_ETHEREUM_API_URL,
+    BLOCKSCOUT_MAX_LOG_RESULTS, BORROW_EVENT_TOPIC0, FINALITY_LAG_BLOCKS,
+    GET_USER_ACCOUNT_DATA_SELECTOR, ZERO_COST_PUBLIC_RPC_URLS,
 };
 use crate::v03_census::{
     AccountDataRow, decode_get_user_account_data, encode_get_user_account_data, normalize_address,
@@ -91,28 +91,27 @@ impl StateRpcClient {
         let mut result = BTreeMap::new();
         for (chunk_index, chunk) in normalized.chunks(self.batch_size).enumerate() {
             let chunk_rows = match self
-                .batch_account_calls(
-                    chunk,
-                    block_number,
-                    chunk_index * self.batch_size + 1,
-                )
+                .batch_account_calls(chunk, block_number, chunk_index * self.batch_size + 1)
                 .await
             {
                 Ok(rows) => rows,
                 Err(_) => self.sequential_account_calls(chunk, block_number).await?,
             };
             for address in chunk {
-                let row = chunk_rows.get(address).cloned().unwrap_or_else(|| AccountDataRow {
-                    address: address.clone(),
-                    success: false,
-                    total_collateral_usd: None,
-                    total_debt_usd: None,
-                    available_borrows_usd: None,
-                    current_liquidation_threshold_pct: None,
-                    ltv_pct: None,
-                    health_factor: None,
-                    error: Some("missing_json_rpc_batch_response".to_owned()),
-                });
+                let row = chunk_rows
+                    .get(address)
+                    .cloned()
+                    .unwrap_or_else(|| AccountDataRow {
+                        address: address.clone(),
+                        success: false,
+                        total_collateral_usd: None,
+                        total_debt_usd: None,
+                        available_borrows_usd: None,
+                        current_liquidation_threshold_pct: None,
+                        ltv_pct: None,
+                        health_factor: None,
+                        error: Some("missing_json_rpc_batch_response".to_owned()),
+                    });
                 result.insert(address.clone(), row);
             }
         }
@@ -205,7 +204,10 @@ impl StateRpcClient {
                         rows.insert(address.clone(), decode_row(address, raw));
                     }
                     None => {
-                        rows.insert(address.clone(), failed_row(address, "eth_call_result_not_hex"));
+                        rows.insert(
+                            address.clone(),
+                            failed_row(address, "eth_call_result_not_hex"),
+                        );
                     }
                 },
                 Err(_) => {
@@ -282,10 +284,7 @@ pub fn resolve_rpc_candidates(configured: Option<&str>) -> Vec<RpcCandidate> {
     result
 }
 
-pub async fn select_state_rpc(
-    http: &Client,
-    configured: Option<&str>,
-) -> Result<SelectedStateRpc> {
+pub async fn select_state_rpc(http: &Client, configured: Option<&str>) -> Result<SelectedStateRpc> {
     let mut failures = BTreeMap::new();
     for candidate in resolve_rpc_candidates(configured) {
         let client = StateRpcClient::new(
@@ -304,7 +303,10 @@ pub async fn select_state_rpc(
                 bail!("finalized block timestamp is in the future");
             }
             let probe = client
-                .account_data(&[AAVE_V3_ETHEREUM_CORE_POOL.to_ascii_lowercase()], finalized_block)
+                .account_data(
+                    &[AAVE_V3_ETHEREUM_CORE_POOL.to_ascii_lowercase()],
+                    finalized_block,
+                )
                 .await?;
             if probe.first().is_none_or(|row| !row.success) {
                 bail!("getUserAccountData fixed-block probe failed");
@@ -369,10 +371,16 @@ fn borrow_logs_complete_boxed<'a>(
             .and_then(Value::as_array)
             .context("Blockscout indexed-log query failed")?;
         if result.len() < BLOCKSCOUT_MAX_LOG_RESULTS as usize {
-            return Ok(result.iter().filter(|item| item.is_object()).cloned().collect());
+            return Ok(result
+                .iter()
+                .filter(|item| item.is_object())
+                .cloned()
+                .collect());
         }
         if from_block == to_block {
-            bail!("Blockscout single-block Borrow log count reached the provider result limit; completeness cannot be proven");
+            bail!(
+                "Blockscout single-block Borrow log count reached the provider result limit; completeness cannot be proven"
+            );
         }
         let midpoint = (from_block + to_block) / 2;
         let mut left = borrow_logs_complete_boxed(http, from_block, midpoint).await?;
@@ -405,8 +413,10 @@ fn adaptive_borrow_logs_boxed<'a>(
                     return Err(error);
                 }
                 let midpoint = (start + end) / 2;
-                let mut left = adaptive_borrow_logs_boxed(http, start, midpoint, minimum_span).await?;
-                let right = adaptive_borrow_logs_boxed(http, midpoint + 1, end, minimum_span).await?;
+                let mut left =
+                    adaptive_borrow_logs_boxed(http, start, midpoint, minimum_span).await?;
+                let right =
+                    adaptive_borrow_logs_boxed(http, midpoint + 1, end, minimum_span).await?;
                 left.extend(right);
                 Ok(left)
             }

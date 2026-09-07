@@ -1,7 +1,7 @@
 use crate::canonical::{CanonicalSource, load_envelope};
 use crate::{
-    CANONICAL_STABLECOIN_SCHEMA_VERSION, parse_meta_and_asset_contexts,
-    parse_stablecoin_snapshot, write_hyperliquid_parquet, write_stablecoin_parquet,
+    CANONICAL_STABLECOIN_SCHEMA_VERSION, parse_meta_and_asset_contexts, parse_stablecoin_snapshot,
+    write_hyperliquid_parquet, write_stablecoin_parquet,
 };
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Int64Array};
@@ -157,10 +157,7 @@ pub fn hyperliquid_path(output_root: &Path, record: &RawSnapshotManifest) -> Pat
         ))
 }
 
-pub fn stablecoin_paths(
-    output_root: &Path,
-    record: &RawSnapshotManifest,
-) -> (PathBuf, PathBuf) {
+pub fn stablecoin_paths(output_root: &Path, record: &RawSnapshotManifest) -> (PathBuf, PathBuf) {
     let observed = record.observed_at;
     let relative = PathBuf::from(format!("year={:04}", observed.year()))
         .join(format!("month={:02}", observed.month()))

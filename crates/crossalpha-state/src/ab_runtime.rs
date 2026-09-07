@@ -1,7 +1,11 @@
-use crate::shadow_v01::{MODE as SHADOW_MODE, PROTOCOL as SHADOW_PROTOCOL, build_latest_shadow_state};
+use crate::shadow_v01::{
+    MODE as SHADOW_MODE, PROTOCOL as SHADOW_PROTOCOL, build_latest_shadow_state,
+};
 use anyhow::{Context, Result, bail};
-use chrono::{Datelike, DateTime, Duration, NaiveDate, Utc};
-use crossalpha_research::paper::{ALL_ASSETS, ONE_WAY_COST_BPS, RISK_ASSETS, apply_shadow_multiplier};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use crossalpha_research::paper::{
+    ALL_ASSETS, ONE_WAY_COST_BPS, RISK_ASSETS, apply_shadow_multiplier,
+};
 use crossalpha_research::paper_runtime::{
     freeze_path as paper_freeze_path, payload_hash, sha256_file, verify_seal as verify_core_seal,
 };
@@ -88,7 +92,11 @@ pub fn write_runtime_binding(data_root: &Path, bound_at: DateTime<Utc>) -> Resul
         return Ok(serde_json::from_reader(File::open(path)?)?);
     }
     let value = runtime_binding_preview(data_root, bound_at)?;
-    if value.get("production_binding_eligible").and_then(Value::as_bool) != Some(true) {
+    if value
+        .get("production_binding_eligible")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
         bail!("State A/B Rust runtime binding refused: Cargo.lock must exist and be tracked");
     }
     write_atomic_json(&path, &value)?;
@@ -109,11 +117,17 @@ pub fn verify_runtime_binding_file(path: &Path) -> Result<bool> {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
-        .context("State A/B binding path is not under <data_root>/research/free_v01/state_ab_v01")?;
+        .context(
+            "State A/B binding path is not under <data_root>/research/free_v01/state_ab_v01",
+        )?;
     Ok(runtime_binding_preview(data_root, bound_at)? == current)
 }
 
-pub fn create_snapshot(data_root: &Path, effective: NaiveDate, now: DateTime<Utc>) -> Result<Value> {
+pub fn create_snapshot(
+    data_root: &Path,
+    effective: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<Value> {
     require_binding(data_root)?;
     let freeze = load_legacy_freeze(data_root)?;
     if effective != now.date_naive() {
@@ -132,7 +146,10 @@ pub fn create_snapshot(data_root: &Path, effective: NaiveDate, now: DateTime<Utc
     }
     let a_path = core_snapshot_path(data_root, effective);
     if !a_path.exists() {
-        bail!("State A/B snapshot requires same-date Frozen B3 snapshot: {}", a_path.display());
+        bail!(
+            "State A/B snapshot requires same-date Frozen B3 snapshot: {}",
+            a_path.display()
+        );
     }
     let a_snapshot: Value = serde_json::from_reader(File::open(&a_path)?)?;
     if !verify_core_seal(&a_snapshot)? {
@@ -262,10 +279,10 @@ pub fn mark(data_root: &Path, end: NaiveDate, now: DateTime<Utc>) -> Result<Valu
     let path = mark_path(data_root, target);
     if path.exists() {
         let mut existing = read_verified(&path)?;
-        existing
-            .as_object_mut()
-            .expect("mark is object")
-            .insert("status".to_owned(), Value::String("already_marked".to_owned()));
+        existing.as_object_mut().expect("mark is object").insert(
+            "status".to_owned(),
+            Value::String("already_marked".to_owned()),
+        );
         existing
             .as_object_mut()
             .expect("mark is object")
@@ -289,7 +306,10 @@ pub fn mark(data_root: &Path, end: NaiveDate, now: DateTime<Utc>) -> Result<Valu
 
     let a_path = core_mark_path(data_root, target);
     if !a_path.exists() {
-        bail!("State A/B mark requires same-date Frozen B3 mark: {}", a_path.display());
+        bail!(
+            "State A/B mark requires same-date Frozen B3 mark: {}",
+            a_path.display()
+        );
     }
     let a_mark: Value = serde_json::from_reader(File::open(&a_path)?)?;
     if !verify_core_seal(&a_mark)? {
@@ -309,7 +329,10 @@ pub fn mark(data_root: &Path, end: NaiveDate, now: DateTime<Utc>) -> Result<Valu
     let (previous_weights, previous_equity) = if let Some(previous) = marks.last() {
         (
             weights_from(previous, "weights")?,
-            previous.get("equity_after").and_then(Value::as_f64).unwrap_or(1.0),
+            previous
+                .get("equity_after")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0),
         )
     } else {
         let mut cash = ALL_ASSETS
@@ -340,7 +363,10 @@ pub fn mark(data_root: &Path, end: NaiveDate, now: DateTime<Utc>) -> Result<Valu
     let net_return = gross_return - cost;
     let cash_return = asset_returns.get("CASH").copied().unwrap_or(0.0);
     let equity_after = previous_equity * (1.0 + net_return);
-    let a_net_return = a_mark.get("net_return").and_then(Value::as_f64).unwrap_or(0.0);
+    let a_net_return = a_mark
+        .get("net_return")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let mut payload = json!({
         "schema_version":1,
         "protocol":AB_PROTOCOL,
@@ -416,11 +442,19 @@ pub fn integrity(data_root: &Path) -> Result<Value> {
     );
     checks.insert(
         "snapshots_are_mondays".to_owned(),
-        Value::Bool(snapshot_dates.iter().all(|day| day.weekday().num_days_from_monday() == 0)),
+        Value::Bool(
+            snapshot_dates
+                .iter()
+                .all(|day| day.weekday().num_days_from_monday() == 0),
+        ),
     );
     checks.insert(
         "mark_dates_contiguous".to_owned(),
-        Value::Bool(mark_dates.windows(2).all(|pair| pair[1] - pair[0] == Duration::days(1))),
+        Value::Bool(
+            mark_dates
+                .windows(2)
+                .all(|pair| pair[1] - pair[0] == Duration::days(1)),
+        ),
     );
     checks.insert(
         "freeze_links".to_owned(),
@@ -434,19 +468,23 @@ pub fn integrity(data_root: &Path) -> Result<Value> {
     );
     checks.insert(
         "multipliers_frozen".to_owned(),
-        Value::Bool(
-            snapshots.iter().chain(marks.iter()).all(|row| {
-                row.get("shadow_risk_multiplier")
-                    .and_then(Value::as_f64)
-                    .is_some_and(|value| ALLOWED_MULTIPLIERS.contains(&value))
-            }),
-        ),
+        Value::Bool(snapshots.iter().chain(marks.iter()).all(|row| {
+            row.get("shadow_risk_multiplier")
+                .and_then(Value::as_f64)
+                .is_some_and(|value| ALLOWED_MULTIPLIERS.contains(&value))
+        })),
     );
     checks.insert(
         "B_never_increases_risk".to_owned(),
         Value::Bool(snapshots.iter().all(|row| {
-            row.get("b_risk_gross").and_then(Value::as_f64).unwrap_or(2.0)
-                <= row.get("a_risk_gross").and_then(Value::as_f64).unwrap_or(1.0) + 1e-12
+            row.get("b_risk_gross")
+                .and_then(Value::as_f64)
+                .unwrap_or(2.0)
+                <= row
+                    .get("a_risk_gross")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(1.0)
+                    + 1e-12
         })),
     );
     let ok = checks.values().all(|value| value.as_bool() == Some(true));
@@ -484,7 +522,10 @@ fn seal_in_place(value: &mut Value) -> Result<()> {
 fn read_verified(path: &Path) -> Result<Value> {
     let value: Value = serde_json::from_reader(File::open(path)?)?;
     if !verify_seal(&value)? {
-        bail!("State A/B immutable record failed seal verification: {}", path.display());
+        bail!(
+            "State A/B immutable record failed seal verification: {}",
+            path.display()
+        );
     }
     Ok(value)
 }
@@ -539,10 +580,10 @@ fn parse_date(value: Option<&Value>) -> Result<NaiveDate> {
 }
 
 fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
-    Ok(DateTime::parse_from_rfc3339(
-        value.and_then(Value::as_str).context("time missing")?,
-    )?
-    .with_timezone(&Utc))
+    Ok(
+        DateTime::parse_from_rfc3339(value.and_then(Value::as_str).context("time missing")?)?
+            .with_timezone(&Utc),
+    )
 }
 
 fn load_records(root: &Path, name_prefix: &str) -> Result<Vec<Value>> {
@@ -637,17 +678,35 @@ fn native_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
         ("storage_recent", "crates/crossalpha-storage/src/recent.rs"),
         ("features_cargo", "crates/crossalpha-features/Cargo.toml"),
         ("features_lib", "crates/crossalpha-features/src/lib.rs"),
-        ("features_hyperliquid", "crates/crossalpha-features/src/canonical/hyperliquid.rs"),
-        ("features_stablecoins", "crates/crossalpha-features/src/canonical/stablecoins.rs"),
-        ("features_market_state", "crates/crossalpha-features/src/market_state.rs"),
-        ("features_stablecoin_state", "crates/crossalpha-features/src/stablecoin_state.rs"),
-        ("features_recent", "crates/crossalpha-features/src/recent_features.rs"),
+        (
+            "features_hyperliquid",
+            "crates/crossalpha-features/src/canonical/hyperliquid.rs",
+        ),
+        (
+            "features_stablecoins",
+            "crates/crossalpha-features/src/canonical/stablecoins.rs",
+        ),
+        (
+            "features_market_state",
+            "crates/crossalpha-features/src/market_state.rs",
+        ),
+        (
+            "features_stablecoin_state",
+            "crates/crossalpha-features/src/stablecoin_state.rs",
+        ),
+        (
+            "features_recent",
+            "crates/crossalpha-features/src/recent_features.rs",
+        ),
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("shadow_v01", "crates/crossalpha-state/src/shadow_v01.rs"),
         ("ab_runtime", "crates/crossalpha-state/src/ab_runtime.rs"),
         ("research_cargo", "crates/crossalpha-research/Cargo.toml"),
         ("paper_kernel", "crates/crossalpha-research/src/paper.rs"),
-        ("paper_runtime", "crates/crossalpha-research/src/paper_runtime.rs"),
+        (
+            "paper_runtime",
+            "crates/crossalpha-research/src/paper_runtime.rs",
+        ),
         ("ab_cli", "crates/crossalpha-cli/src/bin/ab.rs"),
         ("state_config", "config/state_shadow_v01.yaml"),
         ("ab_config", "config/state_ab_v01.yaml"),

@@ -150,10 +150,7 @@ impl AaveV02Client {
                         u64::from_str_radix(raw_timestamp.trim_start_matches("0x"), 16)
                     && let Some(dt) = Utc.timestamp_opt(seconds as i64, 0).single()
                 {
-                    row.insert(
-                        "blockTimestamp".to_owned(),
-                        Value::String(dt.to_rfc3339()),
-                    );
+                    row.insert("blockTimestamp".to_owned(), Value::String(dt.to_rfc3339()));
                 }
             }
             enriched.push(Value::Object(row));

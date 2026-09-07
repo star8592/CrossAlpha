@@ -27,7 +27,10 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
     let collected_at = Utc::now();
     let payloads = collector.collect().await?;
     if payloads.len() != 6 {
-        bail!("State V0.4 expected 6 venue/asset slots, got {}", payloads.len());
+        bail!(
+            "State V0.4 expected 6 venue/asset slots, got {}",
+            payloads.len()
+        );
     }
 
     let mut normalized = Vec::with_capacity(6);
@@ -76,7 +79,11 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
         }
         normalized.push(row);
     }
-    normalized.sort_by(|left, right| left.asset.cmp(&right.asset).then(left.venue.cmp(&right.venue)));
+    normalized.sort_by(|left, right| {
+        left.asset
+            .cmp(&right.asset)
+            .then(left.venue.cmp(&right.venue))
+    });
     let generated = Utc::now();
     let report = compute_market_mechanics(&normalized, generated, MAXIMUM_SNAPSHOT_AGE_SECONDS);
     if report.get("data_confidence").and_then(Value::as_str) == Some("INSUFFICIENT") {
@@ -196,7 +203,11 @@ mod tests {
     fn snapshot_names_follow_python_contract() {
         let time = Utc.with_ymd_and_hms(2026, 9, 6, 12, 34, 56).unwrap();
         let (venue, mechanics) = snapshot_paths(Path::new("/tmp/data"), time);
-        assert!(venue.to_string_lossy().contains("year=2026/month=09/day=06"));
+        assert!(
+            venue
+                .to_string_lossy()
+                .contains("year=2026/month=09/day=06")
+        );
         assert!(
             venue
                 .file_name()

@@ -57,11 +57,9 @@ pub fn load_recent_daily_manifests(data_root: &Path, days: usize) -> Result<Rece
             }
             match serde_json::from_str::<RawSnapshotManifest>(&line) {
                 Ok(record) => records.push(record),
-                Err(error) => errors.push(format!(
-                    "{}: line {}: {error}",
-                    path.display(),
-                    index + 1
-                )),
+                Err(error) => {
+                    errors.push(format!("{}: line {}: {error}", path.display(), index + 1))
+                }
             }
         }
     }

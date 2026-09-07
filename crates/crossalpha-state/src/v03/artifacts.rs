@@ -83,11 +83,7 @@ pub fn write_account_rows(path: &Path, rows: &[AccountDataRow]) -> Result<()> {
         Field::new("total_collateral_usd", DataType::Float64, true),
         Field::new("total_debt_usd", DataType::Float64, true),
         Field::new("available_borrows_usd", DataType::Float64, true),
-        Field::new(
-            "current_liquidation_threshold_pct",
-            DataType::Float64,
-            true,
-        ),
+        Field::new("current_liquidation_threshold_pct", DataType::Float64, true),
         Field::new("ltv_pct", DataType::Float64, true),
         Field::new("health_factor", DataType::Float64, true),
     ];

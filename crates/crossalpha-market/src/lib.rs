@@ -54,7 +54,10 @@ pub fn assess_venue_quality(
         .filter(|row| row.collection_error.is_none())
         .filter(|row| row.known_at <= generated_at && row.observed_at <= row.known_at)
         .filter(|row| generated_at - row.observed_at <= Duration::seconds(maximum_age_seconds))
-        .filter(|row| row.spread_bps.is_some_and(|value| value.is_finite() && value >= 0.0))
+        .filter(|row| {
+            row.spread_bps
+                .is_some_and(|value| value.is_finite() && value >= 0.0)
+        })
         .collect();
     valid.sort_by(|left, right| {
         left.spread_bps

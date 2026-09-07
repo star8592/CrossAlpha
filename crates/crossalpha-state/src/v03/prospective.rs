@@ -79,7 +79,9 @@ pub fn write_full_census_observation(
         .and_then(Value::as_u64)
         .context("State V0.3 freeze minimum_eligible_block missing")?;
     if block_number < minimum_block {
-        bail!("prospective census block predates the frozen minimum eligible block; backfill refused");
+        bail!(
+            "prospective census block predates the frozen minimum eligible block; backfill refused"
+        );
     }
 
     let payload = json!({
@@ -117,7 +119,10 @@ pub fn write_full_census_observation(
     if path.exists() {
         let existing: Value = serde_json::from_reader(File::open(&path)?)?;
         if !verify_seal(&existing)? {
-            bail!("existing block record failed seal verification: {}", path.display());
+            bail!(
+                "existing block record failed seal verification: {}",
+                path.display()
+            );
         }
         for key in [
             "summary_sha256",
@@ -127,7 +132,9 @@ pub fn write_full_census_observation(
             "rust_runtime_binding_record_sha256",
         ] {
             if existing.get(key) != payload.get(key) {
-                bail!("STATE_V03_BLOCK_COLLISION: same finalized block cannot be relabeled with different {key}");
+                bail!(
+                    "STATE_V03_BLOCK_COLLISION: same finalized block cannot be relabeled with different {key}"
+                );
             }
         }
         return Ok(merge_status(existing, "already_exists", &path));
@@ -179,7 +186,8 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
         let value: Value = serde_json::from_reader(File::open(path)?)?;
         seals_ok &= verify_seal(&value)?;
         freeze_links &= value.get("freeze_record_sha256") == freeze.get("record_sha256");
-        descriptive_only &= value.get("actionability").and_then(Value::as_str) == Some(ACTIONABILITY)
+        descriptive_only &= value.get("actionability").and_then(Value::as_str)
+            == Some(ACTIONABILITY)
             && value.get("risk_multiplier").is_some_and(Value::is_null);
         if value.get("rust_runtime_binding_record_sha256").is_some() {
             native_binding_linked_count += 1;
@@ -193,7 +201,10 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
             ("summary_path", "summary_sha256"),
             ("detail_path", "detail_sha256"),
         ] {
-            let artifact = value.get(path_key).and_then(Value::as_str).map(PathBuf::from);
+            let artifact = value
+                .get(path_key)
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
             let expected = value.get(sha_key).and_then(Value::as_str);
             artifact_links &= artifact.as_ref().is_some_and(|path| path.exists())
                 && artifact
@@ -203,7 +214,12 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
                     == expected;
         }
     }
-    let ok = binding_ok && seals_ok && freeze_links && runtime_links && artifact_links && descriptive_only;
+    let ok = binding_ok
+        && seals_ok
+        && freeze_links
+        && runtime_links
+        && artifact_links
+        && descriptive_only;
     Ok(json!({
         "protocol": PROSPECTIVE_PROTOCOL,
         "ok": ok,
@@ -265,10 +281,19 @@ fn implementation_files() -> [(&'static str, &'static str); 9] {
         ("state_v03", "src/crossalpha/state/v03.py"),
         ("state_v03_rpc", "src/crossalpha/state/v03_rpc.py"),
         ("state_v03_logs", "src/crossalpha/state/v03_logs.py"),
-        ("state_v03_preflight", "src/crossalpha/state/v03_preflight.py"),
+        (
+            "state_v03_preflight",
+            "src/crossalpha/state/v03_preflight.py",
+        ),
         ("state_v03_cycle", "src/crossalpha/state/v03_cycle.py"),
-        ("state_v03_watchlist", "src/crossalpha/state/v03_watchlist.py"),
-        ("state_v03_prospective", "src/crossalpha/state/v03_prospective.py"),
+        (
+            "state_v03_watchlist",
+            "src/crossalpha/state/v03_watchlist.py",
+        ),
+        (
+            "state_v03_prospective",
+            "src/crossalpha/state/v03_prospective.py",
+        ),
         ("state_v03_config", "src/crossalpha/state/v03_config.py"),
         ("config", "config/state_v03.yaml"),
     ]
@@ -276,9 +301,18 @@ fn implementation_files() -> [(&'static str, &'static str); 9] {
 
 fn reference_paths(data_root: &Path) -> [(&'static str, PathBuf); 3] {
     [
-        ("frozen_b3", data_root.join("research/free_v01/paper/freeze.json")),
-        ("state_ab_v01", data_root.join("research/free_v01/state_ab_v01/freeze.json")),
-        ("state_v02", data_root.join("research/state_v02/freeze.json")),
+        (
+            "frozen_b3",
+            data_root.join("research/free_v01/paper/freeze.json"),
+        ),
+        (
+            "state_ab_v01",
+            data_root.join("research/free_v01/state_ab_v01/freeze.json"),
+        ),
+        (
+            "state_v02",
+            data_root.join("research/state_v02/freeze.json"),
+        ),
     ]
 }
 

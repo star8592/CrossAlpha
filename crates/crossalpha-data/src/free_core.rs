@@ -122,7 +122,9 @@ impl FreeCoreProvider {
         for (economic_asset, ticker) in FREE_TRADFI_PROXIES {
             let response = self
                 .client
-                .get(format!("https://api.tiingo.com/tiingo/daily/{ticker}/prices"))
+                .get(format!(
+                    "https://api.tiingo.com/tiingo/daily/{ticker}/prices"
+                ))
                 .query(&[
                     ("startDate", range.start.to_string()),
                     ("endDate", range.end.to_string()),
@@ -267,10 +269,7 @@ impl FreeCoreProvider {
             .json()
             .await
             .context("FredJsonDecodeError")?;
-        write_raw_json(
-            &raw_root.join(format!("{FRED_CASH_SERIES}.json")),
-            &payload,
-        )?;
+        write_raw_json(&raw_root.join(format!("{FRED_CASH_SERIES}.json")), &payload)?;
         let rows = parse_fred_payload(FRED_CASH_SERIES, &payload)?;
         if rows.is_empty() {
             bail!("FRED returned no data for {FRED_CASH_SERIES}");
@@ -469,7 +468,9 @@ pub fn write_free_core_fixture_canonical(
     cash.sort_by_key(|row| row.date);
 
     let slug = range.slug();
-    let proxy_root = data_root.join("canonical/core/free_proxy_daily").join(&slug);
+    let proxy_root = data_root
+        .join("canonical/core/free_proxy_daily")
+        .join(&slug);
     let cash_root = data_root.join("canonical/core/cash_rate").join(&slug);
     let tradfi_path = proxy_root.join("tradfi.parquet");
     let crypto_path = proxy_root.join("crypto.parquet");
@@ -490,7 +491,12 @@ pub fn write_free_core_fixture_canonical(
 fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    timestamp_col(
+        &mut fields,
+        &mut arrays,
+        "date",
+        rows.iter().map(|row| row.date),
+    );
     string_col(
         &mut fields,
         &mut arrays,
@@ -509,10 +515,30 @@ fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
         "symbol",
         rows.iter().map(|row| Some(row.symbol.clone())),
     );
-    f64_col(&mut fields, &mut arrays, "open", rows.iter().map(|row| row.open));
-    f64_col(&mut fields, &mut arrays, "high", rows.iter().map(|row| row.high));
-    f64_col(&mut fields, &mut arrays, "low", rows.iter().map(|row| row.low));
-    f64_col(&mut fields, &mut arrays, "close", rows.iter().map(|row| row.close));
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "open",
+        rows.iter().map(|row| row.open),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "high",
+        rows.iter().map(|row| row.high),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "low",
+        rows.iter().map(|row| row.low),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "close",
+        rows.iter().map(|row| row.close),
+    );
     i64_from_f64_col(
         &mut fields,
         &mut arrays,
@@ -567,7 +593,12 @@ fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
 fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    timestamp_col(
+        &mut fields,
+        &mut arrays,
+        "date",
+        rows.iter().map(|row| row.date),
+    );
     string_col(
         &mut fields,
         &mut arrays,
@@ -586,10 +617,30 @@ fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
         "symbol",
         rows.iter().map(|row| Some(row.symbol.clone())),
     );
-    f64_col(&mut fields, &mut arrays, "open", rows.iter().map(|row| row.open));
-    f64_col(&mut fields, &mut arrays, "high", rows.iter().map(|row| row.high));
-    f64_col(&mut fields, &mut arrays, "low", rows.iter().map(|row| row.low));
-    f64_col(&mut fields, &mut arrays, "close", rows.iter().map(|row| row.close));
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "open",
+        rows.iter().map(|row| row.open),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "high",
+        rows.iter().map(|row| row.high),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "low",
+        rows.iter().map(|row| row.low),
+    );
+    f64_col(
+        &mut fields,
+        &mut arrays,
+        "close",
+        rows.iter().map(|row| row.close),
+    );
     f64_col(
         &mut fields,
         &mut arrays,
@@ -626,7 +677,12 @@ fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {
 fn write_cash_parquet(path: &Path, rows: &[CashRateRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    timestamp_col(
+        &mut fields,
+        &mut arrays,
+        "date",
+        rows.iter().map(|row| row.date),
+    );
     string_col(
         &mut fields,
         &mut arrays,
@@ -676,9 +732,7 @@ fn write_raw_json(path: &Path, value: &Value) -> Result<()> {
 }
 
 fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
-    let text = value
-        .and_then(Value::as_str)
-        .context("timestamp missing")?;
+    let text = value.and_then(Value::as_str).context("timestamp missing")?;
     Ok(DateTime::parse_from_rfc3339(text)?.with_timezone(&Utc))
 }
 
@@ -697,10 +751,13 @@ fn number(value: Option<&Value>) -> Option<f64> {
 
 fn integer_number(value: Option<&Value>) -> Option<f64> {
     let value = value?;
-    value
-        .as_i64()
-        .map(|number| number as f64)
-        .or_else(|| value.as_str()?.parse::<i64>().ok().map(|number| number as f64))
+    value.as_i64().map(|number| number as f64).or_else(|| {
+        value
+            .as_str()?
+            .parse::<i64>()
+            .ok()
+            .map(|number| number as f64)
+    })
 }
 
 fn value_i64(value: &Value) -> Option<i64> {
@@ -719,12 +776,8 @@ fn ensure_unique_dates(rows: &[ProxyDailyRow], symbol: &str) -> Result<()> {
     Ok(())
 }
 
-fn timestamp_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = DateTime<Utc>>,
 {
     fields.push(Field::new(
@@ -740,12 +793,8 @@ fn timestamp_col<I>(
     ));
 }
 
-fn string_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = Option<String>>,
 {
     fields.push(Field::new(name, DataType::Utf8, true));
@@ -756,12 +805,8 @@ fn string_col<I>(
     arrays.push(Arc::new(builder.finish()));
 }
 
-fn f64_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn f64_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = Option<f64>>,
 {
     fields.push(Field::new(name, DataType::Float64, true));
@@ -772,12 +817,8 @@ fn f64_col<I>(
     arrays.push(Arc::new(builder.finish()));
 }
 
-fn i64_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn i64_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = Option<i64>>,
 {
     fields.push(Field::new(name, DataType::Int64, true));

@@ -2,7 +2,9 @@ use crate::v04::{NativeStateV04, PROTOCOL};
 use crate::v04_cycle;
 use crate::v04_freeze::{freeze_path, verify_freeze_file, write_freeze};
 use crate::v04_prospective::prospective_integrity;
-use crate::v04_runtime_binding::{runtime_binding_path, verify_runtime_binding_file, write_runtime_binding};
+use crate::v04_runtime_binding::{
+    runtime_binding_path, verify_runtime_binding_file, write_runtime_binding,
+};
 use crate::{StateConfigReport, StateRuntimeContext, StateSpec};
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -34,7 +36,8 @@ impl StateSpec for NativeStateV04Engine {
 
     async fn freeze(&self, context: &StateRuntimeContext) -> Result<Value> {
         ensure_tracked_lockfile()?;
-        let config = NativeStateV04::strict_config_report(&repo_root().join("config/state_v04.yaml"))?;
+        let config =
+            NativeStateV04::strict_config_report(&repo_root().join("config/state_v04.yaml"))?;
         if !config.ok {
             bail!("STATE V0.4 FREEZE REFUSED: strict config consistency failed");
         }

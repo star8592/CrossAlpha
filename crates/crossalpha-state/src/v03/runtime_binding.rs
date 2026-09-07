@@ -1,4 +1,4 @@
-use crate::v03::{PROTOCOL, PROSPECTIVE_PROTOCOL};
+use crate::v03::{PROSPECTIVE_PROTOCOL, PROTOCOL};
 use crate::v03_freeze::{payload_hash, verify_legacy_v1_seal};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -20,7 +20,10 @@ pub fn runtime_binding_path(data_root: &Path) -> PathBuf {
 pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Result<Value> {
     let legacy_path = data_root.join("research/state_v03/freeze.json");
     if !legacy_path.exists() {
-        bail!("State V0.3 legacy freeze missing: {}", legacy_path.display());
+        bail!(
+            "State V0.3 legacy freeze missing: {}",
+            legacy_path.display()
+        );
     }
     let legacy: Value = serde_json::from_reader(
         File::open(&legacy_path).with_context(|| format!("open {}", legacy_path.display()))?,
@@ -146,24 +149,57 @@ fn native_source_hashes(repo_root: &Path) -> Result<BTreeMap<String, String>> {
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("state_lib", "crates/crossalpha-state/src/lib.rs"),
         ("state_v03", "crates/crossalpha-state/src/v03.rs"),
-        ("state_v03_artifacts", "crates/crossalpha-state/src/v03/artifacts.rs"),
-        ("state_v03_census", "crates/crossalpha-state/src/v03/census.rs"),
-        ("state_v03_cycle", "crates/crossalpha-state/src/v03/cycle.rs"),
-        ("state_v03_engine", "crates/crossalpha-state/src/v03/engine.rs"),
-        ("state_v03_freeze", "crates/crossalpha-state/src/v03/freeze.rs"),
-        ("state_v03_network", "crates/crossalpha-state/src/v03/network.rs"),
-        ("state_v03_orchestrator", "crates/crossalpha-state/src/v03/orchestrator.rs"),
-        ("state_v03_preflight", "crates/crossalpha-state/src/v03/preflight.rs"),
-        ("state_v03_prospective", "crates/crossalpha-state/src/v03/prospective.rs"),
+        (
+            "state_v03_artifacts",
+            "crates/crossalpha-state/src/v03/artifacts.rs",
+        ),
+        (
+            "state_v03_census",
+            "crates/crossalpha-state/src/v03/census.rs",
+        ),
+        (
+            "state_v03_cycle",
+            "crates/crossalpha-state/src/v03/cycle.rs",
+        ),
+        (
+            "state_v03_engine",
+            "crates/crossalpha-state/src/v03/engine.rs",
+        ),
+        (
+            "state_v03_freeze",
+            "crates/crossalpha-state/src/v03/freeze.rs",
+        ),
+        (
+            "state_v03_network",
+            "crates/crossalpha-state/src/v03/network.rs",
+        ),
+        (
+            "state_v03_orchestrator",
+            "crates/crossalpha-state/src/v03/orchestrator.rs",
+        ),
+        (
+            "state_v03_preflight",
+            "crates/crossalpha-state/src/v03/preflight.rs",
+        ),
+        (
+            "state_v03_prospective",
+            "crates/crossalpha-state/src/v03/prospective.rs",
+        ),
         (
             "state_v03_runtime_binding",
             "crates/crossalpha-state/src/v03/runtime_binding.rs",
         ),
-        ("state_v03_watchlist", "crates/crossalpha-state/src/v03/watchlist.rs"),
+        (
+            "state_v03_watchlist",
+            "crates/crossalpha-state/src/v03/watchlist.rs",
+        ),
         ("cli_cargo", "crates/crossalpha-cli/Cargo.toml"),
         ("cli_state", "crates/crossalpha-cli/src/bin/state.rs"),
         ("cli_daemon", "crates/crossalpha-cli/src/bin/daemon.rs"),
-        ("cli_v03_census", "crates/crossalpha-cli/src/bin/state_v03_census.rs"),
+        (
+            "cli_v03_census",
+            "crates/crossalpha-cli/src/bin/state_v03_census.rs",
+        ),
         (
             "cli_v03_config",
             "crates/crossalpha-cli/src/bin/state_v03_config_check.rs",

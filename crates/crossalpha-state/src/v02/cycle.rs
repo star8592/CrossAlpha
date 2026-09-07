@@ -1,10 +1,10 @@
+use crate::StateRuntimeContext;
 use crate::v02::{
     AaveMarketInput, BasisInput, CompositionInput, LiquidationInput, StablecoinChainInput,
     StablecoinSystemInput, StateV02Config, StateV02Inputs, compute_state_v02,
 };
 use crate::v02_artifacts::write_state_snapshot;
 use crate::v02_provider::AaveV02Client;
-use crate::StateRuntimeContext;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use crossalpha_features::{
@@ -46,7 +46,9 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
         )?;
     }
 
-    let (liquidation_status, current_liquidations) = if let Some(rpc_url) = context.evm_rpc_url.as_deref() {
+    let (liquidation_status, current_liquidations) = if let Some(rpc_url) =
+        context.evm_rpc_url.as_deref()
+    {
         match client.collect_liquidations(rpc_url, 512).await {
             Ok(envelope) => {
                 if write {
@@ -60,7 +62,10 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
                         &envelope,
                         &synthetic_manifest(&envelope, "preflight:aave-liquidations"),
                     )?;
-                    (json!({"configured":true,"ok":true,"error":Value::Null}), rows)
+                    (
+                        json!({"configured":true,"ok":true,"error":Value::Null}),
+                        rows,
+                    )
                 }
             }
             Err(error) => (
@@ -169,7 +174,10 @@ async fn run(context: &StateRuntimeContext, write: bool) -> Result<Value> {
             .as_object_mut()
             .context("State V0.2 report must be object")?
             .insert("status".to_owned(), Value::String("computed".to_owned()));
-        state.as_object_mut().unwrap().insert("written".to_owned(), Value::Bool(false));
+        state
+            .as_object_mut()
+            .unwrap()
+            .insert("written".to_owned(), Value::Bool(false));
         json!({"status":"preflight_no_write"})
     };
 
@@ -236,8 +244,18 @@ fn latest_input_time(inputs: &StateV02Inputs) -> Option<DateTime<Utc>> {
         .iter()
         .map(|row| row.observed_at)
         .chain(inputs.stablecoin_system.iter().map(|row| row.observed_at))
-        .chain(inputs.hyperliquid_market_state.iter().map(|row| row.observed_at))
-        .chain(inputs.stablecoin_chain_composition.iter().map(|row| row.observed_at))
+        .chain(
+            inputs
+                .hyperliquid_market_state
+                .iter()
+                .map(|row| row.observed_at),
+        )
+        .chain(
+            inputs
+                .stablecoin_chain_composition
+                .iter()
+                .map(|row| row.observed_at),
+        )
         .max()
 }
 
@@ -254,5 +272,8 @@ fn synthetic_manifest(envelope: &ObservationEnvelope, suffix: &str) -> RawSnapsh
 }
 
 fn value_key(value: &Value) -> String {
-    value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string())
+    value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string())
 }

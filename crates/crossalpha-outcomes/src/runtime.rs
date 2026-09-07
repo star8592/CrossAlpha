@@ -80,7 +80,11 @@ pub fn write_runtime_binding(data_root: &Path, bound_at: DateTime<Utc>) -> Resul
         return Ok(serde_json::from_reader(File::open(path)?)?);
     }
     let value = runtime_binding_preview(data_root, bound_at)?;
-    if value.get("production_binding_eligible").and_then(Value::as_bool) != Some(true) {
+    if value
+        .get("production_binding_eligible")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
         bail!("Outcome Linkage Rust runtime binding refused: Cargo.lock must exist and be tracked");
     }
     write_atomic_json(&path, &value)?;
@@ -261,7 +265,9 @@ pub fn integrity(data_root: &Path) -> Result<Value> {
     let freeze = load_legacy_freeze(data_root)?;
     let binding_ok = verify_runtime_binding_file(&binding_path(data_root))?;
     let links = load_records(&root(data_root).join("links"), "horizon=")?;
-    let seals_ok = links.iter().all(|(_, value)| verify_seal(value).unwrap_or(false));
+    let seals_ok = links
+        .iter()
+        .all(|(_, value)| verify_seal(value).unwrap_or(false));
     let freeze_links = links
         .iter()
         .all(|(_, value)| value.get("freeze_record_sha256") == freeze.get("record_sha256"));
@@ -269,13 +275,21 @@ pub fn integrity(data_root: &Path) -> Result<Value> {
         let Some(path) = value.get("source_record_path").and_then(Value::as_str) else {
             return false;
         };
-        let expected = value.get("source_record_file_sha256").and_then(Value::as_str);
+        let expected = value
+            .get("source_record_file_sha256")
+            .and_then(Value::as_str);
         let path = Path::new(path);
         path.exists() && sha256_file(path).ok().as_deref() == expected
     });
     let policy_ok = links.iter().all(|(_, value)| {
-        value.get("same_day_outcome_included").and_then(Value::as_bool) == Some(false)
-            && value.get("selective_linking_allowed").and_then(Value::as_bool) == Some(false)
+        value
+            .get("same_day_outcome_included")
+            .and_then(Value::as_bool)
+            == Some(false)
+            && value
+                .get("selective_linking_allowed")
+                .and_then(Value::as_bool)
+                == Some(false)
             && value.get("actionability").and_then(Value::as_str) == Some("NONE")
             && value.get("risk_multiplier").is_some_and(Value::is_null)
     });
@@ -304,9 +318,21 @@ struct SourceValue {
 
 fn load_source_values(data_root: &Path) -> Result<Vec<SourceValue>> {
     let sources = [
-        ("STATE_V02", data_root.join("research/state_v02/prospective"), "state_at="),
-        ("STATE_V03", data_root.join("research/state_v03/prospective"), "block="),
-        ("STATE_V04", data_root.join("research/state_v04/prospective"), "state_at="),
+        (
+            "STATE_V02",
+            data_root.join("research/state_v02/prospective"),
+            "state_at=",
+        ),
+        (
+            "STATE_V03",
+            data_root.join("research/state_v03/prospective"),
+            "block=",
+        ),
+        (
+            "STATE_V04",
+            data_root.join("research/state_v04/prospective"),
+            "state_at=",
+        ),
     ];
     let mut result = Vec::new();
     for (layer, root, prefix) in sources {
@@ -341,10 +367,7 @@ fn load_marks(data_root: &Path) -> Result<MarkLoad> {
     let mut b = BTreeMap::new();
     let mut a_values = BTreeMap::new();
     let mut b_values = BTreeMap::new();
-    for (path, value) in load_records(
-        &data_root.join("research/free_v01/paper/marks"),
-        "date=",
-    )? {
+    for (path, value) in load_records(&data_root.join("research/free_v01/paper/marks"), "date=")? {
         let date = parse_date(value.get("date"))?;
         a.insert(
             date,
@@ -355,8 +378,14 @@ fn load_marks(data_root: &Path) -> Result<MarkLoad> {
                     .and_then(Value::as_str)
                     .context("A mark sha missing")?
                     .to_owned(),
-                net_return: value.get("net_return").and_then(Value::as_f64).unwrap_or(0.0),
-                cash_return: value.get("cash_return").and_then(Value::as_f64).unwrap_or(0.0),
+                net_return: value
+                    .get("net_return")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                cash_return: value
+                    .get("cash_return")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
                 a_mark_record_sha256: None,
                 shadow_risk_multiplier: None,
                 path: Some(path.to_string_lossy().to_string()),
@@ -378,8 +407,14 @@ fn load_marks(data_root: &Path) -> Result<MarkLoad> {
                     .and_then(Value::as_str)
                     .context("B mark sha missing")?
                     .to_owned(),
-                net_return: value.get("net_return").and_then(Value::as_f64).unwrap_or(0.0),
-                cash_return: value.get("cash_return").and_then(Value::as_f64).unwrap_or(0.0),
+                net_return: value
+                    .get("net_return")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                cash_return: value
+                    .get("cash_return")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
                 a_mark_record_sha256: value
                     .get("a_mark_record_sha256")
                     .and_then(Value::as_str)
@@ -481,11 +516,26 @@ fn pick_fields(row: &Value, fields: &[&str]) -> Value {
 
 fn verify_reference_freezes(data_root: &Path, freeze: &Value) -> Result<()> {
     let references = [
-        ("frozen_b3", data_root.join("research/free_v01/paper/freeze.json")),
-        ("state_ab_v01", data_root.join("research/free_v01/state_ab_v01/freeze.json")),
-        ("state_v02", data_root.join("research/state_v02/freeze.json")),
-        ("state_v03", data_root.join("research/state_v03/freeze.json")),
-        ("state_v04", data_root.join("research/state_v04/freeze.json")),
+        (
+            "frozen_b3",
+            data_root.join("research/free_v01/paper/freeze.json"),
+        ),
+        (
+            "state_ab_v01",
+            data_root.join("research/free_v01/state_ab_v01/freeze.json"),
+        ),
+        (
+            "state_v02",
+            data_root.join("research/state_v02/freeze.json"),
+        ),
+        (
+            "state_v03",
+            data_root.join("research/state_v03/freeze.json"),
+        ),
+        (
+            "state_v04",
+            data_root.join("research/state_v04/freeze.json"),
+        ),
     ];
     for (name, path) in references {
         let expected = freeze
@@ -535,7 +585,10 @@ fn collect_json(root: &Path, prefix: &str, out: &mut Vec<PathBuf>) -> Result<()>
 fn read_verified(path: &Path) -> Result<Value> {
     let value: Value = serde_json::from_reader(File::open(path)?)?;
     if !verify_seal(&value)? {
-        bail!("immutable Outcome/source record failed seal verification: {}", path.display());
+        bail!(
+            "immutable Outcome/source record failed seal verification: {}",
+            path.display()
+        );
     }
     Ok(value)
 }
@@ -574,10 +627,10 @@ fn parse_date(value: Option<&Value>) -> Result<NaiveDate> {
 }
 
 fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
-    Ok(DateTime::parse_from_rfc3339(
-        value.and_then(Value::as_str).context("timestamp missing")?,
-    )?
-    .with_timezone(&Utc))
+    Ok(
+        DateTime::parse_from_rfc3339(value.and_then(Value::as_str).context("timestamp missing")?)?
+            .with_timezone(&Utc),
+    )
 }
 
 fn require_binding(data_root: &Path) -> Result<()> {
@@ -678,7 +731,10 @@ fn native_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
         ("workspace", "Cargo.toml"),
         ("outcomes_cargo", "crates/crossalpha-outcomes/Cargo.toml"),
         ("outcomes_kernel", "crates/crossalpha-outcomes/src/lib.rs"),
-        ("outcomes_runtime", "crates/crossalpha-outcomes/src/runtime.rs"),
+        (
+            "outcomes_runtime",
+            "crates/crossalpha-outcomes/src/runtime.rs",
+        ),
         ("outcome_cli", "crates/crossalpha-cli/src/bin/outcome.rs"),
         ("config", "config/outcome_linkage_v01.yaml"),
     ];

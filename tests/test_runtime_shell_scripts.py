@@ -51,7 +51,7 @@ def test_v03_v04_installers_delay_first_automatic_cycle() -> None:
     assert "OnBootSec=" not in v03
     assert "OnActiveSec=15min" in v03
     assert "OnUnitActiveSec=15min" in v03
-    assert "resolve_rpc_candidates" in v03
+    assert "v03 integrity --data-root" in v03
 
     assert "OnBootSec=" not in v04
     assert "OnActiveSec=5min" in v04

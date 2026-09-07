@@ -109,8 +109,7 @@ fn main() -> Result<()> {
                 &fixture.metadata,
                 fixture.safety_days,
             )?;
-            let returns =
-                build_roll_mtm_returns(&fixture.bars, &roll_map, fixture.roll_cost_bps)?;
+            let returns = build_roll_mtm_returns(&fixture.bars, &roll_map, fixture.roll_cost_bps)?;
             json!({"roll_map": roll_map, "returns": returns})
         }
         Command::Baseline { input } => {
@@ -124,10 +123,7 @@ fn main() -> Result<()> {
         Command::PaperTarget { input } => {
             let fixture: PaperFixture = serde_json::from_reader(File::open(input)?)?;
             let panel = build_daily_panel(&fixture.rows, fixture.start, fixture.end)?;
-            serde_json::to_value(compute_frozen_b3_target(
-                &panel,
-                fixture.signal_date,
-            )?)?
+            serde_json::to_value(compute_frozen_b3_target(&panel, fixture.signal_date)?)?
         }
         Command::AbMultiplier { input } => {
             let fixture: AbMultiplierFixture = serde_json::from_reader(File::open(input)?)?;

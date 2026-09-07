@@ -213,9 +213,7 @@ pub fn parse_aave_liquidations(
             debt_asset: topic_address(topics.get(2)),
             user: topic_address(topics.get(3)),
             debt_to_cover_raw: words.first().and_then(|word| hex_uint_decimal(word)),
-            liquidated_collateral_amount_raw: words
-                .get(1)
-                .and_then(|word| hex_uint_decimal(word)),
+            liquidated_collateral_amount_raw: words.get(1).and_then(|word| hex_uint_decimal(word)),
             liquidator: words.get(2).map(|word| {
                 format!("0x{}", &word[word.len().saturating_sub(40)..]).to_ascii_lowercase()
             }),

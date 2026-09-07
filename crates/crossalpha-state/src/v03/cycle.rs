@@ -1,9 +1,8 @@
 use crate::StateRuntimeContext;
 use crate::v03::{
-    ADAPTIVE_MINIMUM_SPAN_BLOCKS, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
-    AAVE_V3_ETHEREUM_CORE_POOL, BLOCKSCOUT_LOG_SOURCE, BOOTSTRAP_CHUNK_BLOCKS,
-    BORROW_EVENT_TOPIC0, FULL_CENSUS_CADENCE_MINUTES, MAX_BOOTSTRAP_CHUNKS_PER_CYCLE,
-    PROTOCOL,
+    AAVE_V3_ETHEREUM_CORE_POOL, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK, ADAPTIVE_MINIMUM_SPAN_BLOCKS,
+    BLOCKSCOUT_LOG_SOURCE, BOOTSTRAP_CHUNK_BLOCKS, BORROW_EVENT_TOPIC0,
+    FULL_CENSUS_CADENCE_MINUTES, MAX_BOOTSTRAP_CHUNKS_PER_CYCLE, PROTOCOL,
 };
 use crate::v03_artifacts::{read_address_set, write_account_rows, write_address_set};
 use crate::v03_census::{CensusPolicy, borrow_log_debtor, compute_borrower_census};
@@ -120,22 +119,16 @@ pub async fn run_cycle(context: &StateRuntimeContext) -> Result<Value> {
             break;
         }
         let end = (next_block + BOOTSTRAP_CHUNK_BLOCKS as u64 - 1).min(finalized_block);
-        let logs = adaptive_borrow_logs(
-            &http,
-            next_block,
-            end,
-            ADAPTIVE_MINIMUM_SPAN_BLOCKS as u64,
-        )
-        .await?;
+        let logs =
+            adaptive_borrow_logs(&http, next_block, end, ADAPTIVE_MINIMUM_SPAN_BLOCKS as u64)
+                .await?;
         let previously_known = borrowers.clone();
         let debtors: BTreeSet<String> = logs
             .iter()
             .filter_map(|log| borrow_log_debtor(log, BORROW_EVENT_TOPIC0))
             .collect();
-        let new_debtors: BTreeSet<String> = debtors
-            .difference(&previously_known)
-            .cloned()
-            .collect();
+        let new_debtors: BTreeSet<String> =
+            debtors.difference(&previously_known).cloned().collect();
         borrowers.extend(debtors);
         if state.bootstrap_complete {
             pending_new_borrowers.extend(new_debtors.iter().cloned());
@@ -217,18 +210,24 @@ pub async fn run_cycle(context: &StateRuntimeContext) -> Result<Value> {
     });
 
     if !caught_up {
-        return Ok(merge(common, json!({
-            "status": "BORROWER_UNIVERSE_BOOTSTRAPPING",
-            "next_block": next_block,
-            "scanned_ranges": scanned_ranges,
-            "historical_bootstrap_is_evidence": false,
-        })));
+        return Ok(merge(
+            common,
+            json!({
+                "status": "BORROWER_UNIVERSE_BOOTSTRAPPING",
+                "next_block": next_block,
+                "scanned_ranges": scanned_ranges,
+                "historical_bootstrap_is_evidence": false,
+            }),
+        ));
     }
 
     let decision_now = Utc::now();
     if full_census_due(&state, decision_now, finalized_block)? {
         let addresses: Vec<String> = borrowers.iter().cloned().collect();
-        let accounts = selected.client.account_data(&addresses, finalized_block).await?;
+        let accounts = selected
+            .client
+            .account_data(&addresses, finalized_block)
+            .await?;
         let captured = Utc::now();
         let mut summary = compute_borrower_census(
             &accounts,
@@ -277,27 +276,37 @@ pub async fn run_cycle(context: &StateRuntimeContext) -> Result<Value> {
         } else {
             json!({"status": "invalid_full_census_no_prospective_write"})
         };
-        return Ok(merge(common, json!({
-            "status": if valid { "FULL_CENSUS_RECORDED" } else { "FULL_CENSUS_PARTIAL_RETRY_REQUIRED" },
-            "scan_started_at": scan_started_at.to_rfc3339_opts(SecondsFormat::Micros, false),
-            "scanned_ranges": scanned_ranges,
-            "census": summary,
-            "artifacts": artifacts,
-            "prospective": prospective,
-        })));
+        return Ok(merge(
+            common,
+            json!({
+                "status": if valid { "FULL_CENSUS_RECORDED" } else { "FULL_CENSUS_PARTIAL_RETRY_REQUIRED" },
+                "scan_started_at": scan_started_at.to_rfc3339_opts(SecondsFormat::Micros, false),
+                "scanned_ranges": scanned_ranges,
+                "census": summary,
+                "artifacts": artifacts,
+                "prospective": prospective,
+            }),
+        ));
     }
 
     let mut watchlist = read_address_set(&watchlist_path(&context.data_root))?;
     watchlist.extend(pending_new_borrowers);
     if watchlist.is_empty() {
-        return Ok(merge(common, json!({
-            "status": "CAUGHT_UP_AWAITING_NEXT_FULL_CENSUS"
-        })));
+        return Ok(merge(
+            common,
+            json!({
+                "status": "CAUGHT_UP_AWAITING_NEXT_FULL_CENSUS"
+            }),
+        ));
     }
     let addresses: Vec<String> = watchlist.iter().cloned().collect();
-    let accounts = selected.client.account_data(&addresses, finalized_block).await?;
+    let accounts = selected
+        .client
+        .account_data(&addresses, finalized_block)
+        .await?;
     let captured = Utc::now();
-    let mut watch = compute_watchlist_snapshot(&accounts, watchlist.len(), finalized_block, captured);
+    let mut watch =
+        compute_watchlist_snapshot(&accounts, watchlist.len(), finalized_block, captured);
     let object = watch
         .as_object_mut()
         .context("watchlist report must be object")?;
@@ -313,18 +322,16 @@ pub async fn run_cycle(context: &StateRuntimeContext) -> Result<Value> {
         "pending_new_borrower_count".to_owned(),
         Value::from(state.pending_new_borrowers_since_full.len()),
     );
-    let artifacts = write_census_artifacts(
-        &context.data_root,
-        &accounts,
-        &watch,
-        captured,
-        "watchlist",
-    )?;
-    Ok(merge(common, json!({
-        "status": "WATCHLIST_RECORDED",
-        "watchlist": watch,
-        "artifacts": artifacts,
-    })))
+    let artifacts =
+        write_census_artifacts(&context.data_root, &accounts, &watch, captured, "watchlist")?;
+    Ok(merge(
+        common,
+        json!({
+            "status": "WATCHLIST_RECORDED",
+            "watchlist": watch,
+            "artifacts": artifacts,
+        }),
+    ))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -504,7 +511,9 @@ mod tests {
     #[test]
     fn cycle_binding_gate_fails_closed() {
         let temp = tempfile::tempdir().unwrap();
-        let error = require_runtime_binding(temp.path()).unwrap_err().to_string();
+        let error = require_runtime_binding(temp.path())
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("runtime binding missing"));
     }
 }

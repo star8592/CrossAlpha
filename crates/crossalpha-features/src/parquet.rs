@@ -10,10 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub fn write_hyperliquid_parquet(
-    rows: &[HyperliquidAssetContextRow],
-    path: &Path,
-) -> Result<()> {
+pub fn write_hyperliquid_parquet(rows: &[HyperliquidAssetContextRow], path: &Path) -> Result<()> {
     if rows.is_empty() {
         bail!("cannot write empty Hyperliquid canonical parquet");
     }
@@ -25,20 +22,15 @@ pub fn write_hyperliquid_parquet(
         &mut fields,
         &mut arrays,
         "observed_at",
-        rows.iter().map(|row| {
-            Some(
-                row.observed_at
-                    .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            )
-        }),
+        rows.iter()
+            .map(|row| Some(row.observed_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_string_column(
         &mut fields,
         &mut arrays,
         "known_at",
-        rows.iter().map(|row| {
-            Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))
-        }),
+        rows.iter()
+            .map(|row| Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_string_column(
         &mut fields,
@@ -170,20 +162,17 @@ pub fn write_stablecoin_parquet(
         &mut fields,
         &mut arrays,
         "observed_at",
-        asset_rows.iter().map(|row| {
-            Some(
-                row.observed_at
-                    .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            )
-        }),
+        asset_rows
+            .iter()
+            .map(|row| Some(row.observed_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_string_column(
         &mut fields,
         &mut arrays,
         "known_at",
-        asset_rows.iter().map(|row| {
-            Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))
-        }),
+        asset_rows
+            .iter()
+            .map(|row| Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_value_column(
         &mut fields,
@@ -237,9 +226,7 @@ pub fn write_stablecoin_parquet(
         &mut fields,
         &mut arrays,
         "circulating_prev_day_native",
-        asset_rows
-            .iter()
-            .map(|row| row.circulating_prev_day_native),
+        asset_rows.iter().map(|row| row.circulating_prev_day_native),
     );
     push_optional_f64_column(
         &mut fields,
@@ -322,20 +309,17 @@ pub fn write_stablecoin_parquet(
         &mut fields,
         &mut arrays,
         "observed_at",
-        chain_rows.iter().map(|row| {
-            Some(
-                row.observed_at
-                    .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            )
-        }),
+        chain_rows
+            .iter()
+            .map(|row| Some(row.observed_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_string_column(
         &mut fields,
         &mut arrays,
         "known_at",
-        chain_rows.iter().map(|row| {
-            Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))
-        }),
+        chain_rows
+            .iter()
+            .map(|row| Some(row.known_at.to_rfc3339_opts(SecondsFormat::AutoSi, true))),
     );
     push_value_column(
         &mut fields,
@@ -377,9 +361,7 @@ pub fn write_stablecoin_parquet(
         &mut fields,
         &mut arrays,
         "circulating_prev_day_native",
-        chain_rows
-            .iter()
-            .map(|row| row.circulating_prev_day_native),
+        chain_rows.iter().map(|row| row.circulating_prev_day_native),
     );
     push_optional_f64_column(
         &mut fields,
@@ -474,12 +456,8 @@ fn temp_path(path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn push_string_column<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn push_string_column<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: IntoIterator<Item = Option<String>>,
 {
     let mut builder = StringBuilder::new();

@@ -1,9 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use crossalpha_features::{materialize_recent_canonical, materialize_recent_features};
-use crossalpha_observatory::{
-    ProviderSource, SupervisorConfig, run_supervisor, write_json_report,
-};
+use crossalpha_observatory::{ProviderSource, SupervisorConfig, run_supervisor, write_json_report};
 use crossalpha_state::v02_engine::NativeStateV02;
 use crossalpha_state::v03_engine::NativeStateV03;
 use crossalpha_state::v04_engine::NativeStateV04Engine;
@@ -111,7 +109,11 @@ async fn main() -> Result<()> {
             max_consecutive_failures: failure_limit,
             stale_after_seconds: args.stale_after_seconds,
         };
-        tasks.spawn(async move { run_supervisor(config).await.context("Observatory supervisor") });
+        tasks.spawn(async move {
+            run_supervisor(config)
+                .await
+                .context("Observatory supervisor")
+        });
     }
 
     if components.contains(&Component::Materializer) {
@@ -135,7 +137,9 @@ async fn main() -> Result<()> {
                 evm_rpc_url: args.evm_rpc_url.clone(),
             };
             let interval = Duration::from_secs(interval_seconds);
-            tasks.spawn(async move { state_loop(component, context, interval, failure_limit).await });
+            tasks.spawn(
+                async move { state_loop(component, context, interval, failure_limit).await },
+            );
         }
     }
 
@@ -172,11 +176,26 @@ async fn main() -> Result<()> {
 
 fn validate(args: &Args) -> Result<()> {
     for (name, value) in [
-        ("observatory-interval-seconds", args.observatory_interval_seconds),
-        ("materializer-interval-seconds", args.materializer_interval_seconds),
-        ("state-v02-interval-seconds", args.state_v02_interval_seconds),
-        ("state-v03-interval-seconds", args.state_v03_interval_seconds),
-        ("state-v04-interval-seconds", args.state_v04_interval_seconds),
+        (
+            "observatory-interval-seconds",
+            args.observatory_interval_seconds,
+        ),
+        (
+            "materializer-interval-seconds",
+            args.materializer_interval_seconds,
+        ),
+        (
+            "state-v02-interval-seconds",
+            args.state_v02_interval_seconds,
+        ),
+        (
+            "state-v03-interval-seconds",
+            args.state_v03_interval_seconds,
+        ),
+        (
+            "state-v04-interval-seconds",
+            args.state_v04_interval_seconds,
+        ),
         ("http-timeout-seconds", args.http_timeout_seconds),
         ("collector-timeout-seconds", args.collector_timeout_seconds),
     ] {
@@ -223,7 +242,9 @@ fn validate_state_bindings(data_root: &Path, components: &BTreeSet<Component>) -
         if let Some(integrity) = integrity
             && integrity.get("cycle_enabled").and_then(Value::as_bool) != Some(true)
         {
-            bail!("{component:?} daemon start refused: native freeze/runtime binding gate is not valid");
+            bail!(
+                "{component:?} daemon start refused: native freeze/runtime binding gate is not valid"
+            );
         }
     }
     Ok(())
@@ -264,7 +285,11 @@ async fn materializer_loop(
                         "report": report,
                     }),
                 )?;
-                info!(recent_days, interval_seconds = interval.as_secs(), "native materializer cycle succeeded");
+                info!(
+                    recent_days,
+                    interval_seconds = interval.as_secs(),
+                    "native materializer cycle succeeded"
+                );
             }
             Err(error) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
@@ -429,9 +454,7 @@ async fn shutdown_signal() -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c()
-            .await
-            .context("listen for Ctrl-C")?;
+        tokio::signal::ctrl_c().await.context("listen for Ctrl-C")?;
     }
     Ok(())
 }

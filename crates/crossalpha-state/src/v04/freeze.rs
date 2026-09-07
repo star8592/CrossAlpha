@@ -24,12 +24,18 @@ pub fn freeze_preview(data_root: &Path, frozen_at: DateTime<Utc>) -> Result<Valu
     let mut references = BTreeMap::new();
     for (name, path) in reference_paths(data_root) {
         if !path.exists() {
-            bail!("State V0.4 requires frozen predecessor protocol before freeze: {}", path.display());
+            bail!(
+                "State V0.4 requires frozen predecessor protocol before freeze: {}",
+                path.display()
+            );
         }
-        references.insert(name.to_owned(), json!({
-            "path": path.to_string_lossy(),
-            "file_sha256": sha256_file(&path)?,
-        }));
+        references.insert(
+            name.to_owned(),
+            json!({
+                "path": path.to_string_lossy(),
+                "file_sha256": sha256_file(&path)?,
+            }),
+        );
     }
     let payload = json!({
         "schema_version": FREEZE_SCHEMA_VERSION,
@@ -123,9 +129,15 @@ fn implementation_hashes() -> Result<BTreeMap<String, String>> {
     let files = [
         ("state_v04", "src/crossalpha/state/v04.py"),
         ("state_v04_provider", "src/crossalpha/state/v04_provider.py"),
-        ("state_v04_safe_provider", "src/crossalpha/state/v04_safe_provider.py"),
+        (
+            "state_v04_safe_provider",
+            "src/crossalpha/state/v04_safe_provider.py",
+        ),
         ("state_v04_cycle", "src/crossalpha/state/v04_cycle.py"),
-        ("state_v04_prospective", "src/crossalpha/state/v04_prospective.py"),
+        (
+            "state_v04_prospective",
+            "src/crossalpha/state/v04_prospective.py",
+        ),
         ("state_v04_config", "src/crossalpha/state/v04_config.py"),
         ("config", "config/state_v04.yaml"),
     ];
@@ -139,16 +151,31 @@ fn implementation_hashes() -> Result<BTreeMap<String, String>> {
 
 fn reference_paths(data_root: &Path) -> [(&'static str, PathBuf); 4] {
     [
-        ("frozen_b3", data_root.join("research/free_v01/paper/freeze.json")),
-        ("state_ab_v01", data_root.join("research/free_v01/state_ab_v01/freeze.json")),
-        ("state_v02", data_root.join("research/state_v02/freeze.json")),
-        ("state_v03", data_root.join("research/state_v03/freeze.json")),
+        (
+            "frozen_b3",
+            data_root.join("research/free_v01/paper/freeze.json"),
+        ),
+        (
+            "state_ab_v01",
+            data_root.join("research/free_v01/state_ab_v01/freeze.json"),
+        ),
+        (
+            "state_v02",
+            data_root.join("research/state_v02/freeze.json"),
+        ),
+        (
+            "state_v03",
+            data_root.join("research/state_v03/freeze.json"),
+        ),
     ]
 }
 
 fn write_immutable(path: &Path, value: &Value) -> Result<()> {
     if path.exists() {
-        bail!("immutable State V0.4 file already exists: {}", path.display());
+        bail!(
+            "immutable State V0.4 file already exists: {}",
+            path.display()
+        );
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

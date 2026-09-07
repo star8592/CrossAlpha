@@ -60,8 +60,12 @@ impl StateSpec for NativeStateV02 {
 
     fn integrity(&self, data_root: &Path) -> Result<Value> {
         let prospective = crate::v02_prospective::integrity_report(data_root)?;
-        let prospective_ok = prospective.get("ok").and_then(Value::as_bool).unwrap_or(false);
-        let freeze_ok = crate::v02_freeze::verify_freeze_file(&crate::v02_freeze::freeze_path(data_root))?;
+        let prospective_ok = prospective
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let freeze_ok =
+            crate::v02_freeze::verify_freeze_file(&crate::v02_freeze::freeze_path(data_root))?;
         let binding_ok = crate::v02_runtime_binding::verify_runtime_binding_file(
             &crate::v02_runtime_binding::runtime_binding_path(data_root),
         )?;

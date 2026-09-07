@@ -5,9 +5,8 @@ use crate::free_core::{
 use anyhow::{Context, Result, bail};
 use arrow_array::builder::{Float64Builder, StringBuilder};
 use arrow_array::{
-    Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray,
-    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray,
+    Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use chrono::{DateTime, Duration, TimeZone, Utc};
@@ -30,10 +29,7 @@ pub struct AssetReturnRow {
     pub daily_return: Option<f64>,
 }
 
-pub fn canonical_paths(
-    data_root: &Path,
-    range: &FreeCoreRange,
-) -> BTreeMap<&'static str, PathBuf> {
+pub fn canonical_paths(data_root: &Path, range: &FreeCoreRange) -> BTreeMap<&'static str, PathBuf> {
     let slug = range.slug();
     BTreeMap::from([
         (
@@ -64,7 +60,10 @@ pub fn canonical_paths(
                 .join(&slug)
                 .join("asset_returns.parquet"),
         ),
-        ("quality", data_root.join("manifests/free_core_quality.json")),
+        (
+            "quality",
+            data_root.join("manifests/free_core_quality.json"),
+        ),
     ])
 }
 
@@ -106,14 +105,9 @@ pub fn audit_free_core(data_root: &Path, range: &FreeCoreRange) -> Result<Value>
         .iter()
         .map(|(asset, _)| (*asset).to_owned())
         .collect::<BTreeSet<_>>();
-    let tradfi_audit = proxy_audit(
-        &tradfi,
-        &tradfi_expected,
-        "tiingo_eod",
-        start,
-        end,
-        |row| row.adj_close,
-    );
+    let tradfi_audit = proxy_audit(&tradfi, &tradfi_expected, "tiingo_eod", start, end, |row| {
+        row.adj_close
+    });
     let crypto_audit = proxy_audit(
         &crypto,
         &crypto_expected,
@@ -403,7 +397,7 @@ where
         let mut exact_end = 0usize;
         let mut after = 0usize;
         let mut max_gap: Option<f64> = None;
-        let mut previous_date = None;
+        let mut previous_date: Option<DateTime<Utc>> = None;
         for row in &part {
             if !seen.insert(row.date) {
                 duplicate_dates += 1;
@@ -490,8 +484,7 @@ fn read_proxy_parquet(path: &Path) -> Result<Vec<ProxyDailyRow>> {
                 date: timestamp_at(batch.column(date).as_ref(), row)?,
                 economic_asset: string_at(batch.column(economic_asset).as_ref(), row)?
                     .context("economic_asset null")?,
-                source: string_at(batch.column(source).as_ref(), row)?
-                    .context("source null")?,
+                source: string_at(batch.column(source).as_ref(), row)?.context("source null")?,
                 symbol: string_at(batch.column(symbol).as_ref(), row)?.context("symbol null")?,
                 open: f64_at(batch.column(open).as_ref(), row)?,
                 high: f64_at(batch.column(high).as_ref(), row)?,
@@ -615,7 +608,10 @@ fn timestamp_at(array: &dyn Array, index: usize) -> Result<DateTime<Utc>> {
     if let Some(values) = array.as_any().downcast_ref::<TimestampSecondArray>() {
         return datetime_from_nanos(values.value(index).saturating_mul(1_000_000_000));
     }
-    bail!("unsupported timestamp parquet type: {:?}", array.data_type())
+    bail!(
+        "unsupported timestamp parquet type: {:?}",
+        array.data_type()
+    )
 }
 
 fn datetime_from_nanos(value: i64) -> Result<DateTime<Utc>> {
@@ -627,7 +623,12 @@ fn datetime_from_nanos(value: i64) -> Result<DateTime<Utc>> {
 fn write_returns_parquet(path: &Path, rows: &[AssetReturnRow]) -> Result<()> {
     let mut fields = Vec::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    timestamp_col(&mut fields, &mut arrays, "date", rows.iter().map(|row| row.date));
+    timestamp_col(
+        &mut fields,
+        &mut arrays,
+        "date",
+        rows.iter().map(|row| row.date),
+    );
     string_col(
         &mut fields,
         &mut arrays,
@@ -676,12 +677,8 @@ fn write_returns_parquet(path: &Path, rows: &[AssetReturnRow]) -> Result<()> {
     Ok(())
 }
 
-fn timestamp_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = DateTime<Utc>>,
 {
     fields.push(Field::new(
@@ -697,12 +694,8 @@ fn timestamp_col<I>(
     ));
 }
 
-fn string_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = Option<String>>,
 {
     fields.push(Field::new(name, DataType::Utf8, true));
@@ -713,12 +706,8 @@ fn string_col<I>(
     arrays.push(Arc::new(builder.finish()));
 }
 
-fn f64_col<I>(
-    fields: &mut Vec<Field>,
-    arrays: &mut Vec<ArrayRef>,
-    name: &str,
-    values: I,
-) where
+fn f64_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)
+where
     I: Iterator<Item = Option<f64>>,
 {
     fields.push(Field::new(name, DataType::Float64, true));

@@ -115,9 +115,7 @@ pub async fn run_preflight(
         }
     }
 
-    bail!(
-        "No State V0.3 state RPC passed finalized-block/fixed-call probes; attempts={attempts:?}"
-    )
+    bail!("No State V0.3 state RPC passed finalized-block/fixed-call probes; attempts={attempts:?}")
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +229,9 @@ fn normalize_address(value: &str) -> Result<String> {
 
 fn validate_account_data_result(value: &Value) -> Result<()> {
     let text = value.as_str().context("eth_call result is not hex")?;
-    let raw = text.strip_prefix("0x").context("eth_call result is not hex")?;
+    let raw = text
+        .strip_prefix("0x")
+        .context("eth_call result is not hex")?;
     if raw.len() < 64 * 6
         || raw.len() % 64 != 0
         || !raw.bytes().all(|byte| byte.is_ascii_hexdigit())

@@ -1,8 +1,6 @@
 pub mod ab_runtime;
 pub mod shadow_v01;
 pub mod v02;
-pub mod v03;
-pub mod v04;
 #[path = "v02/artifacts.rs"]
 pub mod v02_artifacts;
 #[path = "v02/cycle.rs"]
@@ -11,12 +9,13 @@ pub mod v02_cycle;
 pub mod v02_engine;
 #[path = "v02/freeze.rs"]
 pub mod v02_freeze;
-#[path = "v02/provider.rs"]
-pub mod v02_provider;
 #[path = "v02/prospective.rs"]
 pub mod v02_prospective;
+#[path = "v02/provider.rs"]
+pub mod v02_provider;
 #[path = "v02/runtime_binding.rs"]
 pub mod v02_runtime_binding;
+pub mod v03;
 #[path = "v03/artifacts.rs"]
 pub mod v03_artifacts;
 #[path = "v03/census.rs"]
@@ -39,6 +38,7 @@ pub mod v03_prospective;
 pub mod v03_runtime_binding;
 #[path = "v03/watchlist.rs"]
 pub mod v03_watchlist;
+pub mod v04;
 #[path = "v04/artifacts.rs"]
 pub mod v04_artifacts;
 #[path = "v04/cycle.rs"]
@@ -47,10 +47,10 @@ pub mod v04_cycle;
 pub mod v04_engine;
 #[path = "v04/freeze.rs"]
 pub mod v04_freeze;
-#[path = "v04/provider.rs"]
-pub mod v04_provider;
 #[path = "v04/prospective.rs"]
 pub mod v04_prospective;
+#[path = "v04/provider.rs"]
+pub mod v04_provider;
 #[path = "v04/runtime_binding.rs"]
 pub mod v04_runtime_binding;
 

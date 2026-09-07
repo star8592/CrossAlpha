@@ -1,4 +1,4 @@
-use crate::v02::{PROTOCOL, PROSPECTIVE_PROTOCOL};
+use crate::v02::{PROSPECTIVE_PROTOCOL, PROTOCOL};
 use crate::v02_freeze::{payload_hash, sha256_file, verify_seal};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -19,7 +19,10 @@ pub fn runtime_binding_path(data_root: &Path) -> PathBuf {
 pub fn runtime_binding_preview(data_root: &Path, bound_at: DateTime<Utc>) -> Result<Value> {
     let freeze_path = data_root.join("research/state_v02/freeze.json");
     if !freeze_path.exists() {
-        bail!("State V0.2 legacy freeze missing: {}", freeze_path.display());
+        bail!(
+            "State V0.2 legacy freeze missing: {}",
+            freeze_path.display()
+        );
     }
     let freeze: Value = serde_json::from_reader(File::open(&freeze_path)?)?;
     if !verify_seal(&freeze)? {
@@ -68,7 +71,11 @@ pub fn write_runtime_binding(data_root: &Path, bound_at: DateTime<Utc>) -> Resul
         return Ok(serde_json::from_reader(File::open(path)?)?);
     }
     let value = runtime_binding_preview(data_root, bound_at)?;
-    if value.get("production_binding_eligible").and_then(Value::as_bool) != Some(true) {
+    if value
+        .get("production_binding_eligible")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
         bail!("State V0.2 Rust binding refused: Cargo.lock must exist and be tracked");
     }
     if let Some(parent) = path.parent() {
@@ -114,22 +121,61 @@ fn native_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
         ("storage_recent", "crates/crossalpha-storage/src/recent.rs"),
         ("features_cargo", "crates/crossalpha-features/Cargo.toml"),
         ("features_lib", "crates/crossalpha-features/src/lib.rs"),
-        ("features_aave", "crates/crossalpha-features/src/canonical/aave.rs"),
-        ("features_hyperliquid", "crates/crossalpha-features/src/canonical/hyperliquid.rs"),
-        ("features_stablecoins", "crates/crossalpha-features/src/canonical/stablecoins.rs"),
-        ("features_market_state", "crates/crossalpha-features/src/market_state.rs"),
-        ("features_stablecoin_state", "crates/crossalpha-features/src/stablecoin_state.rs"),
-        ("features_recent", "crates/crossalpha-features/src/recent_features.rs"),
+        (
+            "features_aave",
+            "crates/crossalpha-features/src/canonical/aave.rs",
+        ),
+        (
+            "features_hyperliquid",
+            "crates/crossalpha-features/src/canonical/hyperliquid.rs",
+        ),
+        (
+            "features_stablecoins",
+            "crates/crossalpha-features/src/canonical/stablecoins.rs",
+        ),
+        (
+            "features_market_state",
+            "crates/crossalpha-features/src/market_state.rs",
+        ),
+        (
+            "features_stablecoin_state",
+            "crates/crossalpha-features/src/stablecoin_state.rs",
+        ),
+        (
+            "features_recent",
+            "crates/crossalpha-features/src/recent_features.rs",
+        ),
         ("state_cargo", "crates/crossalpha-state/Cargo.toml"),
         ("state_lib", "crates/crossalpha-state/src/lib.rs"),
         ("state_v02", "crates/crossalpha-state/src/v02.rs"),
-        ("state_v02_provider", "crates/crossalpha-state/src/v02/provider.rs"),
-        ("state_v02_artifacts", "crates/crossalpha-state/src/v02/artifacts.rs"),
-        ("state_v02_cycle", "crates/crossalpha-state/src/v02/cycle.rs"),
-        ("state_v02_engine", "crates/crossalpha-state/src/v02/engine.rs"),
-        ("state_v02_freeze", "crates/crossalpha-state/src/v02/freeze.rs"),
-        ("state_v02_prospective", "crates/crossalpha-state/src/v02/prospective.rs"),
-        ("state_v02_runtime_binding", "crates/crossalpha-state/src/v02/runtime_binding.rs"),
+        (
+            "state_v02_provider",
+            "crates/crossalpha-state/src/v02/provider.rs",
+        ),
+        (
+            "state_v02_artifacts",
+            "crates/crossalpha-state/src/v02/artifacts.rs",
+        ),
+        (
+            "state_v02_cycle",
+            "crates/crossalpha-state/src/v02/cycle.rs",
+        ),
+        (
+            "state_v02_engine",
+            "crates/crossalpha-state/src/v02/engine.rs",
+        ),
+        (
+            "state_v02_freeze",
+            "crates/crossalpha-state/src/v02/freeze.rs",
+        ),
+        (
+            "state_v02_prospective",
+            "crates/crossalpha-state/src/v02/prospective.rs",
+        ),
+        (
+            "state_v02_runtime_binding",
+            "crates/crossalpha-state/src/v02/runtime_binding.rs",
+        ),
         ("cli_state", "crates/crossalpha-cli/src/bin/state.rs"),
         ("cli_daemon", "crates/crossalpha-cli/src/bin/daemon.rs"),
         ("config", "config/state_v02.yaml"),

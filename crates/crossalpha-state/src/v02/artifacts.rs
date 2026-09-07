@@ -44,34 +44,181 @@ pub fn write_state_snapshot(path: &Path, snapshot: &Value) -> Result<()> {
 
     let mut fields = Vec::<Field>::new();
     let mut arrays = Vec::<ArrayRef>::new();
-    push_string(&mut fields, &mut arrays, "protocol", snapshot.get("protocol").and_then(Value::as_str));
-    push_string(&mut fields, &mut arrays, "mode", snapshot.get("mode").and_then(Value::as_str));
-    push_string(&mut fields, &mut arrays, "actionability", snapshot.get("actionability").and_then(Value::as_str));
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "protocol",
+        snapshot.get("protocol").and_then(Value::as_str),
+    );
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "mode",
+        snapshot.get("mode").and_then(Value::as_str),
+    );
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "actionability",
+        snapshot.get("actionability").and_then(Value::as_str),
+    );
     push_null(&mut fields, &mut arrays, "risk_multiplier");
-    push_bool(&mut fields, &mut arrays, "mutates_frozen_core", snapshot.get("mutates_frozen_core").and_then(Value::as_bool));
-    push_bool(&mut fields, &mut arrays, "mutates_state_v01", snapshot.get("mutates_state_v01").and_then(Value::as_bool));
-    push_bool(&mut fields, &mut arrays, "mutates_state_ab_v01", snapshot.get("mutates_state_ab_v01").and_then(Value::as_bool));
-    push_string(&mut fields, &mut arrays, "as_of", snapshot.get("as_of").and_then(Value::as_str));
-    push_string(&mut fields, &mut arrays, "generated_at", snapshot.get("generated_at").and_then(Value::as_str));
-    push_string(&mut fields, &mut arrays, "data_confidence", snapshot.get("data_confidence").and_then(Value::as_str));
-    push_f64(&mut fields, &mut arrays, "descriptive_stress_score", snapshot.get("descriptive_stress_score").and_then(Value::as_f64));
-    push_i64(&mut fields, &mut arrays, "valid_pressure_component_count", snapshot.get("valid_pressure_component_count").and_then(Value::as_i64));
-    push_bool(&mut fields, &mut arrays, "aave_valid", aave.get("valid").and_then(Value::as_bool));
-    push_f64(&mut fields, &mut arrays, "aave_pressure", aave.get("pressure").and_then(Value::as_f64));
-    push_bool(&mut fields, &mut arrays, "stablecoin_flow_valid", stable.get("valid").and_then(Value::as_bool));
-    push_f64(&mut fields, &mut arrays, "stablecoin_flow_pressure", stable.get("pressure").and_then(Value::as_f64));
-    push_f64(&mut fields, &mut arrays, "stablecoin_net_change_ratio", stable.get("net_system_change_ratio").and_then(Value::as_f64));
-    push_f64(&mut fields, &mut arrays, "stablecoin_migration_ratio", stable.get("migration_ratio").and_then(Value::as_f64));
-    push_bool(&mut fields, &mut arrays, "basis_dispersion_valid", basis.get("valid").and_then(Value::as_bool));
-    push_f64(&mut fields, &mut arrays, "basis_dispersion_pressure", basis.get("pressure").and_then(Value::as_f64));
-    push_f64(&mut fields, &mut arrays, "basis_z_dispersion", basis.get("basis_z_dispersion").and_then(Value::as_f64));
-    push_bool(&mut fields, &mut arrays, "contagion_valid", contagion.get("valid").and_then(Value::as_bool));
-    push_f64(&mut fields, &mut arrays, "contagion_pressure", contagion.get("pressure").and_then(Value::as_f64));
-    push_f64(&mut fields, &mut arrays, "contagion_connectivity", contagion.get("weighted_chain_composition_cosine_overlap").and_then(Value::as_f64));
-    push_i64(&mut fields, &mut arrays, "liquidation_events_24h", liquidations.get("events_24h").and_then(Value::as_i64));
-    push_i64(&mut fields, &mut arrays, "liquidation_events_7d", liquidations.get("events_7d").and_then(Value::as_i64));
-    push_bool(&mut fields, &mut arrays, "borrower_health_factor_distribution_valid", borrower.get("valid").and_then(Value::as_bool));
-    push_bool(&mut fields, &mut arrays, "deployment_activation_proxy", deployment.get("coincident_activation_proxy").and_then(Value::as_bool));
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "mutates_frozen_core",
+        snapshot.get("mutates_frozen_core").and_then(Value::as_bool),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "mutates_state_v01",
+        snapshot.get("mutates_state_v01").and_then(Value::as_bool),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "mutates_state_ab_v01",
+        snapshot
+            .get("mutates_state_ab_v01")
+            .and_then(Value::as_bool),
+    );
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "as_of",
+        snapshot.get("as_of").and_then(Value::as_str),
+    );
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "generated_at",
+        snapshot.get("generated_at").and_then(Value::as_str),
+    );
+    push_string(
+        &mut fields,
+        &mut arrays,
+        "data_confidence",
+        snapshot.get("data_confidence").and_then(Value::as_str),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "descriptive_stress_score",
+        snapshot
+            .get("descriptive_stress_score")
+            .and_then(Value::as_f64),
+    );
+    push_i64(
+        &mut fields,
+        &mut arrays,
+        "valid_pressure_component_count",
+        snapshot
+            .get("valid_pressure_component_count")
+            .and_then(Value::as_i64),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "aave_valid",
+        aave.get("valid").and_then(Value::as_bool),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "aave_pressure",
+        aave.get("pressure").and_then(Value::as_f64),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "stablecoin_flow_valid",
+        stable.get("valid").and_then(Value::as_bool),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "stablecoin_flow_pressure",
+        stable.get("pressure").and_then(Value::as_f64),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "stablecoin_net_change_ratio",
+        stable
+            .get("net_system_change_ratio")
+            .and_then(Value::as_f64),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "stablecoin_migration_ratio",
+        stable.get("migration_ratio").and_then(Value::as_f64),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "basis_dispersion_valid",
+        basis.get("valid").and_then(Value::as_bool),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "basis_dispersion_pressure",
+        basis.get("pressure").and_then(Value::as_f64),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "basis_z_dispersion",
+        basis.get("basis_z_dispersion").and_then(Value::as_f64),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "contagion_valid",
+        contagion.get("valid").and_then(Value::as_bool),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "contagion_pressure",
+        contagion.get("pressure").and_then(Value::as_f64),
+    );
+    push_f64(
+        &mut fields,
+        &mut arrays,
+        "contagion_connectivity",
+        contagion
+            .get("weighted_chain_composition_cosine_overlap")
+            .and_then(Value::as_f64),
+    );
+    push_i64(
+        &mut fields,
+        &mut arrays,
+        "liquidation_events_24h",
+        liquidations.get("events_24h").and_then(Value::as_i64),
+    );
+    push_i64(
+        &mut fields,
+        &mut arrays,
+        "liquidation_events_7d",
+        liquidations.get("events_7d").and_then(Value::as_i64),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "borrower_health_factor_distribution_valid",
+        borrower.get("valid").and_then(Value::as_bool),
+    );
+    push_bool(
+        &mut fields,
+        &mut arrays,
+        "deployment_activation_proxy",
+        deployment
+            .get("coincident_activation_proxy")
+            .and_then(Value::as_bool),
+    );
     let details = serde_json::to_string(snapshot)?;
     push_string(&mut fields, &mut arrays, "details_json", Some(&details));
 
@@ -93,7 +240,12 @@ pub fn write_state_snapshot(path: &Path, snapshot: &Value) -> Result<()> {
     Ok(())
 }
 
-fn push_string(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, value: Option<&str>) {
+fn push_string(
+    fields: &mut Vec<Field>,
+    arrays: &mut Vec<ArrayRef>,
+    name: &str,
+    value: Option<&str>,
+) {
     fields.push(Field::new(name, DataType::Utf8, true));
     let mut builder = StringBuilder::new();
     builder.append_option(value);

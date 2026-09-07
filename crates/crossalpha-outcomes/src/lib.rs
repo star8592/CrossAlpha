@@ -149,7 +149,10 @@ pub fn outcome_metrics(
 }
 
 pub fn cumulative_return(returns: &[f64]) -> f64 {
-    returns.iter().fold(1.0, |equity, value| equity * (1.0 + value)) - 1.0
+    returns
+        .iter()
+        .fold(1.0, |equity, value| equity * (1.0 + value))
+        - 1.0
 }
 
 pub fn max_drawdown(returns: &[f64]) -> f64 {
@@ -174,8 +177,18 @@ mod tests {
         let a = Utc.with_ymd_and_hms(2026, 9, 6, 10, 0, 0).unwrap();
         let b = Utc.with_ymd_and_hms(2026, 9, 6, 11, 0, 0).unwrap();
         let rows = vec![
-            SourceRecord { source_layer: "STATE_V03".into(), known_at: a, record_sha256: "a".into(), path: None },
-            SourceRecord { source_layer: "STATE_V03".into(), known_at: b, record_sha256: "b".into(), path: None },
+            SourceRecord {
+                source_layer: "STATE_V03".into(),
+                known_at: a,
+                record_sha256: "a".into(),
+                path: None,
+            },
+            SourceRecord {
+                source_layer: "STATE_V03".into(),
+                known_at: b,
+                record_sha256: "b".into(),
+                path: None,
+            },
         ];
         let selected = select_daily_anchors(&rows, a);
         assert_eq!(selected.len(), 1);

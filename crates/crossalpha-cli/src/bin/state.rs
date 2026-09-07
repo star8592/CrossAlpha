@@ -15,12 +15,20 @@ enum Version {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "crossalpha-state-rs", about = "Native Rust CrossAlpha State control plane")]
+#[command(
+    name = "crossalpha-state-rs",
+    about = "Native Rust CrossAlpha State control plane"
+)]
 struct Args {
     version: Version,
     #[command(subcommand)]
     command: Command,
-    #[arg(long, env = "CROSSALPHA_DATA_DIR", default_value = "./data", global = true)]
+    #[arg(
+        long,
+        env = "CROSSALPHA_DATA_DIR",
+        default_value = "./data",
+        global = true
+    )]
     data_root: PathBuf,
     #[arg(
         long,
@@ -87,9 +95,7 @@ async fn main() -> Result<()> {
             .and_then(serde_json::Value::as_bool)
             == Some(true);
         if !ok || !cycle_enabled {
-            anyhow::bail!(
-                "native State integrity failed: ok={ok} cycle_enabled={cycle_enabled}"
-            );
+            anyhow::bail!("native State integrity failed: ok={ok} cycle_enabled={cycle_enabled}");
         }
     }
     Ok(())

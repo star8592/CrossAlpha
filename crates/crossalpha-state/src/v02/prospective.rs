@@ -38,7 +38,11 @@ pub fn write_live_observation(
     {
         bail!("State V0.2 prospective ledger accepts descriptive-only snapshots");
     }
-    for field in ["mutates_frozen_core", "mutates_state_v01", "mutates_state_ab_v01"] {
+    for field in [
+        "mutates_frozen_core",
+        "mutates_state_v01",
+        "mutates_state_ab_v01",
+    ] {
         if snapshot.get(field).and_then(Value::as_bool) != Some(false) {
             bail!("State V0.2 snapshot claims mutation of frozen predecessor");
         }
@@ -53,7 +57,10 @@ pub fn write_live_observation(
         bail!("State V0.2 prospective observation is not live; backfill refused");
     }
     if !derived_path.exists() {
-        bail!("State V0.2 derived state missing: {}", derived_path.display());
+        bail!(
+            "State V0.2 derived state missing: {}",
+            derived_path.display()
+        );
     }
     let mut payload = json!({
         "schema_version": 1,
@@ -117,7 +124,9 @@ pub fn write_live_observation(
 pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let freeze_file = freeze_path(data_root);
     if !freeze_file.exists() {
-        return Ok(json!({"protocol":PROSPECTIVE_PROTOCOL,"frozen":false,"ok":false,"error":"not_frozen"}));
+        return Ok(
+            json!({"protocol":PROSPECTIVE_PROTOCOL,"frozen":false,"ok":false,"error":"not_frozen"}),
+        );
     }
     let freeze: Value = serde_json::from_reader(File::open(&freeze_file)?)?;
     let freeze_ok = verify_seal(&freeze)?;
@@ -148,11 +157,13 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
     let mut times = Vec::new();
     for row in &rows {
         let computed = payload_hash(row)?;
-        observation_seals &= row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
+        observation_seals &=
+            row.get("record_sha256").and_then(Value::as_str) == Some(computed.as_str());
         freeze_links &= row.get("freeze_record_sha256") == freeze.get("record_sha256");
         if row.get("rust_runtime_binding_record_sha256").is_some() {
             native_binding_linked_count += 1;
-            runtime_binding_links &= row.get("rust_runtime_binding_record_sha256") == binding_record_sha;
+            runtime_binding_links &=
+                row.get("rust_runtime_binding_record_sha256") == binding_record_sha;
             runtime_binding_links &= row
                 .get("rust_runtime_binding_file_sha256")
                 .and_then(Value::as_str)
@@ -164,18 +175,37 @@ pub fn integrity_report(data_root: &Path) -> Result<Value> {
         unique &= seen.insert(ts.to_rfc3339());
         descriptive_only &= row.get("actionability").and_then(Value::as_str) == Some(ACTIONABILITY)
             && row.get("risk_multiplier").is_some_and(Value::is_null);
-        let derived = row.get("derived_state_path").and_then(Value::as_str).map(PathBuf::from);
+        let derived = row
+            .get("derived_state_path")
+            .and_then(Value::as_str)
+            .map(PathBuf::from);
         let expected = row.get("derived_state_sha256").and_then(Value::as_str);
         derived_links &= derived.as_ref().is_some_and(|path| path.exists())
-            && derived.as_ref().and_then(|path| sha256_file(path).ok()).as_deref() == expected;
+            && derived
+                .as_ref()
+                .and_then(|path| sha256_file(path).ok())
+                .as_deref()
+                == expected;
     }
     let monotonic = times.windows(2).all(|pair| pair[0] <= pair[1]);
-    checks.insert("observation_seals".to_owned(), Value::Bool(observation_seals));
+    checks.insert(
+        "observation_seals".to_owned(),
+        Value::Bool(observation_seals),
+    );
     checks.insert("freeze_links".to_owned(), Value::Bool(freeze_links));
-    checks.insert("rust_runtime_binding_links".to_owned(), Value::Bool(runtime_binding_links));
-    checks.insert("no_pre_freeze_observations".to_owned(), Value::Bool(no_pre_freeze));
+    checks.insert(
+        "rust_runtime_binding_links".to_owned(),
+        Value::Bool(runtime_binding_links),
+    );
+    checks.insert(
+        "no_pre_freeze_observations".to_owned(),
+        Value::Bool(no_pre_freeze),
+    );
     checks.insert("descriptive_only".to_owned(), Value::Bool(descriptive_only));
-    checks.insert("derived_state_hash_links".to_owned(), Value::Bool(derived_links));
+    checks.insert(
+        "derived_state_hash_links".to_owned(),
+        Value::Bool(derived_links),
+    );
     checks.insert("generated_at_unique".to_owned(), Value::Bool(unique));
     checks.insert("generated_at_monotonic".to_owned(), Value::Bool(monotonic));
     let ok = checks.values().all(|value| value.as_bool() == Some(true));

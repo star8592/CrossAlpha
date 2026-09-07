@@ -90,7 +90,9 @@ pub fn build_daily_panel(
         }
         for (index, day) in dates.iter().copied().enumerate() {
             if day >= inception {
-                available.get_mut(asset).expect("availability series exists")[index] = true;
+                available
+                    .get_mut(asset)
+                    .expect("availability series exists")[index] = true;
                 if !returns[asset][index].is_finite() {
                     returns.get_mut(asset).expect("risk series exists")[index] = 0.0;
                 }
@@ -203,7 +205,13 @@ fn trailing_compound_at(series: &[f64], index: usize, window: usize) -> Option<f
     {
         return None;
     }
-    Some(values.iter().map(|value| value.ln_1p()).sum::<f64>().exp_m1())
+    Some(
+        values
+            .iter()
+            .map(|value| value.ln_1p())
+            .sum::<f64>()
+            .exp_m1(),
+    )
 }
 
 #[cfg(test)]

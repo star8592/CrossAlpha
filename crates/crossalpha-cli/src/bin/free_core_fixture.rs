@@ -48,11 +48,7 @@ fn main() -> Result<()> {
     }
 
     let mut binance_rows = Vec::new();
-    for binance in fixture_entries(
-        fixture
-            .get("binance")
-            .context("binance fixture missing")?,
-    )? {
+    for binance in fixture_entries(fixture.get("binance").context("binance fixture missing")?)? {
         let payload = binance
             .get("payload")
             .and_then(Value::as_array)

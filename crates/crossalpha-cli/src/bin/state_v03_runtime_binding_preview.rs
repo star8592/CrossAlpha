@@ -19,10 +19,8 @@ fn main() -> Result<()> {
     let bound_at = DateTime::parse_from_rfc3339(&args.now)
         .with_context(|| format!("invalid --now RFC3339 timestamp: {}", args.now))?
         .with_timezone(&Utc);
-    let payload = crossalpha_state::v03_runtime_binding::runtime_binding_preview(
-        &args.data_root,
-        bound_at,
-    )?;
+    let payload =
+        crossalpha_state::v03_runtime_binding::runtime_binding_preview(&args.data_root, bound_at)?;
     println!("{}", serde_json::to_string_pretty(&payload)?);
     Ok(())
 }

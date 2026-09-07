@@ -139,8 +139,8 @@ pub fn compute_shadow_state(
         (None, None) => None,
     };
     let (band, multiplier) = multiplier_from_pressure(state_pressure, config);
-    let source_count = valid_hl.len()
-        + usize::from(stable.get("valid").and_then(Value::as_bool) == Some(true));
+    let source_count =
+        valid_hl.len() + usize::from(stable.get("valid").and_then(Value::as_bool) == Some(true));
     let confidence = match source_count {
         3 => "FULL",
         1 | 2 => "PARTIAL",
@@ -247,7 +247,8 @@ fn stablecoin_component(
     }
     let delta_7d = row.usd_delta_7d_native.unwrap();
     let contraction_ratio = (-delta_7d / row.usd_supply_native).max(0.0);
-    let contraction_pressure = clip01(contraction_ratio / config.stablecoin_contraction_full_stress);
+    let contraction_pressure =
+        clip01(contraction_ratio / config.stablecoin_contraction_full_stress);
     let peg_pressure = row
         .weighted_abs_peg_deviation_bps
         .map(|value| clip01(value / config.peg_full_stress_bps))
@@ -271,7 +272,11 @@ fn stablecoin_component(
     })
 }
 
-fn source_fresh(observed_at: DateTime<Utc>, generated_at: DateTime<Utc>, max_age_minutes: i64) -> bool {
+fn source_fresh(
+    observed_at: DateTime<Utc>,
+    generated_at: DateTime<Utc>,
+    max_age_minutes: i64,
+) -> bool {
     let age = generated_at - observed_at;
     age >= Duration::zero() && age <= Duration::minutes(max_age_minutes)
 }
@@ -310,8 +315,14 @@ mod tests {
     #[test]
     fn thresholds_match_frozen_shadow_contract() {
         let cfg = StateShadowConfig::default();
-        assert_eq!(multiplier_from_pressure(None, cfg), ("NO_MODIFIER_DATA_INSUFFICIENT", 1.0));
-        assert_eq!(multiplier_from_pressure(Some(0.34), cfg), ("MODERATE", 0.75));
+        assert_eq!(
+            multiplier_from_pressure(None, cfg),
+            ("NO_MODIFIER_DATA_INSUFFICIENT", 1.0)
+        );
+        assert_eq!(
+            multiplier_from_pressure(Some(0.34), cfg),
+            ("MODERATE", 0.75)
+        );
         assert_eq!(multiplier_from_pressure(Some(0.67), cfg), ("SEVERE", 0.50));
     }
 }

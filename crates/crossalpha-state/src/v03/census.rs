@@ -367,7 +367,12 @@ mod tests {
             word(0),
             "f".repeat(64),
         );
-        assert_eq!(decode_get_user_account_data(&encoded).unwrap().health_factor, None);
+        assert_eq!(
+            decode_get_user_account_data(&encoded)
+                .unwrap()
+                .health_factor,
+            None
+        );
     }
 
     #[test]

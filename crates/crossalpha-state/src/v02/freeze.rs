@@ -119,8 +119,14 @@ fn implementation_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
     let files = [
         ("state_v02", "src/crossalpha/state/v02.py"),
         ("prospective_v02", "src/crossalpha/state/v02_prospective.py"),
-        ("aave_provider", "src/crossalpha/observatory/providers/aave.py"),
-        ("aave_canonical", "src/crossalpha/observatory/canonical/aave.py"),
+        (
+            "aave_provider",
+            "src/crossalpha/observatory/providers/aave.py",
+        ),
+        (
+            "aave_canonical",
+            "src/crossalpha/observatory/canonical/aave.py",
+        ),
         ("config", "config/state_v02.yaml"),
     ];
     let mut result = BTreeMap::new();
@@ -132,13 +138,22 @@ fn implementation_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
 
 fn reference_freezes(data_root: &Path) -> Result<BTreeMap<String, Value>> {
     let paths = [
-        ("frozen_b3", data_root.join("research/free_v01/paper/freeze.json")),
-        ("state_ab_v01", data_root.join("research/free_v01/state_ab_v01/freeze.json")),
+        (
+            "frozen_b3",
+            data_root.join("research/free_v01/paper/freeze.json"),
+        ),
+        (
+            "state_ab_v01",
+            data_root.join("research/free_v01/state_ab_v01/freeze.json"),
+        ),
     ];
     let mut result = BTreeMap::new();
     for (name, path) in paths {
         if !path.exists() {
-            bail!("State V0.2 requires frozen predecessor reference: {}", path.display());
+            bail!(
+                "State V0.2 requires frozen predecessor reference: {}",
+                path.display()
+            );
         }
         result.insert(
             name.to_owned(),

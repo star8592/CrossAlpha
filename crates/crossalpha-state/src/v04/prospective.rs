@@ -1,6 +1,6 @@
 use crate::v03_freeze::payload_hash;
 use crate::v04::{ACTIONABILITY, FUNDING_SEMANTICS, PROTOCOL};
-use crate::v04_freeze::{freeze_path, verify_freeze_file, verify_hash_graph, PROSPECTIVE_PROTOCOL};
+use crate::v04_freeze::{PROSPECTIVE_PROTOCOL, freeze_path, verify_freeze_file, verify_hash_graph};
 use crate::v04_runtime_binding::{runtime_binding_path, verify_runtime_binding_file};
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, StringArray};
@@ -53,7 +53,11 @@ pub fn write_live_observation(
     {
         bail!("State V0.4 prospective ledger is descriptive only");
     }
-    if mechanics.get("no_composite_stress_score").and_then(Value::as_bool) != Some(true) {
+    if mechanics
+        .get("no_composite_stress_score")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
         bail!("State V0.4 composite stress score is forbidden");
     }
     if mechanics.get("venue_snapshot_path").and_then(Value::as_str)
@@ -218,7 +222,10 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
         freeze_links &= value.get("freeze_record_sha256") == freeze.get("record_sha256");
         policy_ok &= value.get("actionability").and_then(Value::as_str) == Some(ACTIONABILITY)
             && value.get("risk_multiplier").is_some_and(Value::is_null)
-            && value.get("no_composite_stress_score").and_then(Value::as_bool) == Some(true);
+            && value
+                .get("no_composite_stress_score")
+                .and_then(Value::as_bool)
+                == Some(true);
         if value.get("rust_runtime_binding_record_sha256").is_some() {
             native_binding_linked_count += 1;
             runtime_links &= value.get("rust_runtime_binding_record_sha256") == binding_record_sha;
@@ -232,7 +239,10 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
             ("venue_snapshot_path", "venue_snapshot_sha256"),
         ] {
             if value.get(path_key).is_some() || value.get(sha_key).is_some() {
-                let artifact = value.get(path_key).and_then(Value::as_str).map(PathBuf::from);
+                let artifact = value
+                    .get(path_key)
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from);
                 let expected = value.get(sha_key).and_then(Value::as_str);
                 artifact_links &= artifact.as_ref().is_some_and(|path| path.exists())
                     && artifact
@@ -245,7 +255,10 @@ pub fn prospective_integrity(data_root: &Path) -> Result<Value> {
         if let Some(raw_links) = value.get("raw_links").and_then(Value::as_array) {
             raw_links_ok &= raw_links.len() == 6;
             for raw in raw_links {
-                let path = raw.get("raw_path").and_then(Value::as_str).map(PathBuf::from);
+                let path = raw
+                    .get("raw_path")
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from);
                 let payload_sha = raw.get("raw_sha256").and_then(Value::as_str);
                 let compressed_sha = raw
                     .get("raw_compressed_file_sha256")

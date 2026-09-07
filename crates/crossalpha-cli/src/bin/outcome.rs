@@ -13,7 +13,12 @@ struct Args {
     #[command(subcommand)]
     command: Command,
 
-    #[arg(long, env = "CROSSALPHA_DATA_DIR", default_value = "./data", global = true)]
+    #[arg(
+        long,
+        env = "CROSSALPHA_DATA_DIR",
+        default_value = "./data",
+        global = true
+    )]
     data_root: PathBuf,
 }
 
