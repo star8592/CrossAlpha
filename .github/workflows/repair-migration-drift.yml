@@ -1,6 +1,9 @@
 name: CrossAlpha Migration Drift Repair
 
 on:
+  push:
+    branches:
+      - feat/rust-core-v01
   workflow_dispatch:
 
 permissions:
@@ -12,8 +15,9 @@ concurrency:
 
 jobs:
   repair:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[arrow-utc-repair]')
     runs-on: [self-hosted, linux, x64, crossalpha]
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout exact branch head
         uses: actions/checkout@v4
@@ -21,8 +25,29 @@ jobs:
           ref: feat/rust-core-v01
           fetch-depth: 0
 
-      - name: Explain manual-only boundary
+      - name: Apply canonical UTC metadata repair
         run: |
-          echo 'This workflow is retained only as a manual diagnostic/repair entrypoint.'
-          echo 'Unknown CI failures should be delegated to Codex when Codex usage is available.'
-          echo 'No automatic source mutation is performed by this workflow.'
+          set -euo pipefail
+          python scripts/repair_arrow_utc_metadata.py
+          cargo fmt --all
+          git diff --check
+
+      - name: Verify targeted regressions
+        run: |
+          set -euo pipefail
+          cargo test -p crossalpha-features feature_time_columns_are_timestamp_ns_utc
+          cargo build --workspace
+          python scripts/verify_rust_free_core_parity.py
+
+      - name: Commit repair
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No repair diff produced.'
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/crossalpha-features/src/feature_parquet.rs crates/crossalpha-data/src/free_core.rs
+          git commit -m 'fix: normalize Arrow UTC timezone metadata'
+          git push origin HEAD:feat/rust-core-v01
