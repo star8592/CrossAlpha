@@ -21,33 +21,92 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
     )
 
 
-def canonical_timestamp_col() -> str:
-    return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values\n        .map(|value| value.timestamp_micros().saturating_mul(1_000))\n        .collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampNanosecondArray::from(values).with_data_type(data_type),\n    ));\n}\n'''
+def reference_timestamp_col() -> str:
+    return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values\n        .map(|value| value.timestamp_micros())\n        .collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampMicrosecondArray::from(values).with_data_type(data_type),\n    ));\n}\n'''
 
 
 def original_timestamp_col() -> str:
     return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    fields.push(Field::new(\n        name,\n        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),\n        true,\n    ));\n    let values = values\n        .map(|value| value.timestamp_micros().saturating_mul(1_000))\n        .collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampNanosecondArray::from(values).with_timezone_utc(),\n    ));\n}\n'''
 
 
+def reference_string_col() -> str:
+    return '''fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = Option<String>>,\n{\n    fields.push(Field::new(name, DataType::LargeUtf8, true));\n    let mut builder = LargeStringBuilder::new();\n    for value in values {\n        builder.append_option(value.as_deref());\n    }\n    arrays.push(Arc::new(builder.finish()));\n}\n'''
+
+
+def original_string_col() -> str:
+    return '''fn string_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = Option<String>>,\n{\n    fields.push(Field::new(name, DataType::Utf8, true));\n    let mut builder = StringBuilder::new();\n    for value in values {\n        builder.append_option(value.as_deref());\n    }\n    arrays.push(Arc::new(builder.finish()));\n}\n'''
+
+
 def main() -> None:
+    # Generic feature parquet remains ns-resolution, but Arrow field/array timezone
+    # metadata must be byte-for-byte consistent ("UTC", not chrono's "+00:00").
     replace_once(
         "crates/crossalpha-features/src/feature_parquet.rs",
         "TimestampNanosecondArray::from(nanos).with_timezone_utc(),",
         "TimestampNanosecondArray::from(nanos).with_timezone(\"UTC\"),",
-        "feature parquet canonical UTC timezone metadata",
+        "feature parquet exact UTC timezone metadata",
+    )
+
+    # Free Core canonical Parquet is a frozen cross-language contract. Match the
+    # Python reference exactly: timestamp[us, tz=UTC] and large_string.
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        "use arrow_array::builder::{Float64Builder, Int64Builder, StringBuilder};",
+        "use arrow_array::builder::{Float64Builder, Int64Builder, LargeStringBuilder};",
+        "free-core large-string builder import",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        "use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray};",
+        "use arrow_array::{ArrayRef, RecordBatch, TimestampMicrosecondArray};",
+        "free-core microsecond timestamp import",
     )
     replace_once(
         "crates/crossalpha-data/src/free_core.rs",
         original_timestamp_col(),
-        canonical_timestamp_col(),
-        "free-core canonical field/array shared UTC datatype",
+        reference_timestamp_col(),
+        "free-core canonical timestamp[us, UTC]",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        original_string_col(),
+        reference_string_col(),
+        "free-core canonical large_string",
+    )
+
+    # Derived Free Core returns use the same canonical Arrow conventions and
+    # must also be able to read LargeUtf8 canonical inputs.
+    replace_once(
+        "crates/crossalpha-data/src/free_returns.rs",
+        "use arrow_array::builder::{Float64Builder, StringBuilder};",
+        "use arrow_array::builder::{Float64Builder, LargeStringBuilder};",
+        "free-returns large-string builder import",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_returns.rs",
+        "Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,",
+        "Array, ArrayRef, Float64Array, Int64Array, LargeStringArray, RecordBatch, StringArray, TimestampMicrosecondArray,",
+        "free-returns LargeStringArray reader import",
     )
     replace_once(
         "crates/crossalpha-data/src/free_returns.rs",
         original_timestamp_col(),
-        canonical_timestamp_col(),
-        "free-core derived returns field/array shared UTC datatype",
+        reference_timestamp_col(),
+        "free-returns canonical timestamp[us, UTC]",
     )
+    replace_once(
+        "crates/crossalpha-data/src/free_returns.rs",
+        original_string_col(),
+        reference_string_col(),
+        "free-returns canonical large_string",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_returns.rs",
+        '''    if let Some(values) = array.as_any().downcast_ref::<StringArray>() {\n        return Ok(Some(values.value(index).to_owned()));\n    }\n''',
+        '''    if let Some(values) = array.as_any().downcast_ref::<StringArray>() {\n        return Ok(Some(values.value(index).to_owned()));\n    }\n    if let Some(values) = array.as_any().downcast_ref::<LargeStringArray>() {\n        return Ok(Some(values.value(index).to_owned()));\n    }\n''',
+        "free-returns read large_string canonical columns",
+    )
+
     replace_once(
         "crates/crossalpha-cli/src/bin/free_core_fixture.rs",
         '''    }\n\n    let mut binance_rows = Vec::new();\n''',
