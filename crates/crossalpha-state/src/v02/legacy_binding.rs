@@ -41,7 +41,7 @@ pub fn ledger_snapshot(data_root: &Path, before: Option<DateTime<Utc>>) -> Resul
         digest.update(relative.as_bytes());
         digest.update([0_u8]);
         digest.update(file_hash.as_bytes());
-        digest.update([b'\n']);
+        digest.update(*b"\n");
         count += 1;
     }
 
@@ -51,10 +51,7 @@ pub fn ledger_snapshot(data_root: &Path, before: Option<DateTime<Utc>>) -> Resul
     }))
 }
 
-pub fn verify_attestation_for_binding(
-    data_root: &Path,
-    bound_at: DateTime<Utc>,
-) -> Result<Value> {
+pub fn verify_attestation_for_binding(data_root: &Path, bound_at: DateTime<Utc>) -> Result<Value> {
     let path = attestation_path(data_root);
     if !path.is_file() {
         bail!(
@@ -66,14 +63,21 @@ pub fn verify_attestation_for_binding(
     if attestation.get("protocol").and_then(Value::as_str) != Some(LEGACY_ATTESTATION_PROTOCOL)
         || attestation.get("schema_version").and_then(Value::as_u64)
             != Some(LEGACY_ATTESTATION_SCHEMA_VERSION as u64)
-        || attestation.get("python_integrity_ok").and_then(Value::as_bool) != Some(true)
+        || attestation
+            .get("python_integrity_ok")
+            .and_then(Value::as_bool)
+            != Some(true)
     {
         bail!("State V0.2 Python legacy integrity attestation is invalid");
     }
 
     let freeze_path = data_root.join("research/state_v02/freeze.json");
     let freeze_hash = sha256_file(&freeze_path)?;
-    if attestation.get("freeze_file_sha256").and_then(Value::as_str) != Some(freeze_hash.as_str()) {
+    if attestation
+        .get("freeze_file_sha256")
+        .and_then(Value::as_str)
+        != Some(freeze_hash.as_str())
+    {
         bail!("State V0.2 legacy freeze changed after Python integrity attestation");
     }
 
@@ -121,8 +125,10 @@ pub fn verify_bound_legacy_ledger(
         return Ok(false);
     }
     let snapshot = ledger_snapshot(data_root, Some(bound_at))?;
-    Ok(snapshot.get("observation_count") == expected.get("observation_count")
-        && snapshot.get("ledger_root_sha256") == expected.get("ledger_root_sha256"))
+    Ok(
+        snapshot.get("observation_count") == expected.get("observation_count")
+            && snapshot.get("ledger_root_sha256") == expected.get("ledger_root_sha256"),
+    )
 }
 
 fn collect_json_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
