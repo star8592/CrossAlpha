@@ -47,7 +47,8 @@ class _ProbeRpc:
 
 class _ProbeLogs:
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.selected_source = BLOCKSCOUT_LOG_SOURCE
+        self.candidate_failures: dict[str, str] = {}
 
     async def borrow_logs(self, from_block: int, to_block: int):
         assert from_block <= to_block
@@ -58,7 +59,7 @@ def test_preflight_splits_indexed_history_from_state_rpc_and_redacts_failures(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setattr(v03_preflight, "AaveBorrowerRpc", _ProbeRpc)
-    monkeypatch.setattr(v03_preflight, "BlockscoutBorrowLogProvider", _ProbeLogs)
+    monkeypatch.setattr(v03_preflight, "FailoverBorrowLogProvider", _ProbeLogs)
     settings = Settings(
         crossalpha_data_dir=tmp_path,
         evm_rpc_url="http://configured-secret.invalid/token-should-not-leak",
@@ -67,6 +68,7 @@ def test_preflight_splits_indexed_history_from_state_rpc_and_redacts_failures(
     assert report["split_data_plane"] is True
     assert report["archive_rpc_required"] is False
     assert report["borrow_log_source"] == BLOCKSCOUT_LOG_SOURCE
+    assert report["borrow_log_candidate_failures_before_selection"] == {}
     assert report["state_rpc_source"] == "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"
     assert report["state_rpc_candidate_failures_before_selection"] == {
         "EVM_RPC_URL": "RuntimeError"
