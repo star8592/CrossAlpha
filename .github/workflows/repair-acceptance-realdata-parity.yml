@@ -121,15 +121,27 @@ jobs:
           if marker not in text:
               raise SystemExit('RawSnapshotStore marker not found')
           text = text.replace(marker, replacement, 1)
+          observed_old = '        let observed = envelope.observed_at;\n'
+          if observed_old not in text:
+              raise SystemExit('RawSnapshotStore observed_at marker not found')
           text = text.replace(
-              '        let observed = envelope.observed_at;\n',
+              observed_old,
               '        let observed = truncate_to_microseconds(envelope.observed_at);\n',
               1,
           )
           old_parse = '''        let record: RawSnapshotManifest = serde_json::from_str(&line)
               .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
-          records.push(record);
+              records.push(record);
           '''
+          # Match semantic lines rather than rustfmt indentation to make the repair robust.
+          start = text.find('        let record: RawSnapshotManifest = serde_json::from_str(&line)')
+          if start < 0:
+              raise SystemExit('manifest rebuild parse start marker not found')
+          end_marker = '        records.push(record);\n'
+          end = text.find(end_marker, start)
+          if end < 0:
+              raise SystemExit('manifest rebuild parse end marker not found')
+          end += len(end_marker)
           new_parse = '''        let mut record: RawSnapshotManifest = serde_json::from_str(&line)
               .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
           // Python datetime.fromisoformat() and the frozen manifest filenames carry
@@ -138,9 +150,8 @@ jobs:
           record.observed_at = truncate_to_microseconds(record.observed_at);
           records.push(record);
           '''
-          if old_parse not in text:
-              raise SystemExit('manifest rebuild parse marker not found')
-          storage.write_text(text.replace(old_parse, new_parse, 1), encoding='utf-8')
+          text = text[:start] + new_parse + text[end:]
+          storage.write_text(text, encoding='utf-8')
           PY
           cargo fmt --all
           git diff --check
