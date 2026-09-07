@@ -40,6 +40,18 @@ def main() -> None:
         canonical_timestamp_col(),
         "free-core derived returns field/array shared UTC datatype",
     )
+    replace_once(
+        "crates/crossalpha-cli/src/bin/free_core_fixture.rs",
+        '''    }\n\n    let mut binance_rows = Vec::new();\n''',
+        '''    }\n    tiingo_rows.sort_by(|left, right| {\n        left.date\n            .cmp(&right.date)\n            .then(left.economic_asset.cmp(&right.economic_asset))\n    });\n\n    let mut binance_rows = Vec::new();\n''',
+        "sort Tiingo fixture rows by date then asset",
+    )
+    replace_once(
+        "crates/crossalpha-cli/src/bin/free_core_fixture.rs",
+        '''    }\n\n    let fred = fixture.get("fred").context("fred fixture missing")?;\n''',
+        '''    }\n    binance_rows.sort_by(|left, right| {\n        left.date\n            .cmp(&right.date)\n            .then(left.economic_asset.cmp(&right.economic_asset))\n    });\n\n    let fred = fixture.get("fred").context("fred fixture missing")?;\n''',
+        "sort Binance fixture rows by date then asset",
+    )
 
 
 if __name__ == "__main__":
