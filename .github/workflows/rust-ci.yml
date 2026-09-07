@@ -88,7 +88,14 @@ jobs:
             set -e
             printf '%s\n' "$rc" > ".ci-gates/${name}.rc"
             echo "$name rc=$rc"
-            tail -n 20 ".ci-gates/${name}.log" || true
+            if [ "$rc" -ne 0 ]; then
+              echo "----- ${name} diagnostic index -----"
+              grep -n -E 'error\[|error:|warning:|--> ' ".ci-gates/${name}.log" | head -n 200 || true
+              echo "----- ${name} tail -----"
+              tail -n 80 ".ci-gates/${name}.log" || true
+            else
+              tail -n 20 ".ci-gates/${name}.log" || true
+            fi
           }
           run_gate rustfmt cargo fmt --all -- --check
           run_gate clippy cargo clippy --workspace --all-targets -- -D warnings
