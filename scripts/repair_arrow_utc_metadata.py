@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# This repair script is intentionally deterministic and fail-closed; comments may be
+# used to trigger owner-authored exact-head CI without changing repair semantics.
+
 
 def replace_once(path: str, old: str, new: str, label: str) -> None:
     file = Path(path)
