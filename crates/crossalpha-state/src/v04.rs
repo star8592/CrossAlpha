@@ -308,7 +308,8 @@ pub fn compute_market_mechanics(
                     && row.basis_bps.is_some()
             })
             .collect();
-        let valid_venues: Vec<String> = complete.iter().map(|row| row.venue.clone()).collect();
+        let mut valid_venues: Vec<String> = complete.iter().map(|row| row.venue.clone()).collect();
+        valid_venues.sort();
         let valid_count = valid_venues.len();
         valid_counts.push(valid_count);
         let confidence = confidence(valid_count);
