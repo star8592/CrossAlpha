@@ -60,12 +60,14 @@ jobs:
           python scripts/verify_rust_state_v03_freeze_parity.py
           python scripts/verify_rust_canonical_parquet_parity.py --data-root /mnt/disk2/CrossAlphaData
           python scripts/verify_rust_canonical_materializer.py --data-root /mnt/disk2/CrossAlphaData
+          python scripts/verify_rust_feature_parity.py --data-root /mnt/disk2/CrossAlphaData
+          python scripts/verify_rust_shadow_v01_parity.py --data-root /mnt/disk2/CrossAlphaData
 
-      - name: Probe feature parity after precision repair
+      - name: Diagnose manifest parity
         continue-on-error: true
         shell: bash
         run: |
-          python scripts/verify_rust_feature_parity.py --data-root /mnt/disk2/CrossAlphaData
+          target/debug/crossalpha-rs manifest-parity /mnt/disk2/CrossAlphaData
 
       - name: Commit verified repairs
         shell: bash
@@ -79,6 +81,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add crates/crossalpha-features/src/parquet.rs \
                   crates/crossalpha-features/src/market_state.rs \
-                  scripts/verify_rust_state_v03_freeze_parity.py
-          git commit -m 'fix: align acceptance real-data parity'
+                  crates/crossalpha-storage/src/parity.rs \
+                  scripts/verify_rust_state_v03_freeze_parity.py \
+                  scripts/verify_rust_shadow_v01_parity.py
+          git commit -m 'fix: align final acceptance parity'
           git push origin HEAD:feat/rust-core-v01
