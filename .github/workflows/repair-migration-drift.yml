@@ -52,6 +52,26 @@ jobs:
               tests.write_text(text)
           elif new not in text:
               raise SystemExit('unexpected V0.3 installer contract test shape; refusing blind repair')
+
+          features = Path('crates/crossalpha-features/src/lib.rs')
+          text = features.read_text()
+          stale = '    AAVE_CANONICAL_SCHEMA_VERSION, AaveLiquidationRow, AaveMarketRow, parse_aave_liquidations,\n'
+          fixed = '    AaveLiquidationRow, AaveMarketRow, parse_aave_liquidations,\n'
+          if stale in text:
+              text = text.replace(stale, fixed, 1)
+              features.write_text(text)
+          elif fixed not in text:
+              raise SystemExit('unexpected Aave re-export shape; refusing blind repair')
+
+          core = Path('crates/crossalpha-data/src/free_core.rs')
+          text = core.read_text()
+          stale = '            .replace(\',\', "")\n            .replace(\'%\', "")\n'
+          fixed = '            .replace([\',\', \'%\'], "")\n'
+          if stale in text:
+              text = text.replace(stale, fixed, 1)
+              core.write_text(text)
+          elif fixed not in text:
+              raise SystemExit('unexpected free_core numeric sanitizer shape; refusing blind repair')
           PY
 
           cargo fmt --all
@@ -73,7 +93,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add crates tests
-          git commit -m 'fix: resolve Rust migration gate regressions'
+          git commit -m 'fix: resolve remaining Rust migration gate regressions'
           git push origin HEAD:feat/rust-core-v01
           echo "repair_commit=$(git rev-parse HEAD)"
 
