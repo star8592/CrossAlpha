@@ -62,7 +62,11 @@ def main() -> int:
     duration
         .num_nanoseconds()
         .map(|value| value as f64 / 1_000_000_000.0)
-        .or_else(|| duration.num_microseconds().map(|value| value as f64 / 1_000_000.0))
+        .or_else(|| {
+            duration
+                .num_microseconds()
+                .map(|value| value as f64 / 1_000_000.0)
+        })
         .unwrap_or_else(|| duration.num_milliseconds() as f64 / 1_000.0)
 }""",
         "feature-nanosecond-interval",
