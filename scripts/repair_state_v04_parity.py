@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 # Focused self-hosted State V0.4 deterministic parity repair.
+# Owner-authored CI retrigger after workflow-applied deterministic fix.
 
 
 def replace_once(path: str, old: str, new: str, label: str) -> None:
