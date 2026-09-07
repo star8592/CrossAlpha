@@ -738,14 +738,9 @@ fn parse_time(value: Option<&Value>) -> Result<DateTime<Utc>> {
 
 fn number(value: Option<&Value>) -> Option<f64> {
     let value = value?;
-    let number = value.as_f64().or_else(|| {
-        value
-            .as_str()?
-            .replace(',', "")
-            .replace('%', "")
-            .parse()
-            .ok()
-    })?;
+    let number = value
+        .as_f64()
+        .or_else(|| value.as_str()?.replace([',', '%'], "").parse().ok())?;
     number.is_finite().then_some(number)
 }
 
