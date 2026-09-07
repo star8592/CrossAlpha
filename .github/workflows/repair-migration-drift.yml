@@ -2,9 +2,6 @@ name: CrossAlpha Migration Drift Repair
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/rust-core-v01
 
 permissions:
   contents: write
@@ -24,47 +21,8 @@ jobs:
           ref: feat/rust-core-v01
           fetch-depth: 0
 
-      - name: Apply one-shot repair
-        id: repair
-        shell: bash
-        env:
-          ACTOR: ${{ github.actor }}
+      - name: Explain manual-only boundary
         run: |
-          set -euo pipefail
-          if [ "$ACTOR" = "github-actions[bot]" ]; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo 'bot push: repair intentionally skipped'
-            exit 0
-          fi
-          if ! git log -1 --format=%B | grep -Fq '[rust-repair-20260907]'; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo 'ordinary push: one-shot repair intentionally skipped'
-            exit 0
-          fi
-          python3 scripts/repair_rust_198_migration.py
-          cargo fmt --all
-          git diff --check
-          if git diff --quiet --; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'changed=true' >> "$GITHUB_OUTPUT"
-            git status --short
-          fi
-
-      - name: Commit repair
-        if: steps.repair.outputs.changed == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates
-          git commit -m 'fix: repair Rust 1.98 migration regressions'
-          git push origin HEAD:feat/rust-core-v01
-          echo "repair_commit=$(git rev-parse HEAD)"
-
-      - name: Repair summary
-        if: always()
-        run: |
-          echo "changed=${{ steps.repair.outputs.changed }}"
-          echo 'No production data, credentials, strategy parameters, tolerances, or frozen contracts were modified.'
+          echo 'This workflow is retained only as a manual diagnostic/repair entrypoint.'
+          echo 'Unknown CI failures should be delegated to Codex after the repository Codex Cloud environment is configured.'
+          echo 'No automatic source mutation is performed by this workflow.'
