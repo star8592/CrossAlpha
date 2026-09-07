@@ -5,14 +5,21 @@ import argparse
 import json
 import math
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from crossalpha.state import shadow
+from crossalpha.storage.indexes import load_recent_daily_manifests
+from verify_rust_canonical_materializer import _freeze_recent_daily_manifests
+from verify_rust_feature_parity import _python_hyperliquid, _python_stablecoins
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUST = REPO_ROOT / "target" / "debug" / "crossalpha-ab-rs"
+RECENT_DAYS = 2
 
 
 def _normalize(value: Any) -> Any:
@@ -58,8 +65,43 @@ def _diff(left: Any, right: Any, path: str = "$") -> list[str]:
     return [] if left == right else [f"{path}: rust={left!r} python={right!r}"]
 
 
+def _python_from_frozen_inputs(
+    frozen_root: Path,
+    generated_at: datetime,
+) -> dict[str, Any]:
+    records, errors = load_recent_daily_manifests(frozen_root, days=RECENT_DAYS)
+    if errors:
+        raise RuntimeError(f"frozen daily manifests contain errors: {errors}")
+
+    hyper = pd.DataFrame(_python_hyperliquid(records, ["BTC", "ETH"]))
+    stable_rows, _ = _python_stablecoins(records)
+    stable = pd.DataFrame(stable_rows)
+    if hyper.empty and stable.empty:
+        return {
+            "protocol": shadow.PROTOCOL,
+            "mode": shadow.MODE,
+            "status": "no_inputs",
+            "written": False,
+        }
+
+    maxima: list[pd.Timestamp] = []
+    for frame in (hyper, stable):
+        if not frame.empty:
+            maxima.append(pd.to_datetime(frame["observed_at"], utc=True).max())
+    as_of = min(maxima) if len(maxima) > 1 else maxima[0]
+    value = shadow.compute_shadow_state(
+        hyper,
+        stable,
+        as_of=as_of,
+        generated_at=generated_at,
+    )
+    return {**value, "status": "computed", "written": False}
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare Python and Rust State Shadow V0.1")
+    parser = argparse.ArgumentParser(
+        description="Compare Python and Rust State Shadow V0.1 on identical frozen inputs"
+    )
     parser.add_argument("--data-root", type=Path, required=True)
     args = parser.parse_args()
     data_root = args.data_root.resolve()
@@ -67,30 +109,30 @@ def main() -> int:
         raise SystemExit(f"Rust A/B binary missing: {RUST}")
 
     generated_at = datetime.now(timezone.utc).replace(microsecond=0)
-    python_value = shadow.build_latest_shadow_state(
-        data_root,
-        generated_at=generated_at,
-        write=False,
-    )
-    completed = subprocess.run(
-        [
-            str(RUST),
-            "shadow-preview",
-            "--generated-at",
-            generated_at.isoformat(),
-            "--data-root",
-            str(data_root),
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise SystemExit(
-            f"Rust shadow preview failed rc={completed.returncode}: {completed.stderr}"
+    with tempfile.TemporaryDirectory(prefix="crossalpha-shadow-v01-parity-") as tmp:
+        frozen_root = Path(tmp) / "frozen"
+        _freeze_recent_daily_manifests(data_root, frozen_root, RECENT_DAYS)
+        python_value = _python_from_frozen_inputs(frozen_root, generated_at)
+        completed = subprocess.run(
+            [
+                str(RUST),
+                "shadow-preview",
+                "--generated-at",
+                generated_at.isoformat(),
+                "--data-root",
+                str(frozen_root),
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
         )
-    rust_value = json.loads(completed.stdout)
+        if completed.returncode != 0:
+            raise SystemExit(
+                f"Rust shadow preview failed rc={completed.returncode}: {completed.stderr}"
+            )
+        rust_value = json.loads(completed.stdout)
+
     mismatches = _diff(_normalize(rust_value), _normalize(python_value))
     if mismatches:
         print("ok=false")
@@ -99,7 +141,7 @@ def main() -> int:
         return 1
     print(
         "ok=true mismatches=0 protocol=CROSSALPHA_STATE_SHADOW_V0_1 "
-        f"generated_at={generated_at.isoformat()}"
+        f"generated_at={generated_at.isoformat()} recent_days={RECENT_DAYS}"
     )
     return 0
 
