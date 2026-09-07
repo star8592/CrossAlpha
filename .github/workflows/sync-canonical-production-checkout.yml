@@ -1,0 +1,55 @@
+name: CrossAlpha Canonical Production Checkout Sync
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[canonical-sync]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 20
+    env:
+      CANONICAL_REPO: /mnt/disk2/CrossAlpha
+      BACKUP_ROOT: /mnt/disk2/CrossAlphaReleaseBackup
+    steps:
+      - name: Preserve local work and sync canonical checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$CANONICAL_REPO/.git"
+          cd "$CANONICAL_REPO"
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          BACKUP="$BACKUP_ROOT/$STAMP"
+          mkdir -p "$BACKUP"
+
+          git status --short --untracked-files=all > "$BACKUP/status.txt" || true
+          git rev-parse HEAD > "$BACKUP/original_head.txt"
+          git branch --show-current > "$BACKUP/original_branch.txt" || true
+          git diff --binary > "$BACKUP/tracked-working-tree.patch" || true
+          git diff --cached --binary > "$BACKUP/index.patch" || true
+          if [[ -f Cargo.lock ]]; then
+            cp -a Cargo.lock "$BACKUP/Cargo.lock.before-sync"
+          fi
+          sha256sum "$BACKUP"/* > "$BACKUP/SHA256SUMS" 2>/dev/null || true
+          sync
+          echo "backup=$BACKUP"
+
+          # Cargo.lock was untracked in the old local checkout but is tracked in the
+          # qualified Rust branch; preserve it above, then let Git install the qualified one.
+          if [[ -f Cargo.lock ]] && ! git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then
+            rm -f Cargo.lock
+          fi
+
+          git fetch origin feat/rust-core-v01
+          git switch feat/rust-core-v01
+          git reset --hard origin/feat/rust-core-v01
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git ls-files --error-unmatch Cargo.lock >/dev/null
+          echo "canonical_head=$(git rev-parse HEAD)"
+          echo "canonical_sync_ok=true"
