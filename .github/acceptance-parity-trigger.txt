@@ -1,1 +1,2 @@
-Owner-triggered full Acceptance V2 after verified immutable V02 Python-to-Rust ledger handoff. Exact verified repair head includes e5ed69cf0. No production service or writer changes.
+Owner-triggered V02 immutable Python-to-Rust ledger handoff validation on the exact canonical production-synced head. Self-hosted verification must use an isolated production mirror only; no production service or writer changes.
+Trigger: 2026-09-07T17:11Z
