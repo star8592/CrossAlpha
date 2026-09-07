@@ -21,12 +21,16 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
     )
 
 
-def reference_timestamp_col() -> str:
-    return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values\n        .map(|value| value.timestamp_micros())\n        .collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampMicrosecondArray::from(values).with_data_type(data_type),\n    ));\n}\n'''
-
-
 def original_timestamp_col() -> str:
     return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    fields.push(Field::new(\n        name,\n        DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),\n        true,\n    ));\n    let values = values\n        .map(|value| value.timestamp_micros().saturating_mul(1_000))\n        .collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampNanosecondArray::from(values).with_timezone_utc(),\n    ));\n}\n'''
+
+
+def free_core_timestamp_cols() -> str:
+    return '''fn timestamp_us_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values.map(|value| value.timestamp_micros()).collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampMicrosecondArray::from(values).with_data_type(data_type),\n    ));\n}\n\nfn timestamp_ms_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values.map(|value| value.timestamp_millis()).collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampMillisecondArray::from(values).with_data_type(data_type),\n    ));\n}\n'''
+
+
+def returns_timestamp_col() -> str:
+    return '''fn timestamp_col<I>(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, name: &str, values: I)\nwhere\n    I: Iterator<Item = DateTime<Utc>>,\n{\n    let data_type = DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));\n    fields.push(Field::new(name, data_type.clone(), true));\n    let values = values.map(|value| value.timestamp_micros()).collect::<Vec<_>>();\n    arrays.push(Arc::new(\n        TimestampMicrosecondArray::from(values).with_data_type(data_type),\n    ));\n}\n'''
 
 
 def reference_string_col() -> str:
@@ -38,8 +42,8 @@ def original_string_col() -> str:
 
 
 def main() -> None:
-    # Generic feature parquet remains ns-resolution, but Arrow field/array timezone
-    # metadata must be byte-for-byte consistent ("UTC", not chrono's "+00:00").
+    # Feature parquet is an independent frozen contract: ns-resolution with
+    # exact "UTC" Arrow timezone metadata.
     replace_once(
         "crates/crossalpha-features/src/feature_parquet.rs",
         "TimestampNanosecondArray::from(nanos).with_timezone_utc(),",
@@ -47,8 +51,9 @@ def main() -> None:
         "feature parquet exact UTC timezone metadata",
     )
 
-    # Free Core canonical Parquet is a frozen cross-language contract. Match the
-    # Python reference exactly: timestamp[us, tz=UTC] and large_string.
+    # Free Core canonical Parquet preserves the Python producer's source-level
+    # timestamp precision: Tiingo/FRED -> us, Binance -> ms. Strings are
+    # pandas/pyarrow large_string. Do not normalize these frozen schemas.
     replace_once(
         "crates/crossalpha-data/src/free_core.rs",
         "use arrow_array::builder::{Float64Builder, Int64Builder, StringBuilder};",
@@ -58,14 +63,14 @@ def main() -> None:
     replace_once(
         "crates/crossalpha-data/src/free_core.rs",
         "use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray};",
-        "use arrow_array::{ArrayRef, RecordBatch, TimestampMicrosecondArray};",
-        "free-core microsecond timestamp import",
+        "use arrow_array::{ArrayRef, RecordBatch, TimestampMicrosecondArray, TimestampMillisecondArray};",
+        "free-core source-precision timestamp imports",
     )
     replace_once(
         "crates/crossalpha-data/src/free_core.rs",
         original_timestamp_col(),
-        reference_timestamp_col(),
-        "free-core canonical timestamp[us, UTC]",
+        free_core_timestamp_cols(),
+        "free-core source-specific timestamp helpers",
     )
     replace_once(
         "crates/crossalpha-data/src/free_core.rs",
@@ -73,9 +78,27 @@ def main() -> None:
         reference_string_col(),
         "free-core canonical large_string",
     )
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        '''fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_col(\n''',
+        '''fn write_tradfi_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_us_col(\n''',
+        "tradfi canonical timestamp[us, UTC]",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        '''fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_col(\n''',
+        '''fn write_crypto_parquet(path: &Path, rows: &[ProxyDailyRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_ms_col(\n''',
+        "crypto canonical timestamp[ms, UTC]",
+    )
+    replace_once(
+        "crates/crossalpha-data/src/free_core.rs",
+        '''fn write_cash_parquet(path: &Path, rows: &[CashRateRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_col(\n''',
+        '''fn write_cash_parquet(path: &Path, rows: &[CashRateRow]) -> Result<()> {\n    let mut fields = Vec::new();\n    let mut arrays = Vec::<ArrayRef>::new();\n    timestamp_us_col(\n''',
+        "cash canonical timestamp[us, UTC]",
+    )
 
-    # Derived Free Core returns use the same canonical Arrow conventions and
-    # must also be able to read LargeUtf8 canonical inputs.
+    # Derived returns are produced by pandas after combining source frames;
+    # the frozen reference currently materializes them at us precision.
     replace_once(
         "crates/crossalpha-data/src/free_returns.rs",
         "use arrow_array::builder::{Float64Builder, StringBuilder};",
@@ -91,7 +114,7 @@ def main() -> None:
     replace_once(
         "crates/crossalpha-data/src/free_returns.rs",
         original_timestamp_col(),
-        reference_timestamp_col(),
+        returns_timestamp_col(),
         "free-returns canonical timestamp[us, UTC]",
     )
     replace_once(
