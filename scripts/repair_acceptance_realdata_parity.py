@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # Owner-authored exact-head validation trigger after verified self-hosted parity repair.
+# Full Acceptance V2 trigger after deterministic repair verification.
 
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
