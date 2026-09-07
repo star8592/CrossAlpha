@@ -1,5 +1,6 @@
 name: CrossAlpha Rust Migration Acceptance V2
 
+# Owner-triggered read-only acceptance after interpreter portability fix.
 on:
   push:
     branches:
