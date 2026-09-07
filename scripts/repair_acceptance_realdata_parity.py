@@ -127,6 +127,57 @@ def main() -> int:
     )
 
     replace_once(
+        stablecoin_state,
+        """        let total_supply_native = part
+            .iter()
+            .map(|item| item.row.circulating_native.unwrap_or(0.0))
+            .sum::<f64>();
+        let chain_sum_native = part.iter().map(|item| item.chain_sum_native).sum::<f64>();
+        let residual_native = chain_sum_native - total_supply_native;
+""",
+        """        // pandas Series.sum() delegates float64 reduction to NumPy, which uses
+        // pairwise summation for sufficiently large contiguous vectors. Preserve the
+        // frozen formula (chain total - asset total), but mirror that reduction order.
+        let supply_values: Vec<f64> = part
+            .iter()
+            .map(|item| item.row.circulating_native.unwrap_or(0.0))
+            .collect();
+        let chain_values: Vec<f64> = part.iter().map(|item| item.chain_sum_native).collect();
+        let total_supply_native = numpy_pairwise_sum(&supply_values);
+        let chain_sum_native = numpy_pairwise_sum(&chain_values);
+        let residual_native = chain_sum_native - total_supply_native;
+""",
+        "stablecoin-pandas-system-sum",
+    )
+
+    replace_once(
+        stablecoin_state,
+        """fn known_sum<I>(values: I) -> Option<f64>
+where
+    I: IntoIterator<Item = Option<f64>>,
+{
+""",
+        """// Mirror NumPy's pairwise reduction shape closely enough for the frozen
+// pandas Series.sum() contract. Small blocks remain left-to-right; larger blocks
+// recursively split, reducing cancellation error without changing input order.
+fn numpy_pairwise_sum(values: &[f64]) -> f64 {
+    const BLOCK: usize = 128;
+    if values.len() <= BLOCK {
+        return values.iter().copied().sum();
+    }
+    let midpoint = values.len() / 2;
+    numpy_pairwise_sum(&values[..midpoint]) + numpy_pairwise_sum(&values[midpoint..])
+}
+
+fn known_sum<I>(values: I) -> Option<f64>
+where
+    I: IntoIterator<Item = Option<f64>>,
+{
+""",
+        "stablecoin-numpy-pairwise-helper",
+    )
+
+    replace_once(
         freeze_verify,
         """        python = freeze_state_v03(
             data_root,
