@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Exact-head trigger marker for the focused self-hosted repair workflow.
+# Exact-head owner trigger after the bot-authored State V0.4 repair commit.
 
 
 def replace_once(path: str, old: str, new: str, label: str) -> None:
