@@ -3,7 +3,7 @@ name: CrossAlpha Rust CI
 on:
   push:
     branches:
-      - feat/rust-core-v01
+      - main
   pull_request:
     branches:
       - main
