@@ -55,8 +55,8 @@ def _validate_envelope(envelope: dict[str, Any]) -> list[str]:
     if expected is None:
         return [f"unexpected envelope: {key}"]
 
-    if envelope.get("schema_version") != 1:
-        errors.append(f"{key}: schema_version != 1")
+    if envelope.get("schema_version") != 2:
+        errors.append(f"{key}: schema_version != 2")
     if envelope.get("event_time") is not None:
         errors.append(f"{key}: event_time should be null")
     if envelope.get("observed_at") != envelope.get("known_at"):
