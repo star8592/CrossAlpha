@@ -152,6 +152,38 @@ def main() -> None:
         "make free-core audit chrono duration inference explicit",
     )
 
+    # State V0.4 parity: Python omits absent provenance fields from normalized
+    # provider rows rather than serializing explicit nulls. Keep the Rust model
+    # readable with serde(default), but omit None values on serialization.
+    replace_once(
+        "crates/crossalpha-state/src/v04.rs",
+        '''    #[serde(default)]\n    pub collection_error: Option<String>,\n    #[serde(default)]\n    pub raw_sha256: Option<String>,\n    #[serde(default)]\n    pub raw_compressed_file_sha256: Option<String>,\n    #[serde(default)]\n    pub raw_path: Option<String>,\n''',
+        '''    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub collection_error: Option<String>,\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub raw_sha256: Option<String>,\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub raw_compressed_file_sha256: Option<String>,\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub raw_path: Option<String>,\n''',
+        "state-v04 omit absent provenance fields",
+    )
+
+    # Python distinguishes true empty input from eligible rows that later age
+    # out. In the latter case it still emits BTC/ETH empty mechanics reports and
+    # the immutable/non-actionable metadata. Rust must preserve that behavior.
+    replace_once(
+        "crates/crossalpha-state/src/v04.rs",
+        '''    let mut latest: BTreeMap<(String, String), &NormalizedVenueRow> = BTreeMap::new();\n    for row in rows {\n''',
+        '''    let mut latest: BTreeMap<(String, String), &NormalizedVenueRow> = BTreeMap::new();\n    let mut eligible_before_age = false;\n    for row in rows {\n''',
+        "state-v04 track pre-age eligible rows",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v04.rs",
+        '''        if row.known_at > generated_at || row.observed_at > generated_at {\n            continue;\n        }\n        let age = generated_at - row.observed_at;\n''',
+        '''        if row.known_at > generated_at || row.observed_at > generated_at {\n            continue;\n        }\n        eligible_before_age = true;\n        let age = generated_at - row.observed_at;\n''',
+        "state-v04 mark rows eligible before freshness filter",
+    )
+    replace_once(
+        "crates/crossalpha-state/src/v04.rs",
+        '''    if latest.is_empty() {\n        return json!({\n''',
+        '''    if latest.is_empty() && !eligible_before_age {\n        return json!({\n''',
+        "state-v04 preserve stale-row mechanics envelope",
+    )
+
 
 if __name__ == "__main__":
     main()
