@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -249,7 +250,7 @@ def main() -> int:
     output = args.output or data_root / "manifests/rust_migration_acceptance.json"
     env = os.environ.copy()
     env["CROSSALPHA_DATA_DIR"] = str(data_root)
-    py = str(REPO_ROOT / ".venv/bin/python")
+    py = sys.executable
 
     results: dict[str, Any] = {}
     build_failed = False
