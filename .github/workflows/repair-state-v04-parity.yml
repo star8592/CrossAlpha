@@ -40,6 +40,10 @@ jobs:
           set -euo pipefail
           cargo build --workspace
           python scripts/verify_rust_state_kernel_parity.py
+          python scripts/verify_rust_state_v04_parity.py \
+            --config-binary target/debug/crossalpha-state-v04-config-check-rs \
+            --parse-binary target/debug/crossalpha-state-v04-parse-rs \
+            --mechanics-binary target/debug/crossalpha-state-v04-mechanics-rs
 
       - name: Commit repair
         run: |
