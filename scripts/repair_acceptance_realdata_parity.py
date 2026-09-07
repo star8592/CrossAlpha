@@ -27,6 +27,7 @@ def main() -> int:
     parquet = ROOT / "crates/crossalpha-features/src/parquet.rs"
     market_state = ROOT / "crates/crossalpha-features/src/market_state.rs"
     freeze_verify = ROOT / "scripts/verify_rust_state_v03_freeze_parity.py"
+    manifest_parity = ROOT / "crates/crossalpha-storage/src/parity.rs"
 
     replace_once(
         parquet,
@@ -68,6 +69,29 @@ def main() -> int:
     )
 
     replace_once(
+        market_state,
+        """    if values.len() < ROLLING_MIN_PERIODS {
+        return None;
+    }
+    let current = current?;
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+""",
+        """    if values.len() < ROLLING_MIN_PERIODS {
+        return None;
+    }
+    let current = current?;
+    // pandas rolling.std(ddof=0) returns NaN for an exactly constant window.
+    // Detect that contract before floating-point mean cancellation can manufacture
+    // a tiny non-zero variance and a spurious z-score of +/-1.
+    if values.windows(2).all(|pair| pair[0] == pair[1]) {
+        return None;
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+""",
+        "feature-constant-window-zscore",
+    )
+
+    replace_once(
         freeze_verify,
         """        python = freeze_state_v03(
             data_root,
@@ -90,6 +114,53 @@ def main() -> int:
             raise RuntimeError("Python fixture freeze seal failed")
 """,
         "state-v03-seal-wrapper",
+    )
+
+    replace_once(
+        manifest_parity,
+        """            mismatches.push(format!(
+                \"daily content mismatch: {} python_records={} rust_records={} first_difference={}\",
+                relative.display(),
+                expected.len(),
+                actual.len(),
+                first_difference
+                    .map(|index| (index + 1).to_string())
+                    .unwrap_or_else(|| \"length-only\".to_string())
+            ));
+""",
+        """            let detail = first_difference
+                .map(|index| format!(\" python={:?} rust={:?}\", expected[index], actual[index]))
+                .unwrap_or_default();
+            mismatches.push(format!(
+                \"daily content mismatch: {} python_records={} rust_records={} first_difference={}{}\",
+                relative.display(),
+                expected.len(),
+                actual.len(),
+                first_difference
+                    .map(|index| (index + 1).to_string())
+                    .unwrap_or_else(|| \"length-only\".to_string()),
+                detail,
+            ));
+""",
+        "manifest-daily-field-diagnostic",
+    )
+
+    replace_once(
+        manifest_parity,
+        """        if expected != actual {
+            mismatches.push(format!(\"series content mismatch: {}\", relative.display()));
+        }
+""",
+        """        if expected != actual {
+            mismatches.push(format!(
+                \"series content mismatch: {} python={} rust={}\",
+                relative.display(),
+                expected,
+                actual,
+            ));
+        }
+""",
+        "manifest-series-field-diagnostic",
     )
 
     return 0
