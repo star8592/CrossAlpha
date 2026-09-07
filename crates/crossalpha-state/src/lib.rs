@@ -9,6 +9,8 @@ pub mod v02_cycle;
 pub mod v02_engine;
 #[path = "v02/freeze.rs"]
 pub mod v02_freeze;
+#[path = "v02/legacy_binding.rs"]
+pub mod v02_legacy_binding;
 #[path = "v02/prospective.rs"]
 pub mod v02_prospective;
 #[path = "v02/provider.rs"]
