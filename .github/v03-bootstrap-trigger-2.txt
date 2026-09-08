@@ -1,0 +1,3 @@
+Bounded V03 bootstrap validation after verified multi-source Borrow-log failover.
+Expected parent head: 3e25e689835f7d48c97634f30d2b6ea803a7a91e
+Production ownership invariant: V02 legacy timer active; Rust daemon and V03 timer inactive.

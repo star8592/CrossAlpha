@@ -1,0 +1,202 @@
+name: CrossAlpha Acceptance Real-Data Parity Repair
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crossalpha-acceptance-realdata-repair
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[acceptance-parity-repair]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 120
+    env:
+      CROSSALPHA_DATA_DIR: /mnt/disk2/CrossAlphaData
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare Rust stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup component add --toolchain stable rustfmt clippy
+          rustup default stable
+
+      - name: Install Python reference environment
+        run: python -m pip install -e '.[dev]'
+
+      - name: Apply focused acceptance parity repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/repair_acceptance_realdata_parity.py
+          python - <<'PY'
+          from pathlib import Path
+
+          stable = Path('crates/crossalpha-features/src/stablecoin_state.rs')
+          text = stable.read_text(encoding='utf-8')
+          old = '''// Mirror NumPy's pairwise reduction shape closely enough for the frozen
+          // pandas Series.sum() contract. Small blocks remain left-to-right; larger blocks
+          // recursively split, reducing cancellation error without changing input order.
+          fn numpy_pairwise_sum(values: &[f64]) -> f64 {
+              const BLOCK: usize = 128;
+              if values.len() <= BLOCK {
+                  return values.iter().copied().sum();
+              }
+              let midpoint = values.len() / 2;
+              numpy_pairwise_sum(&values[..midpoint]) + numpy_pairwise_sum(&values[midpoint..])
+          }
+          '''
+          new = '''// NumPy's float64 pairwise_sum contract: vectors of at least eight values
+          // are accumulated in eight independent lanes, then tree-combined. Larger vectors
+          // split on an 8-value boundary before applying the same block reduction.
+          fn numpy_pairwise_sum(values: &[f64]) -> f64 {
+              const BLOCK: usize = 128;
+              let n = values.len();
+              if n < 8 {
+                  return values.iter().copied().sum();
+              }
+              if n <= BLOCK {
+                  let mut lanes = [
+                      values[0], values[1], values[2], values[3],
+                      values[4], values[5], values[6], values[7],
+                  ];
+                  let mut i = 8;
+                  while i + 7 < n {
+                      for lane in 0..8 {
+                          lanes[lane] += values[i + lane];
+                      }
+                      i += 8;
+                  }
+                  let mut result = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+                      + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+                  while i < n {
+                      result += values[i];
+                      i += 1;
+                  }
+                  return result;
+              }
+              let mut midpoint = n / 2;
+              midpoint -= midpoint % 8;
+              numpy_pairwise_sum(&values[..midpoint]) + numpy_pairwise_sum(&values[midpoint..])
+          }
+          '''
+          if old not in text:
+              raise SystemExit('expected generated numpy_pairwise_sum helper not found')
+          stable.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          storage = Path('crates/crossalpha-storage/src/lib.rs')
+          text = storage.read_text(encoding='utf-8')
+          marker = '''pub struct RawSnapshotStore {
+              root: PathBuf,
+          }
+          '''
+          replacement = '''fn truncate_to_microseconds(value: DateTime<Utc>) -> DateTime<Utc> {
+              DateTime::<Utc>::from_timestamp_micros(value.timestamp_micros())
+                  .expect("DateTime microsecond timestamp remains in range")
+          }
+
+          pub struct RawSnapshotStore {
+              root: PathBuf,
+          }
+          '''
+          if marker not in text:
+              raise SystemExit('RawSnapshotStore marker not found')
+          text = text.replace(marker, replacement, 1)
+          observed_old = '        let observed = envelope.observed_at;\n'
+          if observed_old not in text:
+              raise SystemExit('RawSnapshotStore observed_at marker not found')
+          text = text.replace(
+              observed_old,
+              '        let observed = truncate_to_microseconds(envelope.observed_at);\n',
+              1,
+          )
+          old_parse = '''        let record: RawSnapshotManifest = serde_json::from_str(&line)
+              .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
+              records.push(record);
+          '''
+          # Match semantic lines rather than rustfmt indentation to make the repair robust.
+          start = text.find('        let record: RawSnapshotManifest = serde_json::from_str(&line)')
+          if start < 0:
+              raise SystemExit('manifest rebuild parse start marker not found')
+          end_marker = '        records.push(record);\n'
+          end = text.find(end_marker, start)
+          if end < 0:
+              raise SystemExit('manifest rebuild parse end marker not found')
+          end += len(end_marker)
+          new_parse = '''        let mut record: RawSnapshotManifest = serde_json::from_str(&line)
+              .with_context(|| format!("invalid audit manifest line {}", idx + 1))?;
+          // Python datetime.fromisoformat() and the frozen manifest filenames carry
+          // microsecond precision. Normalize audit entries before rebuilding indexes so
+          // daily and series manifests are byte-semantically equivalent.
+          record.observed_at = truncate_to_microseconds(record.observed_at);
+          records.push(record);
+          '''
+          text = text[:start] + new_parse + text[end:]
+          storage.write_text(text, encoding='utf-8')
+          PY
+          cargo fmt --all
+          git diff --check
+
+      - name: Verify focused parity repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --workspace
+          cargo build --workspace
+          python scripts/verify_rust_state_v03_freeze_parity.py
+          python scripts/verify_rust_canonical_parquet_parity.py --data-root /mnt/disk2/CrossAlphaData
+          python scripts/verify_rust_canonical_materializer.py --data-root /mnt/disk2/CrossAlphaData
+          python scripts/verify_rust_feature_parity.py --data-root /mnt/disk2/CrossAlphaData
+          python scripts/verify_rust_shadow_v01_parity.py --data-root /mnt/disk2/CrossAlphaData
+          target/debug/crossalpha-rs manifest-parity /mnt/disk2/CrossAlphaData
+
+      - name: Diagnose manifest parity
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [[ -x target/debug/crossalpha-rs ]]; then
+            target/debug/crossalpha-rs manifest-parity /mnt/disk2/CrossAlphaData
+          else
+            echo 'manifest diagnostic unavailable: Rust binary was not built'
+          fi
+
+      - name: Commit verified repairs
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No repair diff to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/crossalpha-features/src/parquet.rs \
+                  crates/crossalpha-features/src/market_state.rs \
+                  crates/crossalpha-features/src/stablecoin_state.rs \
+                  crates/crossalpha-storage/src/lib.rs \
+                  crates/crossalpha-storage/src/parity.rs \
+                  scripts/verify_rust_state_v03_freeze_parity.py \
+                  scripts/verify_rust_shadow_v01_parity.py
+          git commit -m 'fix: align final acceptance parity'
+          git push origin HEAD:feat/rust-core-v01

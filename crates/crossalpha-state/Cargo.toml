@@ -1,0 +1,30 @@
+[package]
+name = "crossalpha-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
+parquet.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+crossalpha-config = { path = "../crossalpha-config" }
+crossalpha-features = { path = "../crossalpha-features" }
+crossalpha-research = { path = "../crossalpha-research" }
+crossalpha-storage = { path = "../crossalpha-storage" }
+
+[dev-dependencies]
+tempfile.workspace = true

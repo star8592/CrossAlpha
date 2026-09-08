@@ -1,0 +1,112 @@
+name: CrossAlpha V03 Log Capability Diagnostic
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[v03-log-capability]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime dependencies
+        shell: bash
+        run: python -m pip install -e .
+
+      - name: Probe safe log capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import asyncio
+          import re
+          import httpx
+          from crossalpha.settings import Settings
+          from crossalpha.state.v03_logs import resolve_borrow_log_rpc_candidates
+          from crossalpha.state.v03_rpc import (
+              AAVE_V3_ETHEREUM_CORE_POOL,
+              AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
+              BORROW_EVENT_TOPIC0,
+              AaveBorrowerRpc,
+              RpcPolicy,
+          )
+
+          def classify(exc):
+              row={'type': type(exc).__name__}
+              if isinstance(exc, httpx.HTTPStatusError):
+                  row['http_status']=exc.response.status_code
+              text=str(exc)
+              match=re.search(r"['\"]code['\"]\s*:\s*(-?\d+)", text)
+              if match:
+                  row['rpc_error_code']=int(match.group(1))
+              return row
+
+          async def probe_rpc(settings, start):
+              spans=(1, 16, 256)
+              candidates=list(resolve_borrow_log_rpc_candidates(settings.evm_rpc_url))
+              candidates.extend([
+                  ('https://public.1rpc.io/eth', 'ONE_RPC_PUBLIC_ETH_GETLOGS'),
+                  ('https://rpc.ankr.com/eth', 'ANKR_PUBLIC_ETH_GETLOGS'),
+              ])
+              seen=set()
+              for url, source in candidates:
+                  if url in seen:
+                      continue
+                  seen.add(url)
+                  rpc=AaveBorrowerRpc(url, policy=RpcPolicy(timeout_seconds=settings.crossalpha_http_timeout))
+                  for span in spans:
+                      try:
+                          rows=await rpc.borrow_logs(start, start+span-1)
+                          print({'source':source,'span':span,'ok':True,'rows':len(rows)})
+                      except Exception as exc:
+                          print({'source':source,'span':span,'ok':False,**classify(exc)})
+                          break
+
+          async def probe_routescan(settings, start):
+              base='https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api'
+              spans=(1, 16, 256, 25000)
+              async with httpx.AsyncClient(timeout=settings.crossalpha_http_timeout) as client:
+                  for span in spans:
+                      params={
+                          'module':'logs','action':'getLogs',
+                          'fromBlock':str(start),'toBlock':str(start+span-1),
+                          'address':AAVE_V3_ETHEREUM_CORE_POOL,
+                          'topic0':BORROW_EVENT_TOPIC0,
+                          'page':'1','offset':'1000',
+                      }
+                      try:
+                          response=await client.get(base, params=params)
+                          response.raise_for_status()
+                          body=response.json()
+                          result=body.get('result') if isinstance(body,dict) else None
+                          if not isinstance(result,list):
+                              raise RuntimeError('non-list-result')
+                          print({'source':'ROUTESCAN_KEYLESS_INDEXED_LOGS','span':span,'ok':True,'rows':len(result),'status':body.get('status')})
+                      except Exception as exc:
+                          print({'source':'ROUTESCAN_KEYLESS_INDEXED_LOGS','span':span,'ok':False,**classify(exc)})
+                          break
+                      await asyncio.sleep(0.55)
+
+          async def main():
+              settings=Settings()
+              start=AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
+              await probe_rpc(settings,start)
+              await probe_routescan(settings,start)
+          asyncio.run(main())
+          PY

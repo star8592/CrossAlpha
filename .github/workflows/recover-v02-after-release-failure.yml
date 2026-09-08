@@ -1,0 +1,35 @@
+name: CrossAlpha Recover V02 After Release Failure
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: contains(github.event.head_commit.message, '[recover-v02]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 10
+    steps:
+      - name: Restore only proven legacy V02 writer
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATA_ROOT=/mnt/disk2/CrossAlphaData
+          test -f "$DATA_ROOT/research/state_v02/freeze.json"
+          if systemctl --user list-unit-files crossalpha-state-v02.timer --no-legend | grep -q '^crossalpha-state-v02.timer'; then
+            systemctl --user enable --now crossalpha-state-v02.timer
+            systemctl --user is-enabled --quiet crossalpha-state-v02.timer
+            systemctl --user is-active --quiet crossalpha-state-v02.timer
+            echo 'v02_legacy_writer_restored=true'
+          else
+            echo 'crossalpha-state-v02.timer unit not installed; refusing to invent a replacement' >&2
+            exit 2
+          fi
+          systemctl --user is-active --quiet crossalpha-daemon.service && {
+            echo 'Refusing dual-write: Rust daemon unexpectedly active' >&2
+            exit 3
+          } || true

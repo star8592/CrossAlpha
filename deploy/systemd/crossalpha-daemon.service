@@ -1,0 +1,19 @@
+[Unit]
+Description=CrossAlpha unified native Rust daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=-@REPO_DIR@/.env
+ExecStart=@REPO_DIR@/target/release/crossalpha-daemon-rs --data-root @DATA_ROOT@ @COMPONENT_ARGS@
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,298 @@
+name: CrossAlpha Production Rust Release
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crossalpha-production-rust-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[production-release]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 180
+    env:
+      CANONICAL_REPO: /mnt/disk2/CrossAlpha
+      DATA_ROOT: /mnt/disk2/CrossAlphaData
+    steps:
+      - name: Validate and sync stable production checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$CANONICAL_REPO/.git"
+          test -d "$DATA_ROOT"
+          cd "$CANONICAL_REPO"
+          test -z "$(git status --porcelain --untracked-files=no)" || {
+            echo 'Refusing release: canonical production repo has tracked local changes.' >&2
+            git status --short >&2
+            exit 2
+          }
+          git fetch origin feat/rust-core-v01
+          git switch feat/rust-core-v01
+          git reset --hard "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "release_head=$GITHUB_SHA"
+
+      - name: Prepare exact production toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          rustup toolchain install stable --profile minimal
+          rustup component add --toolchain stable rustfmt clippy
+          rustup default stable
+          if [[ ! -x .venv/bin/python ]]; then
+            python3 -m venv .venv
+          fi
+          .venv/bin/python -m pip install -e '.[dev]'
+          cargo build --workspace --release
+
+      - name: Exact-head pre-release Acceptance V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          mkdir -p "$DATA_ROOT/manifests"
+          REPORT="/tmp/crossalpha-pre-release-acceptance.json"
+          rm -f "$REPORT"
+          .venv/bin/python scripts/run_rust_migration_acceptance.py \
+            --data-root "$DATA_ROOT" \
+            --output "$REPORT"
+          .venv/bin/python - "$REPORT" <<'PY'
+          import json, sys
+          v=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert v.get('daemon_cutover_allowed') is True, v.get('decision')
+          assert v.get('git_clean', {}).get('ok') is True
+          assert v.get('cargo_lock', {}).get('ok') is True
+          print('pre_release_decision=' + str(v.get('decision')))
+          PY
+          install -m 0644 "$REPORT" "$DATA_ROOT/manifests/rust_migration_acceptance.json"
+
+      - name: Quiesce legacy State writers before handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          for version in v02 v03 v04; do
+            systemctl --user disable --now "crossalpha-state-${version}.timer" >/dev/null 2>&1 || true
+            systemctl --user stop "crossalpha-state-${version}.service" >/dev/null 2>&1 || true
+          done
+          for version in v02 v03 v04; do
+            if systemctl --user is-active --quiet "crossalpha-state-${version}.service"; then
+              echo "Refusing handoff: crossalpha-state-${version}.service is still active" >&2
+              exit 2
+            fi
+            if systemctl --user is-active --quiet "crossalpha-state-${version}.timer"; then
+              echo "Refusing handoff: crossalpha-state-${version}.timer is still active" >&2
+              exit 2
+            fi
+          done
+          echo 'legacy_state_writers_quiesced=true'
+
+      - name: Complete legitimate V03 bootstrap and V04 freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+
+          .venv/bin/crossalpha-state-v03-config-check
+          .venv/bin/crossalpha-state-v03-preflight
+          if [[ ! -f "$DATA_ROOT/research/state_v03/freeze.json" ]]; then
+            .venv/bin/crossalpha-state-v03-freeze
+          fi
+
+          # A previously written freeze does not prove that the historical borrower
+          # bootstrap completed. Resume bounded cycles until the persisted cursor
+          # explicitly says bootstrap_complete=true. Never infer completion from a
+          # freeze file alone.
+          BOOTSTRAP_STATE="$DATA_ROOT/research/state_v03/bootstrap_state.json"
+          for attempt in $(seq 1 48); do
+            if .venv/bin/python - "$BOOTSTRAP_STATE" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          if not p.exists():
+              raise SystemExit(1)
+          v=json.loads(p.read_text(encoding='utf-8'))
+          raise SystemExit(0 if v.get('bootstrap_complete') is True else 1)
+          PY
+            then
+              echo "v03_bootstrap_complete=true attempt=$attempt"
+              break
+            fi
+            echo "v03_bootstrap_cycle=$attempt"
+            .venv/bin/crossalpha-state-v03-cycle
+          done
+          .venv/bin/python - "$BOOTSTRAP_STATE" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          assert p.exists(), 'V03 bootstrap state missing after bounded cycles'
+          v=json.loads(p.read_text(encoding='utf-8'))
+          assert v.get('bootstrap_complete') is True, v
+          print('v03_bootstrap_complete=true')
+          PY
+          .venv/bin/crossalpha-state-v03-integrity
+
+          # V04 freeze itself verifies that V03 is both frozen and strict-integrity healthy.
+          .venv/bin/crossalpha-state-v04-config-check
+          .venv/bin/crossalpha-state-v04-preflight
+          if [[ ! -f "$DATA_ROOT/research/state_v04/freeze.json" ]]; then
+            .venv/bin/crossalpha-state-v04-freeze
+            .venv/bin/crossalpha-state-v04-cycle
+          fi
+          .venv/bin/crossalpha-state-v04-integrity
+
+      - name: Bind all frozen production runtimes to Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+          bash scripts/bind_native_state_runtime.sh --activate --data-root "$DATA_ROOT"
+          for version in v02 v03 v04; do
+            target/release/crossalpha-state-rs "$version" integrity --data-root "$DATA_ROOT" \
+              | tee "/tmp/crossalpha-${version}-integrity.json"
+            .venv/bin/python - "/tmp/crossalpha-${version}-integrity.json" <<'PY'
+          import json, sys
+          v=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert v.get('ok') is True
+          assert v.get('cycle_enabled') is True
+          PY
+          done
+
+      - name: Quiesce legacy Paper A-B Outcome writers
+        shell: bash
+        run: |
+          set -euo pipefail
+          for timer in \
+            crossalpha-free-paper-daily.timer \
+            crossalpha-free-paper-weekly.timer \
+            crossalpha-outcome-linkage.timer; do
+            systemctl --user disable --now "$timer" >/dev/null 2>&1 || true
+          done
+          for service in \
+            crossalpha-free-paper-daily.service \
+            crossalpha-free-paper-weekly.service \
+            crossalpha-outcome-linkage.service; do
+            systemctl --user stop "$service" >/dev/null 2>&1 || true
+          done
+
+      - name: Cut over Observatory Materializer and State to unified Rust daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+          bash scripts/cutover_unified_rust_daemon.sh \
+            --activate \
+            --data-root "$DATA_ROOT" \
+            --include-state-v02 \
+            --include-state-v03 \
+            --include-state-v04
+
+      - name: Install Rust-only Paper A-B and Outcome timers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+          bash scripts/install_free_paper_user_services.sh
+          bash scripts/install_outcome_linkage_user_service.sh
+          systemctl --user is-active --quiet crossalpha-daemon.service
+          systemctl --user is-enabled --quiet crossalpha-daemon.service
+
+      - name: Verify immediate installed runtime ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+          .venv/bin/python scripts/verify_rust_production_runtime.py --data-root "$DATA_ROOT" \
+            | tee /tmp/crossalpha-production-runtime.json
+          .venv/bin/python - /tmp/crossalpha-production-runtime.json <<'PY'
+          import json, sys
+          v=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert v.get('ok') is True
+          assert v.get('python_production_writer_detected') is False
+          print('rust_production_ownership=true')
+          PY
+
+      - name: Required 1800 second native soak
+        shell: bash
+        run: |
+          set -euo pipefail
+          systemctl --user is-active --quiet crossalpha-daemon.service
+          sleep 1810
+          systemctl --user is-active --quiet crossalpha-daemon.service
+
+      - name: Post-cutover Acceptance and Python retirement gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CANONICAL_REPO"
+          export CROSSALPHA_DATA_DIR="$DATA_ROOT"
+          REPORT="$DATA_ROOT/manifests/rust_migration_post_cutover_acceptance.json"
+          .venv/bin/python scripts/run_rust_migration_acceptance.py \
+            --data-root "$DATA_ROOT" \
+            --post-cutover \
+            --minimum-soak-seconds 1800 \
+            --output "$REPORT"
+          .venv/bin/python - "$REPORT" <<'PY'
+          import json, sys
+          v=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert v.get('decision') == 'PYTHON_RETIREMENT_ALLOWED', v.get('decision')
+          assert v.get('python_retirement_allowed') is True
+          assert v.get('post_cutover_soak', {}).get('ok') is True
+          assert v.get('post_cutover_soak', {}).get('soak_seconds', 0) >= 1800
+          assert v.get('production_runtime_audit', {}).get('value', {}).get('python_production_writer_detected') is False
+          print('release_decision=PYTHON_RETIREMENT_ALLOWED')
+          PY
+          install -m 0644 "$REPORT" "$DATA_ROOT/manifests/rust_migration_acceptance.json"
+
+      - name: Guarded rollback of V02 writer after pre-cutover failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Once Rust owns production, never resurrect a Python writer. Before Rust
+          # ownership, restore only the already-proven V02 legacy timer so a failed
+          # freeze/bootstrap/binding attempt cannot leave State V02 unwritten.
+          if systemctl --user is-active --quiet crossalpha-daemon.service; then
+            echo 'rust_daemon_active=true; legacy V02 rollback refused to prevent dual-write'
+            exit 0
+          fi
+          if systemctl --user list-unit-files crossalpha-state-v02.timer --no-legend | grep -q '^crossalpha-state-v02.timer'; then
+            systemctl --user enable --now crossalpha-state-v02.timer
+            systemctl --user is-active --quiet crossalpha-state-v02.timer
+            systemctl --user is-enabled --quiet crossalpha-state-v02.timer
+            echo 'v02_legacy_writer_restored_after_failure=true'
+          else
+            echo 'V02 legacy timer is unavailable; no replacement was invented' >&2
+            exit 2
+          fi
+          ! systemctl --user is-active --quiet crossalpha-state-v03.timer
+          ! systemctl --user is-active --quiet crossalpha-state-v04.timer
+
+      - name: Final production status
+        if: always()
+        shell: bash
+        run: |
+          echo '=== unified daemon ==='
+          systemctl --user status crossalpha-daemon.service --no-pager || true
+          echo '=== Rust paper timers ==='
+          systemctl --user status crossalpha-free-paper-daily.timer --no-pager || true
+          systemctl --user status crossalpha-free-paper-weekly.timer --no-pager || true
+          echo '=== Rust outcome timer ==='
+          systemctl --user status crossalpha-outcome-linkage.timer --no-pager || true
+          echo '=== legacy standalone State timers ==='
+          for version in v02 v03 v04; do
+            systemctl --user is-active "crossalpha-state-${version}.timer" || true
+          done

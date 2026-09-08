@@ -1,0 +1,108 @@
+[package]
+name = "crossalpha-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "crossalpha-rs"
+
+[[bin]]
+name = "crossalpha-rs"
+path = "src/main.rs"
+
+[[bin]]
+name = "crossalpha-state-rs"
+path = "src/bin/state.rs"
+
+[[bin]]
+name = "crossalpha-kernel-rs"
+path = "src/bin/kernel.rs"
+
+[[bin]]
+name = "crossalpha-materialize-rs"
+path = "src/bin/materialize.rs"
+
+[[bin]]
+name = "crossalpha-daemon-rs"
+path = "src/bin/daemon.rs"
+
+[[bin]]
+name = "crossalpha-paper-rs"
+path = "src/bin/paper.rs"
+
+[[bin]]
+name = "crossalpha-ab-rs"
+path = "src/bin/ab.rs"
+
+[[bin]]
+name = "crossalpha-outcome-rs"
+path = "src/bin/outcome.rs"
+
+[[bin]]
+name = "crossalpha-raw-envelope-fixture-rs"
+path = "src/bin/raw_envelope_fixture.rs"
+
+[[bin]]
+name = "crossalpha-free-core-fixture-rs"
+path = "src/bin/free_core_fixture.rs"
+
+[[bin]]
+name = "crossalpha-state-v02-kernel-rs"
+path = "src/bin/state_v02_kernel.rs"
+
+[[bin]]
+name = "crossalpha-state-v03-config-check-rs"
+path = "src/bin/state_v03_config_check.rs"
+
+[[bin]]
+name = "crossalpha-state-v03-preflight-rs"
+path = "src/bin/state_v03_preflight.rs"
+
+[[bin]]
+name = "crossalpha-state-v03-freeze-preview-rs"
+path = "src/bin/state_v03_freeze_preview.rs"
+
+[[bin]]
+name = "crossalpha-state-v03-runtime-binding-preview-rs"
+path = "src/bin/state_v03_runtime_binding_preview.rs"
+
+[[bin]]
+name = "crossalpha-state-v03-census-rs"
+path = "src/bin/state_v03_census.rs"
+
+[[bin]]
+name = "crossalpha-state-v04-config-check-rs"
+path = "src/bin/state_v04_config_check.rs"
+
+[[bin]]
+name = "crossalpha-state-v04-preflight-rs"
+path = "src/bin/state_v04_preflight.rs"
+
+[[bin]]
+name = "crossalpha-state-v04-parse-rs"
+path = "src/bin/state_v04_parse.rs"
+
+[[bin]]
+name = "crossalpha-state-v04-mechanics-rs"
+path = "src/bin/state_v04_mechanics.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+fs2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+crossalpha-config = { path = "../crossalpha-config" }
+crossalpha-data = { path = "../crossalpha-data" }
+crossalpha-domain = { path = "../crossalpha-domain" }
+crossalpha-features = { path = "../crossalpha-features" }
+crossalpha-market = { path = "../crossalpha-market" }
+crossalpha-observatory = { path = "../crossalpha-observatory" }
+crossalpha-outcomes = { path = "../crossalpha-outcomes" }
+crossalpha-research = { path = "../crossalpha-research" }
+crossalpha-state = { path = "../crossalpha-state" }
+crossalpha-storage = { path = "../crossalpha-storage" }

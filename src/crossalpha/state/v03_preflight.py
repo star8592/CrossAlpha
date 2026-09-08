@@ -8,8 +8,7 @@ import pandas as pd
 from crossalpha.settings import Settings
 from crossalpha.state.v03_cycle import FINALITY_LAG_BLOCKS
 from crossalpha.state.v03_logs import (
-    BLOCKSCOUT_LOG_SOURCE,
-    BlockscoutBorrowLogProvider,
+    FailoverBorrowLogProvider,
     BorrowLogPolicy,
     resolve_state_rpc_candidates,
 )
@@ -23,8 +22,9 @@ from crossalpha.state.v03_rpc import (
 
 async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
     """Probe the split V0.3 data plane without mutating any research ledger."""
-    log_provider = BlockscoutBorrowLogProvider(
-        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout)
+    log_provider = FailoverBorrowLogProvider(
+        settings.evm_rpc_url,
+        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout),
     )
     historical_from = AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK
     historical_to = historical_from + 255
@@ -32,7 +32,7 @@ async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
         historical_logs = await log_provider.borrow_logs(historical_from, historical_to)
     except Exception as exc:
         raise RuntimeError(
-            "State V0.3 indexed Borrow-log source failed historical probe: "
+            "State V0.3 Borrow-log sources failed historical probe: "
             f"{type(exc).__name__}"
         ) from exc
 
@@ -62,12 +62,16 @@ async def run_v03_preflight(settings: Settings) -> dict[str, Any]:
 
             recent_from = max(finalized - 127, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
             recent_logs = await log_provider.borrow_logs(recent_from, finalized)
+            borrow_log_source = log_provider.selected_source
+            if borrow_log_source is None:
+                raise RuntimeError("Borrow-log provider selected no auditable source")
             return {
                 "protocol": "CROSSALPHA_STATE_V0_3_PREFLIGHT",
                 "data_cost_usd": 0,
                 "split_data_plane": True,
                 "archive_rpc_required": False,
-                "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+                "borrow_log_source": borrow_log_source,
+                "borrow_log_candidate_failures_before_selection": dict(log_provider.candidate_failures),
                 "state_rpc_source": rpc_source,
                 "rpc_source": rpc_source,
                 "state_rpc_candidate_failures_before_selection": attempts,

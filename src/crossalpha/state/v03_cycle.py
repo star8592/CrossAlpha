@@ -11,11 +11,7 @@ import pandas as pd
 from crossalpha.domain.models import ObservationEnvelope, SourceType
 from crossalpha.settings import Settings
 from crossalpha.state.v03 import CensusPolicy, compute_borrower_census
-from crossalpha.state.v03_logs import (
-    BLOCKSCOUT_LOG_SOURCE,
-    BlockscoutBorrowLogProvider,
-    BorrowLogPolicy,
-)
+from crossalpha.state.v03_logs import BorrowLogPolicy, FailoverBorrowLogProvider
 from crossalpha.state.v03_prospective import freeze_path, write_full_census_observation
 from crossalpha.state.v03_rpc import (
     AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK,
@@ -200,8 +196,9 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
 
     # Borrower history is deliberately independent of archive JSON-RPC. Prove the
     # fixed indexed source is available before any state/raw/parquet mutation.
-    log_provider = BlockscoutBorrowLogProvider(
-        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout)
+    log_provider = FailoverBorrowLogProvider(
+        settings.evm_rpc_url,
+        policy=BorrowLogPolicy(timeout_seconds=settings.crossalpha_http_timeout),
     )
     log_probe_from = max(next_block, AAVE_V3_ETHEREUM_DEPLOYMENT_BLOCK)
     try:
@@ -212,9 +209,11 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         )
     except Exception as exc:
         raise RuntimeError(
-            "State V0.3 indexed Borrow-log source unavailable: "
+            "State V0.3 Borrow-log sources unavailable: "
             f"{type(exc).__name__}"
         ) from exc
+    if log_provider.selected_source is None:
+        raise RuntimeError("State V0.3 Borrow-log provider selected no auditable source")
 
     # The state RPC now needs only finalized-state capabilities, not archive logs.
     rpc: AaveBorrowerRpc | None = None
@@ -285,7 +284,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
                 "log_count": len(logs),
                 "new_candidate_count_in_chunk": len(new_debtors),
                 "historical_bootstrap_is_evidence": False,
-                "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+                "borrow_log_source": log_provider.selected_source,
+                "borrow_log_candidate_failures_before_selection": dict(log_provider.candidate_failures),
                 "state_rpc_source": state_rpc_source,
                 "rpc_source": state_rpc_source,
                 "state_rpc_candidate_failures_before_selection": rpc_attempts,
@@ -316,7 +316,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
     state["latest_seen_block"] = latest_block
     state["latest_finalized_block"] = finalized_block
     state["latest_finalized_block_time"] = finalized_block_time
-    state["borrow_log_source"] = BLOCKSCOUT_LOG_SOURCE
+    state["borrow_log_source"] = log_provider.selected_source
+    state["borrow_log_candidate_failures_before_selection"] = dict(log_provider.candidate_failures)
     state["state_rpc_source"] = state_rpc_source
     state["rpc_source"] = state_rpc_source
     state["state_rpc_candidate_failures_before_selection"] = rpc_attempts
@@ -330,7 +331,8 @@ async def run_state_v03_cycle(settings: Settings) -> dict[str, Any]:
         "data_cost_usd": 0,
         "split_data_plane": True,
         "archive_rpc_required": False,
-        "borrow_log_source": BLOCKSCOUT_LOG_SOURCE,
+        "borrow_log_source": log_provider.selected_source,
+        "borrow_log_candidate_failures_before_selection": dict(log_provider.candidate_failures),
         "state_rpc_source": state_rpc_source,
         "rpc_source": state_rpc_source,
         "state_rpc_candidate_failures_before_selection": rpc_attempts,

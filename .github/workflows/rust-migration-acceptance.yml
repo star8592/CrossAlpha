@@ -1,0 +1,107 @@
+name: CrossAlpha Rust Migration Acceptance V2
+
+# Owner-triggered read-only acceptance after interpreter portability fix.
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crossalpha-rust-migration-acceptance
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[acceptance-v2]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 180
+    env:
+      CROSSALPHA_DATA_DIR: /mnt/disk2/CrossAlphaData
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 0
+
+      - name: Safety preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "feat/rust-core-v01"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -d /mnt/disk2/CrossAlphaData
+          test ! -e /mnt/disk2/CrossAlphaData/.github-actions-write-probe
+          test -f Cargo.lock
+          git ls-files --error-unmatch Cargo.lock >/dev/null
+          echo "production_service_changes=false"
+          echo "production_writer_changes=false"
+          echo "acceptance_report=$GITHUB_WORKSPACE/.acceptance/rust_migration_acceptance.json"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Prepare Rust stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup component add --toolchain stable rustfmt clippy
+          rustup default stable
+
+      - name: Install deterministic Python environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run full read-only Acceptance V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .acceptance
+          python scripts/run_rust_migration_acceptance.py \
+            --data-root /mnt/disk2/CrossAlphaData \
+            --output "$GITHUB_WORKSPACE/.acceptance/rust_migration_acceptance.json"
+
+      - name: Print acceptance decision
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .acceptance/rust_migration_acceptance.json ]; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('.acceptance/rust_migration_acceptance.json')
+          d = json.loads(p.read_text())
+          print('decision=', d.get('decision'))
+          print('daemon_cutover_allowed=', d.get('daemon_cutover_allowed'))
+          print('python_retirement_allowed=', d.get('python_retirement_allowed'))
+          failed=[]
+          for name,row in (d.get('gates') or {}).items():
+              if row.get('ok') is not True:
+                  failed.append(name)
+          print('failed_gates=', ','.join(failed) if failed else 'none')
+          print('cargo_lock=', (d.get('cargo_lock') or {}).get('ok'))
+          print('git_clean=', (d.get('git_clean') or {}).get('ok'))
+          print('production_state_integrity=', (d.get('production_state_integrity') or {}).get('ok'))
+          PY
+          fi
+
+      - name: Upload local acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-migration-acceptance-v2
+          path: .acceptance/rust_migration_acceptance.json
+          if-no-files-found: ignore
+          retention-days: 7

@@ -83,7 +83,8 @@ class _AdvancingRpc(_FakeRpc):
 
 class _FakeLogs:
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.selected_source = BLOCKSCOUT_LOG_SOURCE
+        self.candidate_failures: dict[str, str] = {}
 
     async def borrow_logs(self, from_block: int, to_block: int):
         assert from_block <= to_block
@@ -103,7 +104,7 @@ class _AdvancingLogs(_FakeLogs):
 
 def _patch_sources(monkeypatch, rpc_cls=_FakeRpc, logs_cls=_FakeLogs) -> None:
     monkeypatch.setattr(v03_cycle, "AaveBorrowerRpc", rpc_cls)
-    monkeypatch.setattr(v03_cycle, "BlockscoutBorrowLogProvider", logs_cls)
+    monkeypatch.setattr(v03_cycle, "FailoverBorrowLogProvider", logs_cls)
 
 
 def test_cycle_uses_indexed_logs_and_zero_cost_state_rpc(monkeypatch, tmp_path: Path) -> None:
@@ -114,6 +115,7 @@ def test_cycle_uses_indexed_logs_and_zero_cost_state_rpc(monkeypatch, tmp_path: 
     assert report["split_data_plane"] is True
     assert report["archive_rpc_required"] is False
     assert report["borrow_log_source"] == BLOCKSCOUT_LOG_SOURCE
+    assert report["borrow_log_candidate_failures_before_selection"] == {}
     assert report["state_rpc_source"] == "BLOCKSCOUT_ETH_RPC_ZERO_COST_FALLBACK"
     assert report["data_cost_usd"] == 0
     assert report["risk_multiplier"] is None

@@ -1,0 +1,53 @@
+name: CrossAlpha Cargo.lock Generation
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+
+permissions:
+  contents: write
+
+# Cargo.lock is generated only on the trusted self-hosted CrossAlpha runner.
+
+jobs:
+  generate:
+    if: contains(github.event.head_commit.message, '[cargo-lock]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 0
+
+      - name: Safety preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "feat/rust-core-v01"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test ! -e /mnt/disk2/CrossAlphaData/.github-actions-write-probe
+
+      - name: Generate real Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile
+          test -f Cargo.lock
+          cargo metadata --locked --format-version 1 >/dev/null
+          git diff --check
+
+      - name: Commit Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then
+            echo "Cargo.lock is already tracked"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "build: track resolver-generated Cargo.lock"
+          git push origin HEAD:feat/rust-core-v01
