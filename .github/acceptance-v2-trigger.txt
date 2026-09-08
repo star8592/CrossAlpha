@@ -1,1 +1,1 @@
-Owner-authored exact-head trigger for CrossAlpha Rust Migration Acceptance V2 after V02 legacy handoff validation.
+Owner-authored exact-head Acceptance V2 trigger after resumable State handoff, V02 guarded rollback, and V03 rate-limit/failover repairs. Expected parent head: 5392182f26ba0daf02c288b3b7665928ce98a2eb. Read-only acceptance only; no production writer or service mutation.
