@@ -37,9 +37,10 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import tempfile
+          import sys, tempfile
           from pathlib import Path
           import pandas as pd
+          sys.path.insert(0, str(Path('scripts').resolve()))
           from crossalpha.storage.indexes import load_recent_daily_manifests
           from verify_rust_canonical_materializer import _freeze_recent_daily_manifests
           from verify_rust_feature_parity import _choose_assets, _python_hyperliquid, _run_rust, _sort_rust
