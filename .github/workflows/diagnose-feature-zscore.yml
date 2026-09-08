@@ -1,0 +1,69 @@
+name: CrossAlpha Feature ZScore Diagnostic
+
+on:
+  push:
+    branches:
+      - feat/rust-core-v01
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[feature-zscore-diagnostic]')
+    runs-on: [self-hosted, linux, x64, crossalpha]
+    timeout-minutes: 30
+    env:
+      DATA_ROOT: /mnt/disk2/CrossAlphaData
+    steps:
+      - name: Checkout exact diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/rust-core-v01
+          fetch-depth: 1
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare Python and Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e '.[dev]'
+          rustup default stable
+          cargo build -p crossalpha-cli --bin crossalpha-rs
+      - name: Diagnose funding z-score windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          import pandas as pd
+          from crossalpha.storage.indexes import load_recent_daily_manifests
+          from verify_rust_canonical_materializer import _freeze_recent_daily_manifests
+          from verify_rust_feature_parity import _choose_assets, _python_hyperliquid, _run_rust, _sort_rust
+          root=Path('/mnt/disk2/CrossAlphaData')
+          with tempfile.TemporaryDirectory(prefix='crossalpha-zdiag-') as tmp:
+              t=Path(tmp); frozen=t/'frozen'
+              _freeze_recent_daily_manifests(root, frozen, 2)
+              records, errors=load_recent_daily_manifests(frozen, days=2)
+              if errors: raise RuntimeError(errors)
+              assets=_choose_assets(records)
+              py=_python_hyperliquid(records, assets)
+              rust=_run_rust(Path('target/debug/crossalpha-rs'), frozen, t/'rust.json', 'hyperliquid', 2, assets)
+              _sort_rust(rust); rr=rust['rows']
+              mism=[]
+              for i,(p,r) in enumerate(zip(py,rr)):
+                  if p.get('funding_z_24h') != r.get('funding_z_24h'):
+                      mism.append((i,p,r))
+              print('mismatch_count=',len(mism))
+              df=pd.DataFrame(py)
+              df['observed_at']=pd.to_datetime(df['observed_at'], utc=True)
+              for i,p,r in mism[:20]:
+                  asset=p['asset']; ts=pd.Timestamp(p['observed_at'])
+                  part=df[(df.asset==asset) & (df.observed_at>ts-pd.Timedelta('24h')) & (df.observed_at<=ts)].sort_values('observed_at')
+                  vals=pd.to_numeric(part.funding_rate, errors='coerce').dropna()
+                  print({'row':i,'asset':asset,'ts':str(ts),'python_z':p.get('funding_z_24h'),'rust_z':r.get('funding_z_24h'),'n':len(vals),'unique':len(set(float(x) for x in vals)),'first':repr(float(vals.iloc[0])) if len(vals) else None,'last':repr(float(vals.iloc[-1])) if len(vals) else None,'min':repr(float(vals.min())) if len(vals) else None,'max':repr(float(vals.max())) if len(vals) else None,'mean':repr(float(vals.mean())) if len(vals) else None,'std0':repr(float(vals.std(ddof=0))) if len(vals) else None})
+                  print('tail_values=', [repr(float(x)) for x in vals.tail(12)])
+          PY
